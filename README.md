@@ -1,4 +1,4 @@
-# 4300-Flask-React-TypeScript-Template
+# 4300 Flask React Template
 
 ## Contents
 
