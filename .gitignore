@@ -27,3 +27,4 @@ frontend/node_modules/
 package-lock.json
 
 .env
+backend/data/raw/guardian_opinion_2005_2025.parquet
