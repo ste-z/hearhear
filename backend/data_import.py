@@ -1,11 +1,21 @@
+import ast
 import json
 import pandas as pd
 from pathlib import Path
 
 
 def parse_json_list_cell(x):
-    if pd.isna(x):
+    if isinstance(x, list):
+        return x
+    if x is None:
         return []
+
+    try:
+        if pd.isna(x):
+            return []
+    except Exception:
+        pass
+
     s = str(x).strip()
     if s == "" or s.lower() in {"nan", "none", "null"}:
         return []
@@ -13,7 +23,43 @@ def parse_json_list_cell(x):
         val = json.loads(s)
         return val if isinstance(val, list) else []
     except Exception:
+        pass
+
+    try:
+        val = ast.literal_eval(s)
+        return val if isinstance(val, list) else []
+    except Exception:
         return []
+
+
+def normalize_guardian_article_columns(
+    df,
+    list_columns=("keywords", "contributors"),
+    int_columns=("n_contributors",),
+):
+    """
+    Normalize common Guardian article columns:
+      - parse list-like payload columns
+      - coerce integer-like numeric columns
+    """
+    if df.empty:
+        return df.copy()
+
+    normalized = df.copy()
+
+    for col in list_columns:
+        if col in normalized.columns:
+            normalized[col] = normalized[col].apply(parse_json_list_cell)
+
+    for col in int_columns:
+        if col in normalized.columns:
+            normalized[col] = (
+                pd.to_numeric(normalized[col], errors="coerce")
+                .fillna(0)
+                .astype(int)
+            )
+
+    return normalized
 
 
 def _is_blank_string(series):
@@ -66,12 +112,11 @@ def load_guardian_year(year, folder):
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
 
-    for col in ["keywords", "contributors"]:
-        if col in df.columns:
-            df[col] = df[col].apply(parse_json_list_cell)
-
-    if "n_contributors" in df.columns:
-        df["n_contributors"] = pd.to_numeric(df["n_contributors"], errors="coerce").fillna(0).astype(int)
+    df = normalize_guardian_article_columns(
+        df,
+        list_columns=("keywords", "contributors"),
+        int_columns=("n_contributors",),
+    )
 
     df["year"] = int(year)
     return df

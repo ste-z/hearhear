@@ -29,3 +29,9 @@ package-lock.json
 .env
 backend/data/raw/guardian_opinion_2005_2025.parquet
 backend/data/processed/guardian_articles_filtered.parquet
+backend/data/processed/vector_index/guardian_tfidf_articles.pkl
+backend/data/processed/vector_index/guardian_tfidf_doc_ids.json
+backend/data/processed/vector_index/guardian_tfidf_meta.json
+backend/data/processed/vector_index/guardian_tfidf_term_doc_matrix.npz
+backend/data/processed/vector_index/guardian_tfidf_terms.json
+backend/data/processed/vector_index/guardian_tfidf_vectorizer.pkl
