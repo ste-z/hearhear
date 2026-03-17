@@ -81,21 +81,30 @@
   margin-top: 2rem;
 }
 
-.episode-item {
+.article-item {
   padding: 1.5rem;
   background-color: #f8f9fa;
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.episode-title {
+.article-title {
   font-size: 1.25rem;
   color: #1a73e8;
   margin-bottom: 0.5rem;
   font-family: 'Kanit', sans-serif;
 }
 
-.episode-desc {
+.article-title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.article-title a:hover {
+  text-decoration: underline;
+}
+
+.article-summary {
   font-size: 1rem;
   color: #3c4043;
   line-height: 1.6;
@@ -103,7 +112,7 @@
   font-family: 'Montserrat', sans-serif;
 }
 
-.episode-rating {
+.article-meta {
   font-size: 0.9rem;
   color: #5f6368;
   font-weight: 600;

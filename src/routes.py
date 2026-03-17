@@ -1,12 +1,12 @@
 """
-Routes: React app serving and episode search API.
+Routes: React app serving and Guardian article search API.
 
 To enable AI chat, set USE_LLM = True below. See llm_routes.py for AI code.
 """
-import json
 import os
 from flask import send_from_directory, request, jsonify
-from models import db, Episode, Review
+from sqlalchemy import or_
+from models import GuardianArticle
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
 USE_LLM = False
@@ -16,18 +16,37 @@ USE_LLM = False
 
 def json_search(query):
     if not query or not query.strip():
-        query = "Kardashian"
-    results = db.session.query(Episode, Review).join(
-        Review, Episode.id == Review.id
-    ).filter(
-        Episode.title.ilike(f'%{query}%')
-    ).all()
+        return []
+
+    query = query.strip()
+    results = (
+        GuardianArticle.query.filter(
+            or_(
+                GuardianArticle.title.ilike(f"%{query}%"),
+                GuardianArticle.summary.ilike(f"%{query}%"),
+                GuardianArticle.body_text.ilike(f"%{query}%"),
+            )
+        )
+        .order_by(GuardianArticle.date.desc())
+        .all()
+    )
+
     matches = []
-    for episode, review in results:
+    for article in results:
+        authors = article.contributors if isinstance(article.contributors, list) else []
+        author_display = ", ".join(authors) if authors else article.author_raw
         matches.append({
-            'title': episode.title,
-            'descr': episode.descr,
-            'imdb_rating': review.imdb_rating
+            "id": article.id,
+            "title": article.title,
+            "summary": article.summary,
+            "date": article.date.isoformat() if article.date else None,
+            "url": article.url,
+            "authors": authors,
+            "author_display": author_display,
+            "author_raw": article.author_raw,
+            "n_contributors": article.n_contributors,
+            "keywords": article.keywords or [],
+            "year": article.year,
         })
     return matches
 
@@ -45,9 +64,9 @@ def register_routes(app):
     def config():
         return jsonify({"use_llm": USE_LLM})
 
-    @app.route("/api/episodes")
-    def episodes_search():
-        text = request.args.get("title", "")
+    @app.route("/api/articles")
+    def articles_search():
+        text = request.args.get("q", "") or request.args.get("title", "")
         return jsonify(json_search(text))
 
     if USE_LLM:

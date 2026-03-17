@@ -1,24 +1,31 @@
 import { useState, useEffect } from 'react'
 import './App.css'
 import SearchIcon from './assets/mag.png'
-import { Episode } from './types'
+import { Article } from './types'
 import Chat from './Chat'
 
 function App(): JSX.Element {
   const [useLlm, setUseLlm] = useState<boolean | null>(null)
   const [searchTerm, setSearchTerm] = useState<string>('')
-  const [episodes, setEpisodes] = useState<Episode[]>([])
+  const [articles, setArticles] = useState<Article[]>([])
 
   useEffect(() => {
     fetch('/api/config').then(r => r.json()).then(data => setUseLlm(data.use_llm))
   }, [])
 
+  const formatDate = (isoDate: string | null): string => {
+    if (!isoDate) return 'Unknown date'
+    const parsed = new Date(isoDate)
+    if (Number.isNaN(parsed.getTime())) return 'Unknown date'
+    return parsed.toLocaleDateString()
+  }
+
   const handleSearch = async (value: string): Promise<void> => {
     setSearchTerm(value)
-    if (value.trim() === '') { setEpisodes([]); return }
-    const response = await fetch(`/api/episodes?title=${encodeURIComponent(value)}`)
-    const data: Episode[] = await response.json()
-    setEpisodes(data)
+    if (value.trim() === '') { setArticles([]); return }
+    const response = await fetch(`/api/articles?q=${encodeURIComponent(value)}`)
+    const data: Article[] = await response.json()
+    setArticles(data)
   }
 
   if (useLlm === null) return <></>
@@ -37,7 +44,7 @@ function App(): JSX.Element {
           <img src={SearchIcon} alt="search" />
           <input
             id="search-input"
-            placeholder="Search for a Keeping up with the Kardashians episode"
+            placeholder="Search Guardian opinion articles"
             value={searchTerm}
             onChange={(e) => handleSearch(e.target.value)}
           />
@@ -46,17 +53,21 @@ function App(): JSX.Element {
 
       {/* Search results (always shown) */}
       <div id="answer-box">
-        {episodes.map((episode, index) => (
-          <div key={index} className="episode-item">
-            <h3 className="episode-title">{episode.title}</h3>
-            <p className="episode-desc">{episode.descr}</p>
-            <p className="episode-rating">IMDB Rating: {episode.imdb_rating}</p>
+        {articles.map((article) => (
+          <div key={article.id} className="article-item">
+            <h3 className="article-title">
+              <a href={article.url} target="_blank" rel="noreferrer">{article.title}</a>
+            </h3>
+            <p className="article-summary">{article.summary}</p>
+            <p className="article-meta">
+              {article.author_display || article.author_raw || 'Unknown author'} | {formatDate(article.date)}
+            </p>
           </div>
         ))}
       </div>
 
       {/* Chat (only when USE_LLM = True in routes.py) */}
-      {useLlm && <Chat onSearchTerm={handleSearch} />}
+      {useLlm && <Chat onSearchQuery={handleSearch} />}
     </div>
   )
 }
