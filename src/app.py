@@ -7,18 +7,18 @@ from flask import Flask
 from sqlalchemy import and_, func
 
 from flask_cors import CORS
-from models import db, GuardianArticle
-from routes import register_routes
-
-load_dotenv()
 
 # src/ directory and project root (one level up)
 project_root = Path(__file__).resolve().parent.parent
 
-# Allow importing backend/data_import.py from src/app.py
+# Allow importing backend modules before importing src modules that depend on them.
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+load_dotenv()
+
+from models import db, GuardianArticle
+from routes import register_routes
 from backend.data_import import load_and_clean_guardian_years
 
 # Serve React build files from <project_root>/frontend/dist
