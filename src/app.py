@@ -67,16 +67,6 @@ def _clean_datetime(value):
     return value
 
 
-def _discover_guardian_years(data_folder):
-    pattern = re.compile(r"guardian_opinion_(\d{4})\.csv$")
-    years = []
-    for file_name in os.listdir(data_folder):
-        match = pattern.match(file_name)
-        if match:
-            years.append(int(match.group(1)))
-    return sorted(set(years))
-
-
 def _existing_data_needs_refresh():
     """
     Check whether existing rows violate notebook-aligned cleaning rules.
@@ -125,11 +115,7 @@ def init_db():
         # Initialize database with Guardian article data if empty / refreshed.
         if should_seed:
             data_folder = project_root / "backend" / "data" / "raw" / "guardian_by_year"
-            years = _discover_guardian_years(data_folder)
-
-            if not years:
-                print(f"No Guardian year files found in {data_folder}")
-                return
+            years = set(range(2015, 2025)) 
 
             df = load_and_clean_guardian_years(
                 years=years,

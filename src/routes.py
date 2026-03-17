@@ -19,15 +19,17 @@ def json_search(query):
         return []
 
     query = query.strip()
+    if len(query) < 3:
+        return []
     results = (
         GuardianArticle.query.filter(
             or_(
                 GuardianArticle.title.ilike(f"%{query}%"),
                 GuardianArticle.summary.ilike(f"%{query}%"),
-                GuardianArticle.body_text.ilike(f"%{query}%"),
             )
         )
         .order_by(GuardianArticle.date.desc())
+        .limit(100)
         .all()
     )
 

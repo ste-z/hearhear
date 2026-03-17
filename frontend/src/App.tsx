@@ -13,6 +13,33 @@ function App(): JSX.Element {
     fetch('/api/config').then(r => r.json()).then(data => setUseLlm(data.use_llm))
   }, [])
 
+  useEffect(() => {
+    const trimmed = searchTerm.trim()
+    if (trimmed === '') {
+      setArticles([])
+      return
+    }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/articles?q=${encodeURIComponent(trimmed)}`, {
+          signal: controller.signal,
+        })
+        const data: Article[] = await response.json()
+        setArticles(data)
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        console.error('Search request failed:', error)
+      }
+    }, 300)
+
+    return () => {
+      controller.abort()
+      clearTimeout(timeoutId)
+    }
+  }, [searchTerm])
+
   const formatDate = (isoDate: string | null): string => {
     if (!isoDate) return 'Unknown date'
     const parsed = new Date(isoDate)
@@ -20,12 +47,8 @@ function App(): JSX.Element {
     return parsed.toLocaleDateString()
   }
 
-  const handleSearch = async (value: string): Promise<void> => {
+  const handleSearch = (value: string): void => {
     setSearchTerm(value)
-    if (value.trim() === '') { setArticles([]); return }
-    const response = await fetch(`/api/articles?q=${encodeURIComponent(value)}`)
-    const data: Article[] = await response.json()
-    setArticles(data)
   }
 
   if (useLlm === null) return <></>
@@ -67,7 +90,7 @@ function App(): JSX.Element {
       </div>
 
       {/* Chat (only when USE_LLM = True in routes.py) */}
-      {useLlm && <Chat onSearchQuery={handleSearch} />}
+      {useLlm && <Chat onSearchTerm={handleSearch} />}
     </div>
   )
 }
