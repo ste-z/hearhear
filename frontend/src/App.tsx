@@ -1,24 +1,54 @@
 import { useState, useEffect } from 'react'
 import './App.css'
 import SearchIcon from './assets/mag.png'
-import { Episode } from './types'
+import { Article } from './types'
 import Chat from './Chat'
 
 function App(): JSX.Element {
   const [useLlm, setUseLlm] = useState<boolean | null>(null)
   const [searchTerm, setSearchTerm] = useState<string>('')
-  const [episodes, setEpisodes] = useState<Episode[]>([])
+  const [articles, setArticles] = useState<Article[]>([])
 
   useEffect(() => {
     fetch('/api/config').then(r => r.json()).then(data => setUseLlm(data.use_llm))
   }, [])
 
-  const handleSearch = async (value: string): Promise<void> => {
+  useEffect(() => {
+    const trimmed = searchTerm.trim()
+    if (trimmed === '') {
+      setArticles([])
+      return
+    }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/articles?q=${encodeURIComponent(trimmed)}`, {
+          signal: controller.signal,
+        })
+        const data: Article[] = await response.json()
+        setArticles(data)
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        console.error('Search request failed:', error)
+      }
+    }, 300)
+
+    return () => {
+      controller.abort()
+      clearTimeout(timeoutId)
+    }
+  }, [searchTerm])
+
+  const formatDate = (isoDate: string | null): string => {
+    if (!isoDate) return 'Unknown date'
+    const parsed = new Date(isoDate)
+    if (Number.isNaN(parsed.getTime())) return 'Unknown date'
+    return parsed.toLocaleDateString()
+  }
+
+  const handleSearch = (value: string): void => {
     setSearchTerm(value)
-    if (value.trim() === '') { setEpisodes([]); return }
-    const response = await fetch(`/api/episodes?title=${encodeURIComponent(value)}`)
-    const data: Episode[] = await response.json()
-    setEpisodes(data)
   }
 
   if (useLlm === null) return <></>
@@ -27,17 +57,15 @@ function App(): JSX.Element {
     <div className={`full-body-container ${useLlm ? 'llm-mode' : ''}`}>
       {/* Search bar (always shown) */}
       <div className="top-text">
-        <div className="google-colors">
-          <h1 id="google-4">4</h1>
-          <h1 id="google-3">3</h1>
-          <h1 id="google-0-1">0</h1>
-          <h1 id="google-0-2">0</h1>
+        <div>
+          <h1>hear! hear!</h1>
+          <h2>Find your voice in Guardian opinion articles</h2>
         </div>
         <div className="input-box" onClick={() => document.getElementById('search-input')?.focus()}>
           <img src={SearchIcon} alt="search" />
           <input
             id="search-input"
-            placeholder="Search for a Keeping up with the Kardashians episode"
+            placeholder="Search Guardian opinion articles"
             value={searchTerm}
             onChange={(e) => handleSearch(e.target.value)}
           />
@@ -46,11 +74,15 @@ function App(): JSX.Element {
 
       {/* Search results (always shown) */}
       <div id="answer-box">
-        {episodes.map((episode, index) => (
-          <div key={index} className="episode-item">
-            <h3 className="episode-title">{episode.title}</h3>
-            <p className="episode-desc">{episode.descr}</p>
-            <p className="episode-rating">IMDB Rating: {episode.imdb_rating}</p>
+        {articles.map((article) => (
+          <div key={article.id} className="article-item">
+            <h3 className="article-title">
+              <a href={article.url} target="_blank" rel="noreferrer">{article.title}</a>
+            </h3>
+            <p className="article-summary">{article.summary}</p>
+            <p className="article-meta">
+              {article.author_display || article.author_raw || 'Unknown author'} | {formatDate(article.date)}
+            </p>
           </div>
         ))}
       </div>

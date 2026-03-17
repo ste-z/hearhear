@@ -8,5 +8,6 @@ numpy
 pandas
 matplotlib
 seaborn
+scikit-learn
 python-dotenv
 git+https://github.com/MrPeterss/infosci-spark-client.git
