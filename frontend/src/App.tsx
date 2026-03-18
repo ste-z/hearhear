@@ -23,7 +23,12 @@ function App(): JSX.Element {
     const controller = new AbortController()
     const timeoutId = setTimeout(async () => {
       try {
-        const response = await fetch(`/api/articles?q=${encodeURIComponent(trimmed)}`, {
+        const response = await fetch('/api/articles', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ q: trimmed }),
           signal: controller.signal,
         })
         const data: Article[] = await response.json()

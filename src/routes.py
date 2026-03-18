@@ -7,14 +7,14 @@ import os
 from flask import send_from_directory, request, jsonify
 from sqlalchemy import or_
 from models import GuardianArticle
+from search_helpers import build_matches, build_vector_processor, serialize_article
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
 USE_LLM = False
 # USE_LLM = True
 # ─────────────────────────────────────────────────────────────────────────────
 
-
-def json_search(query):
+def keyword_search(query):
     if not query or not query.strip():
         return []
 
@@ -33,24 +33,56 @@ def json_search(query):
         .all()
     )
 
-    matches = []
-    for article in results:
-        authors = article.contributors if isinstance(article.contributors, list) else []
-        author_display = ", ".join(authors) if authors else article.author_raw
-        matches.append({
-            "id": article.id,
-            "title": article.title,
-            "summary": article.summary,
-            "date": article.date.isoformat() if article.date else None,
-            "url": article.url,
-            "authors": authors,
-            "author_display": author_display,
-            "author_raw": article.author_raw,
-            "n_contributors": article.n_contributors,
-            "keywords": article.keywords or [],
-            "year": article.year,
-        })
-    return matches
+    return [serialize_article(article) for article in results]
+
+def tfidf_cos_search(query):
+    if not query or not query.strip():
+        return []
+    query = query.strip()
+    if len(query) < 3:
+        return []
+
+    processor = build_vector_processor()
+    if processor is None:
+        return []
+
+    ranked = processor.search(query, top_n=100)
+    return build_matches(ranked)
+
+def json_search(query):
+    """
+    Primary search used by /api/articles and optional LLM retrieval.
+    Defaults to TF-IDF cosine search, falls back to keyword SQL search.
+    """
+    try:
+        return tfidf_cos_search(query)
+    except Exception:
+        return keyword_search(query)
+
+
+def _extract_search_text():
+    """
+    Support both GET query params and POST JSON/form payloads.
+    """
+    if request.method == "POST":
+        if request.is_json:
+            payload = request.get_json(silent=True) or {}
+            return (
+                payload.get("q")
+                or payload.get("query")
+                or payload.get("text")
+                or payload.get("title")
+                or ""
+            )
+        return (
+            request.form.get("q")
+            or request.form.get("query")
+            or request.form.get("text")
+            or request.form.get("title")
+            or ""
+        )
+
+    return request.args.get("q", "") or request.args.get("title", "")
 
 
 def register_routes(app):
@@ -66,9 +98,10 @@ def register_routes(app):
     def config():
         return jsonify({"use_llm": USE_LLM})
 
-    @app.route("/api/articles")
+    @app.route("/api/articles", methods=["GET", "POST"])
+    @app.route("/api/articles/search", methods=["POST"])
     def articles_search():
-        text = request.args.get("q", "") or request.args.get("title", "")
+        text = _extract_search_text()
         return jsonify(json_search(text))
 
     if USE_LLM:
