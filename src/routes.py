@@ -8,6 +8,8 @@ from flask import send_from_directory, request, jsonify
 from sqlalchemy import or_
 from models import GuardianArticle
 from search_helpers import build_matches, build_vector_processor, serialize_article
+from io import BytesIO
+from pypdf import PdfReader
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
 USE_LLM = False
@@ -59,22 +61,72 @@ def json_search(query):
     except Exception:
         return keyword_search(query)
 
+def _extract_pdf_text(uploaded_file, max_pages=20, max_chars=20000):
+    """
+    Extract text from an uploaded PDF file.
+    Limits pages/chars so very large PDFs do not overwhelm search.
+    """
+    if uploaded_file is None:
+        return ""
+
+    filename = (uploaded_file.filename or "").lower()
+    content_type = (uploaded_file.mimetype or "").lower()
+
+    if not filename.endswith(".pdf") and content_type != "application/pdf":
+        return ""
+
+    try:
+        file_bytes = uploaded_file.read()
+        if not file_bytes:
+            return ""
+
+        reader = PdfReader(BytesIO(file_bytes))
+        chunks = []
+
+        for page in reader.pages[:max_pages]:
+            page_text = page.extract_text() or ""
+            page_text = page_text.strip()
+            if page_text:
+                chunks.append(page_text)
+            if sum(len(c) for c in chunks) >= max_chars:
+                break
+
+        text = "\n\n".join(chunks).strip()
+        return text[:max_chars]
+    except Exception:
+        return ""
+    finally:
+        try:
+            uploaded_file.stream.seek(0)
+        except Exception:
+            pass
+
 
 def _extract_search_text():
     """
-    Support both GET query params and POST JSON/form payloads.
+    Support:
+      - GET query params
+      - POST JSON payloads
+      - POST form payloads
+      - optional uploaded PDF under field name 'pdf'
+
+    Returns combined search text from typed text and extracted PDF text.
     """
+    typed_text = ""
+
     if request.method == "POST":
         if request.is_json:
             payload = request.get_json(silent=True) or {}
-            return (
+            typed_text = (
                 payload.get("q")
                 or payload.get("query")
                 or payload.get("text")
                 or payload.get("title")
                 or ""
             )
-        return (
+            return str(typed_text).strip()
+
+        typed_text = (
             request.form.get("q")
             or request.form.get("query")
             or request.form.get("text")
@@ -82,7 +134,15 @@ def _extract_search_text():
             or ""
         )
 
-    return request.args.get("q", "") or request.args.get("title", "")
+        uploaded_pdf = request.files.get("pdf")
+        pdf_text = _extract_pdf_text(uploaded_pdf)
+
+        parts = [str(typed_text).strip(), pdf_text.strip()]
+        combined = "\n\n".join(part for part in parts if part)
+        return combined.strip()
+
+    typed_text = request.args.get("q", "") or request.args.get("title", "")
+    return str(typed_text).strip()
 
 
 def register_routes(app):
