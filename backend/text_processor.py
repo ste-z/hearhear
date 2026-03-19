@@ -12,7 +12,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 DEFAULT_TFIDF_PARAMS = {
     "analyzer": "word",
-    "token_pattern": r"(?u)\b\w\w+\b",
+    "token_pattern": r"(?u)\b[^\W\d_]+(?:[-'][^\W\d_]+)*\b",
     "lowercase": True,
     "strip_accents": "unicode",
     "stop_words": "english",
