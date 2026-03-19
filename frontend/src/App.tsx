@@ -68,11 +68,12 @@ function App(): JSX.Element {
         </div>
         <div className="input-box" onClick={() => document.getElementById('search-input')?.focus()}>
           <img src={SearchIcon} alt="search" />
-          <input
+          <textarea
             id="search-input"
-            placeholder="Search Guardian opinion articles"
+            placeholder="Search Guardian opinion articles or paste a paragraph..."
             value={searchTerm}
             onChange={(e) => handleSearch(e.target.value)}
+            rows={3}
           />
         </div>
       </div>
