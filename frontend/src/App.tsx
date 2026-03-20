@@ -568,6 +568,34 @@ function App(): JSX.Element {
               </p>
             )}
 
+            <div className="similarity-block">
+              <div className="similarity-title">Cosine similarity</div>
+              <div className="similarity-row">
+                <div className="similarity-bar">
+                  <div
+                    className="similarity-fill"
+                    style={{ width: `${(article.score ?? 0) * 100}%` }}
+                  />
+                </div>
+                <span className="similarity-label">
+                  {formatPercent(article.score)}
+                </span>
+              </div>
+            </div>
+
+            <p>
+              {article.keywords && article.keywords.length > 0 && (
+                <div className="keyword-block">
+                  <p>Keywords</p>
+                  <div className="keyword-list">
+                    {article.keywords.map((kw, i) => (
+                      <span key={i} className="keyword-chip">{kw}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </p>
+
             <p className="article-meta">
               {article.author_display || article.author_raw || 'Unknown author'} | {formatDate(article.date)}
             </p>
