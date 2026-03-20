@@ -154,8 +154,7 @@ function App(): JSX.Element {
           <h1>hear! hear!</h1>
           <h2>Find your voice in Guardian opinion articles</h2>
           <p className="hero-subtitle">
-            Start with a topic and your position, then rerank relevant articles by whether their
-            central claim supports, contradicts, or stays neutral toward that stance.
+            Either describe your stance on a topic or paste an essay, and we&apos;ll find you relevant articles that support, contradict, or neutrally discuss your position. 
           </p>
         </div>
 
@@ -192,7 +191,7 @@ function App(): JSX.Element {
               <label className="stance-prompt-line opinion-line">
                 <span className="stance-prefix">I believe</span>
                 <textarea
-                  placeholder="Governments should invest far more in public transit than highway expansion."
+                  placeholder="'Governments should welcome refugees.', 'Climate protests are effective,' 'Housing policy needs reform' ..."
                   value={opinion}
                   onChange={(e) => setOpinion(e.target.value)}
                   rows={4}
@@ -214,7 +213,7 @@ function App(): JSX.Element {
                 className="utility-pill"
                 onClick={() => setIsSettingsOpen(true)}
               >
-                Search settings
+                Settings
               </button>
             </div>
           </div>
@@ -382,7 +381,7 @@ function App(): JSX.Element {
             <div className="modal-header">
               <div>
                 <p className="modal-eyebrow">About</p>
-                <h3 id="about-reranking-title">Two-stage search</h3>
+                <h3 id="about-reranking-title">Search Method</h3>
               </div>
               <button
                 type="button"
@@ -395,14 +394,17 @@ function App(): JSX.Element {
             </div>
             <div className="modal-stage-list">
               <p className="modal-copy">
-                <strong>Stage 1:</strong> TF-IDF retrieves the top {rerankTopK}{' '}
-                {rerankTopK === 1 ? 'article' : 'articles'} that are most relevant to your topic.
+                <strong>Stage 1: Topic relevance.</strong> We first identify articles that are relevant to your topic. 
+                To do this, we compute the similarity between your input and each Guardian article using 
+                TF-IDF (Term Frequency–Inverse Document Frequency) representations combined with cosine similarity. 
+                This helps us find articles that discuss similar themes and keywords.
               </p>
+
               <p className="modal-copy">
-                <strong>Stage 2:</strong> NLI reranks those {rerankTopK}{' '}
-                {rerankTopK === 1 ? 'article' : 'articles'} by comparing your opinion with each
-                article&apos;s LLM-coded central claim to estimate whether the article supports,
-                contradicts, or stays neutral toward your stance.
+                <strong>Stage 2: Stance relevance.</strong> From the top {rerankTopK}{' '}
+                {rerankTopK === 1 ? 'article' : 'articles'} identified in Stage 1, we then rank them based on how they relate to your opinion. 
+                We use a Natural Language Inference (NLI) model, DeBERTa (Decoding-enhanced BERT with disentangled attention), to compare your claim with each article's central argument (extracted using an LLM). 
+                The model estimates whether each article supports, contradicts, or is neutral toward your stance, and we rank the results accordingly.
               </p>
             </div>
           </div>
