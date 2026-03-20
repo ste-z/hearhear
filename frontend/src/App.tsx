@@ -260,8 +260,7 @@ function App(): JSX.Element {
           <h1>hear! hear!</h1>
           <h2>Find your voice in Guardian opinion articles</h2>
           <p className="hero-subtitle">
-            Search by topic and stance, or let the app help isolate the central thesis of a full
-            essay before reranking articles against that selected claim.
+            Either describe your stance on a topic or paste an essay, and we&apos;ll find you relevant articles that support, contradict, or neutrally discuss your position. 
           </p>
         </div>
 
@@ -298,7 +297,7 @@ function App(): JSX.Element {
               <label className="stance-prompt-line opinion-line">
                 <span className="stance-prefix">I believe</span>
                 <textarea
-                  placeholder="Governments should invest far more in public transit than highway expansion."
+                  placeholder="'Governments should welcome refugees.', 'Climate protests are effective,' 'Housing policy needs reform' ..."
                   value={opinion}
                   onChange={(e) => setOpinion(e.target.value)}
                   rows={4}

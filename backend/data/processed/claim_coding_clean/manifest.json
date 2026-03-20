@@ -1,0 +1,52 @@
+{
+  "created_at": "2026-03-20T15:50:31.241587+00:00",
+  "source_dir": "/Users/stevenzhou/Desktop/StevenZhou/Undergraduate/INFO4300/hearhear/backend/data/processed/openai_claim_batches",
+  "output_dir": "/Users/stevenzhou/Desktop/StevenZhou/Undergraduate/INFO4300/hearhear/backend/data/processed/claim_coding_clean",
+  "record_count": 29606,
+  "file_count": 7,
+  "max_shard_bytes": 90000000,
+  "files": [
+    {
+      "filename": "claims_2020_part_001.jsonl.gz",
+      "year": "2020",
+      "record_count": 5687,
+      "size_bytes": 2750202
+    },
+    {
+      "filename": "claims_2021_part_001.jsonl.gz",
+      "year": "2021",
+      "record_count": 5021,
+      "size_bytes": 2492711
+    },
+    {
+      "filename": "claims_2022_part_001.jsonl.gz",
+      "year": "2022",
+      "record_count": 4900,
+      "size_bytes": 2423078
+    },
+    {
+      "filename": "claims_2023_part_001.jsonl.gz",
+      "year": "2023",
+      "record_count": 4815,
+      "size_bytes": 2420073
+    },
+    {
+      "filename": "claims_2024_part_001.jsonl.gz",
+      "year": "2024",
+      "record_count": 4777,
+      "size_bytes": 2400931
+    },
+    {
+      "filename": "claims_2025_part_001.jsonl.gz",
+      "year": "2025",
+      "record_count": 4405,
+      "size_bytes": 2199444
+    },
+    {
+      "filename": "claims_2026_part_001.jsonl.gz",
+      "year": "2026",
+      "record_count": 1,
+      "size_bytes": 706
+    }
+  ]
+}
