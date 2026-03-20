@@ -1,5 +1,7 @@
 import ast
+import html
 import json
+import re
 import pandas as pd
 from pathlib import Path
 
@@ -65,6 +67,22 @@ def normalize_guardian_article_columns(
 def _is_blank_string(series):
     series = series.astype("string")
     return series.isna() | (series.str.strip() == "")
+
+
+def _strip_html_tags(value):
+    if value is None:
+        return ""
+
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+
+    text = html.unescape(str(value))
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 
 def _normalize_name_list(value):
@@ -169,6 +187,9 @@ def clean_guardian_articles(df, min_body_text_chars=1000):
         cleaned["keywords"] = cleaned["keywords"].apply(_normalize_name_list)
     else:
         cleaned["keywords"] = [[] for _ in range(len(cleaned))]
+
+    if "summary" in cleaned.columns:
+        cleaned["summary"] = cleaned["summary"].apply(_strip_html_tags).astype("string")
 
     # Notebook logic: invalid author only when both n_contributors==0 and author_raw is blank.
     n_contrib = pd.to_numeric(cleaned.get("n_contributors", 0), errors="coerce").fillna(0).astype(int)
