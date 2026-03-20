@@ -33,4 +33,24 @@ export interface Article {
   topic_weight?: number | null;
   stance_weight?: number | null;
   rerank_position?: number | null;
+  selected_thesis_sentence?: string | null;
+  selected_thesis_id?: string | null;
+  essay_query_text?: string | null;
+}
+
+export interface EssayClaimCandidate {
+  sentence_id: string;
+  sentence: string;
+  entailment_prob: number;
+  neutral_prob: number;
+  contradiction_prob: number;
+  claim_score: number;
+  claim_score_normalized: number;
+  claim_label: string;
+}
+
+export interface EssayClaimCandidateResponse {
+  essay_text: string;
+  sentence_count: number;
+  candidates: EssayClaimCandidate[];
 }

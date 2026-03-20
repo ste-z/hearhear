@@ -83,6 +83,62 @@ def stance_search(topic, opinion, topic_weight=0.5, stance_weight=0.5, top_n=20)
         top_n=top_n,
     )
 
+
+def essay_claim_candidates(essay_text, top_n=5):
+    from backend.nli_processor import score_claim_sentences
+    from backend.sentence_splitter import sentence_rows_from_text
+
+    resolved_text = str(essay_text or "").strip()
+    if len(resolved_text) < 3:
+        return {
+            "essay_text": resolved_text,
+            "sentence_count": 0,
+            "candidates": [],
+        }
+
+    sentence_rows = sentence_rows_from_text(resolved_text, prefix="essay_s")
+    candidates = score_claim_sentences(sentence_rows, top_n=top_n)
+    return {
+        "essay_text": resolved_text,
+        "sentence_count": len(sentence_rows),
+        "candidates": candidates,
+    }
+
+
+def essay_search(
+    essay_text,
+    selected_thesis_sentence,
+    selected_thesis_id=None,
+    topic_weight=0.5,
+    stance_weight=0.5,
+    top_n=20,
+):
+    from backend.stance_rerank import rerank_article_matches_by_statement
+
+    resolved_essay = str(essay_text or "").strip()
+    resolved_thesis = str(selected_thesis_sentence or "").strip()
+    if len(resolved_essay) < 3:
+        return []
+
+    topic_matches = tfidf_cos_search(resolved_essay, top_n=top_n)
+    if not topic_matches:
+        return []
+    if not resolved_thesis:
+        return topic_matches
+
+    reranked = rerank_article_matches_by_statement(
+        article_matches=topic_matches,
+        statement=resolved_thesis,
+        topic_weight=topic_weight,
+        stance_weight=stance_weight,
+        top_n=top_n,
+    )
+    for match in reranked:
+        match["selected_thesis_sentence"] = resolved_thesis
+        match["selected_thesis_id"] = selected_thesis_id
+        match["essay_query_text"] = resolved_essay
+    return reranked
+
 def _extract_pdf_text(uploaded_file, max_pages=20, max_chars=20000):
     """
     Extract text from an uploaded PDF file.
@@ -157,6 +213,9 @@ def _extract_request_context():
     topic_weight = _coerce_float(payload.get("topic_weight"), 0.5)
     stance_weight = _coerce_float(payload.get("stance_weight"), 0.5)
     rerank_top_k = _coerce_int(payload.get("top_k"), 20, minimum=1, maximum=100)
+    candidate_top_n = _coerce_int(payload.get("candidate_top_n"), 5, minimum=1, maximum=10)
+    selected_thesis_sentence = str(payload.get("selected_thesis_sentence") or "").strip()
+    selected_thesis_id = str(payload.get("selected_thesis_id") or "").strip() or None
 
     typed_text = (
         payload.get("q")
@@ -181,6 +240,9 @@ def _extract_request_context():
         "topic_weight": topic_weight,
         "stance_weight": stance_weight,
         "rerank_top_k": rerank_top_k,
+        "candidate_top_n": candidate_top_n,
+        "selected_thesis_sentence": selected_thesis_sentence,
+        "selected_thesis_id": selected_thesis_id,
         "essay_text": essay_text,
     }
 
@@ -212,9 +274,34 @@ def register_routes(app):
                     stance_weight=context["stance_weight"],
                     top_n=context["rerank_top_k"],
                 )
+            elif context["mode"] == "essay":
+                results = essay_search(
+                    essay_text=context["essay_text"],
+                    selected_thesis_sentence=context["selected_thesis_sentence"],
+                    selected_thesis_id=context["selected_thesis_id"],
+                    topic_weight=context["topic_weight"],
+                    stance_weight=context["stance_weight"],
+                    top_n=context["rerank_top_k"],
+                )
             else:
                 results = json_search(context["essay_text"])
             return jsonify(results)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 500
+
+    @app.route("/api/essay/claim-candidates", methods=["POST"])
+    def essay_claim_candidates_route():
+        context = _extract_request_context()
+
+        try:
+            return jsonify(
+                essay_claim_candidates(
+                    essay_text=context["essay_text"],
+                    top_n=context["candidate_top_n"],
+                )
+            )
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except RuntimeError as exc:

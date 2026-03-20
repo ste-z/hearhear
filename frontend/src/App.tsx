@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { Article } from './types'
+import { Article, EssayClaimCandidate, EssayClaimCandidateResponse } from './types'
 import Chat from './Chat'
 
 type InputMode = 'stance' | 'essay'
@@ -20,19 +20,22 @@ function App(): JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [isAboutOpen, setIsAboutOpen] = useState<boolean>(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
+  const [essayCandidates, setEssayCandidates] = useState<EssayClaimCandidate[]>([])
+  const [essayPreparedText, setEssayPreparedText] = useState<string>('')
+  const [selectedEssayCandidateId, setSelectedEssayCandidateId] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/config').then(r => r.json()).then(data => setUseLlm(data.use_llm))
   }, [])
 
   useEffect(() => {
-    const trimmedSearch = searchTerm.trim()
+    if (inputMode !== 'stance') {
+      return
+    }
+
     const trimmedTopic = topic.trim()
     const trimmedOpinion = opinion.trim()
-    const shouldSearchEssay = inputMode === 'essay' && (trimmedSearch !== '' || !!pdfFile)
-    const shouldSearchStance = inputMode === 'stance' && trimmedTopic !== '' && trimmedOpinion !== ''
-
-    if (!shouldSearchEssay && !shouldSearchStance) {
+    if (trimmedTopic === '' || trimmedOpinion === '') {
       setArticles([])
       setError(null)
       setLoading(false)
@@ -45,37 +48,21 @@ function App(): JSX.Element {
       setError(null)
 
       try {
-        let response: Response
-        if (inputMode === 'stance') {
-          response = await fetch('/api/articles', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              mode: 'stance',
-              topic: trimmedTopic,
-              opinion: trimmedOpinion,
-              topic_weight: topicWeight,
-              stance_weight: stanceWeight,
-              top_k: rerankTopK,
-            }),
-            signal: controller.signal,
-          })
-        } else {
-          const formData = new FormData()
-          formData.append('mode', 'essay')
-          formData.append('q', trimmedSearch)
-          if (pdfFile) {
-            formData.append('pdf', pdfFile)
-          }
-
-          response = await fetch('/api/articles', {
-            method: 'POST',
-            body: formData,
-            signal: controller.signal,
-          })
-        }
+        const response = await fetch('/api/articles', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            mode: 'stance',
+            topic: trimmedTopic,
+            opinion: trimmedOpinion,
+            topic_weight: topicWeight,
+            stance_weight: stanceWeight,
+            top_k: rerankTopK,
+          }),
+          signal: controller.signal,
+        })
 
         const data = await response.json()
         if (!response.ok) {
@@ -96,7 +83,18 @@ function App(): JSX.Element {
       controller.abort()
       clearTimeout(timeoutId)
     }
-  }, [inputMode, opinion, pdfFile, rerankTopK, searchTerm, stanceWeight, topic, topicWeight])
+  }, [inputMode, opinion, rerankTopK, stanceWeight, topic, topicWeight])
+
+  useEffect(() => {
+    if (inputMode !== 'essay') {
+      return
+    }
+    setEssayCandidates([])
+    setEssayPreparedText('')
+    setSelectedEssayCandidateId(null)
+    setArticles([])
+    setError(null)
+  }, [inputMode, pdfFile, searchTerm])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -108,6 +106,14 @@ function App(): JSX.Element {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
+
+  const trimmedEssayText = searchTerm.trim()
+  const canAnalyzeEssay = inputMode === 'essay' && (trimmedEssayText !== '' || !!pdfFile)
+  const selectedEssayCandidate = useMemo(
+    () => essayCandidates.find(candidate => candidate.sentence_id === selectedEssayCandidateId) ?? null,
+    [essayCandidates, selectedEssayCandidateId],
+  )
+  const canSubmitEssay = Boolean(essayPreparedText && selectedEssayCandidate)
 
   const formatDate = (isoDate: string | null): string => {
     if (!isoDate) return 'Unknown date'
@@ -142,8 +148,108 @@ function App(): JSX.Element {
 
   const handleEssaySearch = (value: string): void => {
     setInputMode('essay')
+    setPdfFile(null)
     setSearchTerm(value)
   }
+
+  const handleAnalyzeEssay = async (): Promise<void> => {
+    if (!canAnalyzeEssay || loading) return
+
+    setLoading(true)
+    setError(null)
+    setArticles([])
+
+    try {
+      const formData = new FormData()
+      formData.append('mode', 'essay')
+      formData.append('q', trimmedEssayText)
+      formData.append('candidate_top_n', '5')
+      if (pdfFile) {
+        formData.append('pdf', pdfFile)
+      }
+
+      const response = await fetch('/api/essay/claim-candidates', {
+        method: 'POST',
+        body: formData,
+      })
+      const data: EssayClaimCandidateResponse & { error?: string } = await response.json()
+      if (!response.ok) {
+        throw new Error(data?.error || `Request failed (${response.status})`)
+      }
+
+      setEssayPreparedText(data.essay_text || trimmedEssayText)
+      setEssayCandidates(data.candidates || [])
+      setSelectedEssayCandidateId(data.candidates?.[0]?.sentence_id || null)
+      if (!data.candidates || data.candidates.length === 0) {
+        setError('No claim candidates were found. Try a longer essay or cleaner PDF text.')
+      }
+    } catch (fetchError) {
+      console.error('Essay analysis failed:', fetchError)
+      setEssayCandidates([])
+      setSelectedEssayCandidateId(null)
+      setEssayPreparedText('')
+      setError(fetchError instanceof Error ? fetchError.message : 'Essay analysis failed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSubmitEssay = async (): Promise<void> => {
+    if (!canSubmitEssay || loading || !selectedEssayCandidate) return
+
+    setLoading(true)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/articles', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mode: 'essay',
+          q: essayPreparedText,
+          selected_thesis_id: selectedEssayCandidate.sentence_id,
+          selected_thesis_sentence: selectedEssayCandidate.sentence,
+          topic_weight: topicWeight,
+          stance_weight: stanceWeight,
+          top_k: rerankTopK,
+        }),
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data?.error || `Request failed (${response.status})`)
+      }
+      setArticles(Array.isArray(data) ? data : [])
+    } catch (fetchError) {
+      console.error('Essay search failed:', fetchError)
+      setArticles([])
+      setError(fetchError instanceof Error ? fetchError.message : 'Essay search failed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const resultsLabel = useMemo(() => {
+    if (inputMode === 'stance') {
+      return 'Top topic matches reranked by claim-level stance alignment'
+    }
+    if (articles.length > 0) {
+      return 'Essay matches reranked by your selected thesis sentence'
+    }
+    if (essayCandidates.length > 0) {
+      return 'Choose the sentence that best states your essay’s central thesis'
+    }
+    return 'Paste or upload an essay, then identify its central thesis before searching'
+  }, [articles.length, essayCandidates.length, inputMode])
+
+  const aboutTitle = inputMode === 'stance' ? 'Two-stage stance search' : 'Essay-guided search'
+  const showScoreGrid = (article: Article): boolean => (
+    article.combined_score !== undefined ||
+    article.stance_score_normalized !== undefined ||
+    article.topic_score_normalized !== undefined
+  )
 
   if (useLlm === null) return <></>
 
@@ -154,8 +260,8 @@ function App(): JSX.Element {
           <h1>hear! hear!</h1>
           <h2>Find your voice in Guardian opinion articles</h2>
           <p className="hero-subtitle">
-            Start with a topic and your position, then rerank relevant articles by whether their
-            central claim supports, contradicts, or stays neutral toward that stance.
+            Search by topic and stance, or let the app help isolate the central thesis of a full
+            essay before reranking articles against that selected claim.
           </p>
         </div>
 
@@ -200,26 +306,17 @@ function App(): JSX.Element {
                 />
               </label>
             </div>
-
-            <div className="stance-actions">
-              <button
-                type="button"
-                className="utility-pill"
-                onClick={() => setIsAboutOpen(true)}
-              >
-                About
-              </button>
-              <button
-                type="button"
-                className="utility-pill"
-                onClick={() => setIsSettingsOpen(true)}
-              >
-                Search settings
-              </button>
-            </div>
           </div>
         ) : (
           <div className="essay-panel">
+            <div className="essay-stage-card">
+              <div className="essay-stage-number">1</div>
+              <div className="essay-stage-copy">
+                <h3>Add your essay</h3>
+                <p>Paste text or upload a PDF. We’ll sentence-split it and score which lines look most thesis-like.</p>
+              </div>
+            </div>
+
             <div className="stance-prompt-card essay-prompt-card">
               <label className="stance-prompt-line opinion-line">
                 <span className="stance-prefix">Essay text</span>
@@ -228,7 +325,7 @@ function App(): JSX.Element {
                   placeholder="Paste an essay, paper, op-ed..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  rows={4}
+                  rows={5}
                   aria-label="Essay or search phrase"
                 />
               </label>
@@ -242,7 +339,7 @@ function App(): JSX.Element {
               <div className="essay-upload-header">
                 <span className="stance-prefix">Upload PDF</span>
                 <p className="essay-upload-copy">
-                  Use a PDF instead of pasted text.
+                  Use a PDF instead of pasted text. The extracted text will be used for thesis detection and article matching.
                 </p>
               </div>
               <div className="essay-upload-controls">
@@ -273,17 +370,101 @@ function App(): JSX.Element {
                 )}
               </div>
             </div>
+
+            <div className="essay-actions">
+              <button
+                type="button"
+                className="primary-action-button"
+                onClick={handleAnalyzeEssay}
+                disabled={!canAnalyzeEssay || loading}
+              >
+                Find thesis candidates
+              </button>
+              <p className="essay-action-help">
+                We score each sentence against the hypothesis “This sentence is the author&apos;s main claim.”
+              </p>
+            </div>
+
+            {essayCandidates.length > 0 && (
+              <div className="essay-candidate-panel">
+                <div className="essay-stage-card">
+                  <div className="essay-stage-number">2</div>
+                  <div className="essay-stage-copy">
+                    <h3>Pick the central thesis</h3>
+                    <p>Select the one sentence that best captures the essay’s main claim. You can change your mind before submitting.</p>
+                  </div>
+                </div>
+
+                <div className="essay-candidate-grid">
+                  {essayCandidates.map((candidate, index) => {
+                    const isSelected = candidate.sentence_id === selectedEssayCandidateId
+                    return (
+                      <button
+                        key={candidate.sentence_id}
+                        type="button"
+                        className={`candidate-card ${isSelected ? 'selected' : ''}`}
+                        onClick={() => setSelectedEssayCandidateId(candidate.sentence_id)}
+                        style={{ animationDelay: `${index * 70}ms` }}
+                      >
+                        <div className="candidate-card-header">
+                          <span className="candidate-rank">Candidate {index + 1}</span>
+                          <span className="candidate-score">
+                            Claimness {formatScore(candidate.claim_score_normalized)}
+                          </span>
+                        </div>
+                        <p className="candidate-sentence">{candidate.sentence}</p>
+                        <div className="candidate-metrics">
+                          <span>Entail {formatPercent(candidate.entailment_prob)}</span>
+                          <span>Neutral {formatPercent(candidate.neutral_prob)}</span>
+                          <span>Contradict {formatPercent(candidate.contradiction_prob)}</span>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <div className="essay-submit-panel">
+                  <div>
+                    <p className="essay-submit-eyebrow">Selected thesis</p>
+                    <p className="essay-submit-copy">
+                      {selectedEssayCandidate?.sentence || 'Choose a sentence above to continue.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="primary-action-button secondary-action"
+                    onClick={handleSubmitEssay}
+                    disabled={!canSubmitEssay || loading}
+                  >
+                    Rank articles with selected thesis
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
+
+        <div className="stance-actions">
+          <button
+            type="button"
+            className="utility-pill"
+            onClick={() => setIsAboutOpen(true)}
+          >
+            About
+          </button>
+          <button
+            type="button"
+            className="utility-pill"
+            onClick={() => setIsSettingsOpen(true)}
+          >
+            Search settings
+          </button>
+        </div>
       </div>
 
       <div className="results-header">
-        <p className="results-label">
-          {inputMode === 'stance'
-            ? 'Top topic matches reranked by claim-level stance alignment'
-            : 'Topic and essay similarity results'}
-        </p>
-        {loading && <p className="results-status">Searching...</p>}
+        <p className="results-label">{resultsLabel}</p>
+        {loading && <p className="results-status">Working...</p>}
         {error && <p className="results-status error">{error}</p>}
       </div>
 
@@ -301,7 +482,7 @@ function App(): JSX.Element {
               </div>
             )}
 
-            {inputMode === 'stance' && (
+            {showScoreGrid(article) && (
               <div className="score-grid">
                 <div className="score-chip">
                   <span>Combined</span>
@@ -350,10 +531,10 @@ function App(): JSX.Element {
               </div>
             )}
 
-            {inputMode === 'stance' && !article.central_claim_summary && (
+            {showScoreGrid(article) && !article.central_claim_summary && (
               <p className="claim-missing">
                 No LLM-coded central claim is available for this article yet, so it stayed in the
-                ranking based on topic relevance alone.
+                ranking based on essay/topic relevance alone.
               </p>
             )}
 
@@ -382,7 +563,7 @@ function App(): JSX.Element {
             <div className="modal-header">
               <div>
                 <p className="modal-eyebrow">About</p>
-                <h3 id="about-reranking-title">Two-stage search</h3>
+                <h3 id="about-reranking-title">{aboutTitle}</h3>
               </div>
               <button
                 type="button"
@@ -394,16 +575,32 @@ function App(): JSX.Element {
               </button>
             </div>
             <div className="modal-stage-list">
-              <p className="modal-copy">
-                <strong>Stage 1:</strong> TF-IDF retrieves the top {rerankTopK}{' '}
-                {rerankTopK === 1 ? 'article' : 'articles'} that are most relevant to your topic.
-              </p>
-              <p className="modal-copy">
-                <strong>Stage 2:</strong> NLI reranks those {rerankTopK}{' '}
-                {rerankTopK === 1 ? 'article' : 'articles'} by comparing your opinion with each
-                article&apos;s LLM-coded central claim to estimate whether the article supports,
-                contradicts, or stays neutral toward your stance.
-              </p>
+              {inputMode === 'stance' ? (
+                <>
+                  <p className="modal-copy">
+                    <strong>Stage 1:</strong> TF-IDF retrieves the top {rerankTopK}{' '}
+                    {rerankTopK === 1 ? 'article' : 'articles'} that are most relevant to your topic.
+                  </p>
+                  <p className="modal-copy">
+                    <strong>Stage 2:</strong> NLI reranks those {rerankTopK}{' '}
+                    {rerankTopK === 1 ? 'article' : 'articles'} by comparing your opinion with each
+                    article&apos;s LLM-coded central claim to estimate whether the article supports,
+                    contradicts, or stays neutral toward your stance.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="modal-copy">
+                    <strong>Stage 1:</strong> the essay is sentence-split and each sentence is scored
+                    for “claimness” against the hypothesis that it is the author&apos;s main claim.
+                  </p>
+                  <p className="modal-copy">
+                    <strong>Stage 2:</strong> you choose the best thesis candidate, then the whole essay
+                    retrieves top TF-IDF matches and the selected thesis sentence reranks those articles
+                    with NLI against each article&apos;s LLM-coded central claim.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -425,7 +622,7 @@ function App(): JSX.Element {
             <div className="modal-header">
               <div>
                 <p className="modal-eyebrow">Settings</p>
-                <h3 id="search-settings-title">Stance search settings</h3>
+                <h3 id="search-settings-title">Reranking settings</h3>
               </div>
               <button
                 type="button"
@@ -448,14 +645,14 @@ function App(): JSX.Element {
                   onChange={(e) => setRerankTopK(parseTopKInput(e.target.value, rerankTopK))}
                 />
                 <p className="setting-help-text">
-                  How many TF-IDF topic matches move from Stage 1 into stance reranking.
+                  How many TF-IDF matches move into the NLI reranking stage.
                 </p>
               </label>
               <div className="weight-card full-row weights-group-card">
                 <span>Weights</span>
                 <div className="weight-pair-grid">
                   <label className="paired-weight-field">
-                    <span>Topic weight</span>
+                    <span>Topic / essay weight</span>
                     <input
                       type="number"
                       min="0"
@@ -465,7 +662,7 @@ function App(): JSX.Element {
                     />
                   </label>
                   <label className="paired-weight-field">
-                    <span>Stance weight</span>
+                    <span>Stance / thesis weight</span>
                     <input
                       type="number"
                       min="0"
@@ -477,13 +674,10 @@ function App(): JSX.Element {
                 </div>
                 <div className="parameter-help-list">
                   <p className="parameter-help-item">
-                    <strong>Topic weight:</strong> how much the final score prioritizes topical
-                    similarity.
+                    <strong>Topic / essay weight:</strong> how much the final score prioritizes whole-text topical similarity.
                   </p>
                   <p className="parameter-help-item">
-                    <strong>Stance weight:</strong> how much the final score prioritizes whether the
-                    article&apos;s central claim supports, contradicts, or stays neutral toward your
-                    position.
+                    <strong>Stance / thesis weight:</strong> how much the final score prioritizes whether the selected claim aligns with an article&apos;s central claim.
                   </p>
                 </div>
               </div>

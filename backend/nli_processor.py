@@ -4,6 +4,7 @@ from functools import lru_cache
 MODEL_NAME = "cross-encoder/nli-deberta-v3-base"
 DEFAULT_BATCH_SIZE = 16
 DEFAULT_MAX_LENGTH = 512
+CLAIMNESS_HYPOTHESIS = "This sentence is the author's main claim."
 
 
 def _import_torch():
@@ -143,3 +144,56 @@ def stance_label_from_probs(entailment_prob, neutral_prob, contradiction_prob):
         "contradiction": float(contradiction_prob),
     }
     return max(scores, key=scores.get)
+
+
+def score_claim_sentences(
+    sentence_rows,
+    hypothesis=CLAIMNESS_HYPOTHESIS,
+    top_n=5,
+    model_name=MODEL_NAME,
+    batch_size=DEFAULT_BATCH_SIZE,
+    max_length=DEFAULT_MAX_LENGTH,
+):
+    rows = list(sentence_rows)
+    if not rows:
+        return []
+
+    scores = score_nli_pairs(
+        premises=[row.get("sentence", "") for row in rows],
+        hypothesis=hypothesis,
+        model_name=model_name,
+        batch_size=batch_size,
+        max_length=max_length,
+    )
+
+    ranked = []
+    for row, score in zip(rows, scores):
+        claim_score = stance_score_from_probs(
+            entailment_prob=score["entailment_prob"],
+            contradiction_prob=score["contradiction_prob"],
+        )
+        ranked.append(
+            {
+                "sentence_id": row.get("sentence_id"),
+                "sentence": row.get("sentence"),
+                "entailment_prob": score["entailment_prob"],
+                "neutral_prob": score["neutral_prob"],
+                "contradiction_prob": score["contradiction_prob"],
+                "claim_score": claim_score,
+                "claim_score_normalized": normalize_stance_score(claim_score),
+                "claim_label": stance_label_from_probs(
+                    entailment_prob=score["entailment_prob"],
+                    neutral_prob=score["neutral_prob"],
+                    contradiction_prob=score["contradiction_prob"],
+                ),
+            }
+        )
+
+    ranked.sort(
+        key=lambda row: (
+            float(row["claim_score"]),
+            float(row["entailment_prob"]),
+        ),
+        reverse=True,
+    )
+    return ranked[:max(1, int(top_n))]

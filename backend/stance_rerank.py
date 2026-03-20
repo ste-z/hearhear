@@ -98,10 +98,9 @@ def _combined_score(topic_score, stance_score, topic_weight, stance_weight):
     ) / total_weight
 
 
-def rerank_article_matches(
+def rerank_article_matches_by_statement(
     article_matches,
-    topic,
-    opinion,
+    statement,
     topic_weight=DEFAULT_TOPIC_WEIGHT,
     stance_weight=DEFAULT_STANCE_WEIGHT,
     top_n=DEFAULT_RERANK_TOP_N,
@@ -112,7 +111,9 @@ def rerank_article_matches(
         return []
 
     topic_weight, stance_weight = _resolve_weight_pair(topic_weight, stance_weight)
-    topic_statement = build_stance_statement(topic, opinion)
+    query_statement = str(statement or "").strip()
+    if not query_statement:
+        return matches
 
     indexed_claims = []
     premises = []
@@ -124,7 +125,7 @@ def rerank_article_matches(
             indexed_claims.append(idx)
             premises.append(claim_summary)
 
-    nli_rows = score_nli_pairs(premises, topic_statement) if premises else []
+    nli_rows = score_nli_pairs(premises, query_statement) if premises else []
     nli_by_match_idx = dict(zip(indexed_claims, nli_rows))
     topic_scores = _normalize_topic_scores(matches)
 
@@ -151,7 +152,8 @@ def rerank_article_matches(
                 contradiction_prob=contradiction_prob,
             )
 
-        match["topic_statement"] = topic_statement
+        match["query_statement"] = query_statement
+        match["topic_statement"] = query_statement
         match["topic_score"] = topic_score
         match["topic_score_normalized"] = topic_score_normalized
         match["stance_entailment_prob"] = entailment_prob
@@ -183,3 +185,20 @@ def rerank_article_matches(
         match["rerank_position"] = rank_idx
 
     return reranked
+
+
+def rerank_article_matches(
+    article_matches,
+    topic,
+    opinion,
+    topic_weight=DEFAULT_TOPIC_WEIGHT,
+    stance_weight=DEFAULT_STANCE_WEIGHT,
+    top_n=DEFAULT_RERANK_TOP_N,
+):
+    return rerank_article_matches_by_statement(
+        article_matches=article_matches,
+        statement=build_stance_statement(topic, opinion),
+        topic_weight=topic_weight,
+        stance_weight=stance_weight,
+        top_n=top_n,
+    )
