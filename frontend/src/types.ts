@@ -10,4 +10,27 @@ export interface Article {
   year: number;
   n_contributors: number;
   keywords: string[];
+  score?: number;
+  central_claim_summary?: string | null;
+  has_clear_central_thesis?: boolean | null;
+  thesis_sentence_id?: string | null;
+  thesis_sentence?: string | null;
+  support_sentence_ids?: string[];
+  support_sentences?: string[];
+  secondary_claim_ids?: string[];
+  secondary_claim_sentences?: string[];
+  claim_available?: boolean;
+  topic_statement?: string;
+  topic_score?: number | null;
+  topic_score_normalized?: number | null;
+  stance_entailment_prob?: number | null;
+  stance_neutral_prob?: number | null;
+  stance_contradiction_prob?: number | null;
+  stance_score?: number | null;
+  stance_score_normalized?: number | null;
+  stance_label?: string | null;
+  combined_score?: number | null;
+  topic_weight?: number | null;
+  stance_weight?: number | null;
+  rerank_position?: number | null;
 }

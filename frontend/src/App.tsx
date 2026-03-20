@@ -1,54 +1,94 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
-import SearchIcon from './assets/mag.png'
 import { Article } from './types'
 import Chat from './Chat'
 
+type InputMode = 'stance' | 'essay'
+
 function App(): JSX.Element {
   const [useLlm, setUseLlm] = useState<boolean | null>(null)
+  const [inputMode, setInputMode] = useState<InputMode>('stance')
   const [searchTerm, setSearchTerm] = useState<string>('')
+  const [topic, setTopic] = useState<string>('')
+  const [opinion, setOpinion] = useState<string>('')
+  const [topicWeight, setTopicWeight] = useState<number>(0.5)
+  const [stanceWeight, setStanceWeight] = useState<number>(0.5)
+  const [rerankTopK, setRerankTopK] = useState<number>(20)
   const [articles, setArticles] = useState<Article[]>([])
-  const [pdfFile, setPdfFile] = useState<File | null>(null) //pdf upload constant
+  const [pdfFile, setPdfFile] = useState<File | null>(null)
+  const [loading, setLoading] = useState<boolean>(false)
+  const [error, setError] = useState<string | null>(null)
+  const [isAboutOpen, setIsAboutOpen] = useState<boolean>(false)
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
+
   useEffect(() => {
     fetch('/api/config').then(r => r.json()).then(data => setUseLlm(data.use_llm))
   }, [])
 
   useEffect(() => {
-    const trimmed = searchTerm.trim()
-    if (trimmed === '' && !pdfFile) {
+    const trimmedSearch = searchTerm.trim()
+    const trimmedTopic = topic.trim()
+    const trimmedOpinion = opinion.trim()
+    const shouldSearchEssay = inputMode === 'essay' && (trimmedSearch !== '' || !!pdfFile)
+    const shouldSearchStance = inputMode === 'stance' && trimmedTopic !== '' && trimmedOpinion !== ''
+
+    if (!shouldSearchEssay && !shouldSearchStance) {
       setArticles([])
+      setError(null)
+      setLoading(false)
       return
     }
 
     const controller = new AbortController()
     const timeoutId = setTimeout(async () => {
-      try {
-        // const response = await fetch('/api/articles', {
-        //   method: 'POST',
-        //   headers: {
-        //     'Content-Type': 'application/json',
-        //   },
-        //   body: JSON.stringify({ q: trimmed }),
-        //   signal: controller.signal,
-        // })
+      setLoading(true)
+      setError(null)
 
-        //changed for pdf 
-        const formData = new FormData()
-        formData.append('q', trimmed)
-        if (pdfFile) {
-          formData.append('pdf', pdfFile)
+      try {
+        let response: Response
+        if (inputMode === 'stance') {
+          response = await fetch('/api/articles', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              mode: 'stance',
+              topic: trimmedTopic,
+              opinion: trimmedOpinion,
+              topic_weight: topicWeight,
+              stance_weight: stanceWeight,
+              top_k: rerankTopK,
+            }),
+            signal: controller.signal,
+          })
+        } else {
+          const formData = new FormData()
+          formData.append('mode', 'essay')
+          formData.append('q', trimmedSearch)
+          if (pdfFile) {
+            formData.append('pdf', pdfFile)
+          }
+
+          response = await fetch('/api/articles', {
+            method: 'POST',
+            body: formData,
+            signal: controller.signal,
+          })
         }
 
-        const response = await fetch('/api/articles', {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal,
-        })
-        const data: Article[] = await response.json()
-        setArticles(data)
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') return
-        console.error('Search request failed:', error)
+        const data = await response.json()
+        if (!response.ok) {
+          throw new Error(data?.error || `Request failed (${response.status})`)
+        }
+        setArticles(Array.isArray(data) ? data : [])
+      } catch (fetchError) {
+        if (fetchError instanceof DOMException && fetchError.name === 'AbortError') return
+        console.error('Search request failed:', fetchError)
+        setArticles([])
+        setError(fetchError instanceof Error ? fetchError.message : 'Search request failed.')
+      } finally {
+        setLoading(false)
       }
     }, 300)
 
@@ -56,7 +96,18 @@ function App(): JSX.Element {
       controller.abort()
       clearTimeout(timeoutId)
     }
-  }, [searchTerm, pdfFile]) //changed for pdffile compatible
+  }, [inputMode, opinion, pdfFile, rerankTopK, searchTerm, stanceWeight, topic, topicWeight])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      setIsAboutOpen(false)
+      setIsSettingsOpen(false)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   const formatDate = (isoDate: string | null): string => {
     if (!isoDate) return 'Unknown date'
@@ -65,7 +116,32 @@ function App(): JSX.Element {
     return parsed.toLocaleDateString()
   }
 
-  const handleSearch = (value: string): void => {
+  const formatScore = (value?: number | null): string => {
+    if (value === undefined || value === null || Number.isNaN(value)) return 'n/a'
+    return value.toFixed(3)
+  }
+
+  const formatPercent = (value?: number | null): string => {
+    if (value === undefined || value === null || Number.isNaN(value)) return 'n/a'
+    return `${Math.round(value * 100)}%`
+  }
+
+  const parseWeightInput = (value: string, fallback: number): number => {
+    if (value.trim() === '') return fallback
+    const parsed = Number(value)
+    if (Number.isNaN(parsed) || parsed < 0) return fallback
+    return parsed
+  }
+
+  const parseTopKInput = (value: string, fallback: number): number => {
+    if (value.trim() === '') return fallback
+    const parsed = Number(value)
+    if (Number.isNaN(parsed)) return fallback
+    return Math.min(100, Math.max(1, Math.round(parsed)))
+  }
+
+  const handleEssaySearch = (value: string): void => {
+    setInputMode('essay')
     setSearchTerm(value)
   }
 
@@ -73,58 +149,214 @@ function App(): JSX.Element {
 
   return (
     <div className={`full-body-container ${useLlm ? 'llm-mode' : ''}`}>
-      {/* Search bar (always shown) */}
       <div className="top-text">
-        <div>
+        <div className="hero-copy">
           <h1>hear! hear!</h1>
           <h2>Find your voice in Guardian opinion articles</h2>
+          <p className="hero-subtitle">
+            Start with a topic and your position, then rerank relevant articles by whether their
+            central claim supports, contradicts, or stays neutral toward that stance.
+          </p>
         </div>
-        <div className="input-box" onClick={() => document.getElementById('search-input')?.focus()}>
-          <img src={SearchIcon} alt="search" />
-          <textarea
-            id="search-input"
-            placeholder="Search Guardian opinion articles or paste a paragraph..."
-            value={searchTerm}
-            onChange={(e) => handleSearch(e.target.value)}
-            rows={3}
-          />
+
+        <div className="mode-switch" role="tablist" aria-label="Search mode">
+          <button
+            type="button"
+            className={`mode-pill ${inputMode === 'stance' ? 'active' : ''}`}
+            onClick={() => setInputMode('stance')}
+          >
+            Topic + Opinion
+          </button>
+          <button
+            type="button"
+            className={`mode-pill ${inputMode === 'essay' ? 'active' : ''}`}
+            onClick={() => setInputMode('essay')}
+          >
+            Essay
+          </button>
         </div>
-        <div className="pdf-upload-row">
-          <label htmlFor="pdf-upload" className="pdf-upload-label">
-            Upload PDF
-          </label>
-          <input
-            id="pdf-upload"
-            type="file"
-            accept="application/pdf"
-            onChange={(e) => {
-              const file = e.target.files?.[0] ?? null
-              setPdfFile(file)
-            }}
-          />
-          {pdfFile && (
-            <span className="pdf-file-name">
-              {pdfFile.name}
+
+        {inputMode === 'stance' ? (
+          <div className="stance-panel">
+            <div className="stance-prompt-card">
+              <label className="stance-prompt-line">
+                <span className="stance-prefix">Regarding</span>
+                <input
+                  type="text"
+                  placeholder="Climate protest, immigration, housing policy..."
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                  aria-label="Topic"
+                />
+              </label>
+              <label className="stance-prompt-line opinion-line">
+                <span className="stance-prefix">I believe</span>
+                <textarea
+                  placeholder="Governments should invest far more in public transit than highway expansion."
+                  value={opinion}
+                  onChange={(e) => setOpinion(e.target.value)}
+                  rows={4}
+                  aria-label="Opinion"
+                />
+              </label>
+            </div>
+
+            <div className="stance-actions">
               <button
                 type="button"
-                onClick={() => setPdfFile(null)}
-                className="clear-pdf-button"
+                className="utility-pill"
+                onClick={() => setIsAboutOpen(true)}
               >
-                Remove
+                About
               </button>
-            </span>
-          )}
-        </div>
+              <button
+                type="button"
+                className="utility-pill"
+                onClick={() => setIsSettingsOpen(true)}
+              >
+                Search settings
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="essay-panel">
+            <div className="stance-prompt-card essay-prompt-card">
+              <label className="stance-prompt-line opinion-line">
+                <span className="stance-prefix">Essay text</span>
+                <textarea
+                  id="search-input"
+                  placeholder="Paste an essay, paper, op-ed..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  rows={4}
+                  aria-label="Essay or search phrase"
+                />
+              </label>
+            </div>
+
+            <div className="essay-divider" aria-hidden="true">
+              <span>OR</span>
+            </div>
+
+            <div className="stance-prompt-card essay-upload-card">
+              <div className="essay-upload-header">
+                <span className="stance-prefix">Upload PDF</span>
+                <p className="essay-upload-copy">
+                  Use a PDF instead of pasted text.
+                </p>
+              </div>
+              <div className="essay-upload-controls">
+                <label htmlFor="pdf-upload" className="pdf-upload-button">
+                  Choose PDF
+                </label>
+                <input
+                  id="pdf-upload"
+                  className="pdf-upload-input"
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null
+                    setPdfFile(file)
+                  }}
+                />
+                {pdfFile && (
+                  <span className="pdf-file-chip">
+                    {pdfFile.name}
+                    <button
+                      type="button"
+                      onClick={() => setPdfFile(null)}
+                      className="clear-pdf-button"
+                    >
+                      Remove
+                    </button>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Search results (always shown) */}
+      <div className="results-header">
+        <p className="results-label">
+          {inputMode === 'stance'
+            ? 'Top topic matches reranked by claim-level stance alignment'
+            : 'Topic and essay similarity results'}
+        </p>
+        {loading && <p className="results-status">Searching...</p>}
+        {error && <p className="results-status error">{error}</p>}
+      </div>
+
       <div id="answer-box">
         {articles.map((article) => (
           <div key={article.id} className="article-item">
             <h3 className="article-title">
               <a href={article.url} target="_blank" rel="noreferrer">{article.title}</a>
             </h3>
+
+            {article.central_claim_summary && (
+              <div className="claim-band">
+                <span className="claim-band-label">Author&apos;s claim</span>
+                <p>{article.central_claim_summary}</p>
+              </div>
+            )}
+
+            {inputMode === 'stance' && (
+              <div className="score-grid">
+                <div className="score-chip">
+                  <span>Combined</span>
+                  <strong>{formatScore(article.combined_score)}</strong>
+                </div>
+                <div className="score-chip">
+                  <span>Topic</span>
+                  <strong>{formatScore(article.topic_score_normalized)}</strong>
+                </div>
+                <div className="score-chip">
+                  <span>Stance</span>
+                  <strong>{formatScore(article.stance_score_normalized)}</strong>
+                </div>
+                <div className="score-chip">
+                  <span>Label</span>
+                  <strong>{article.stance_label || 'unavailable'}</strong>
+                </div>
+                <div className="score-chip">
+                  <span>Entail</span>
+                  <strong>{formatPercent(article.stance_entailment_prob)}</strong>
+                </div>
+                <div className="score-chip">
+                  <span>Contradict</span>
+                  <strong>{formatPercent(article.stance_contradiction_prob)}</strong>
+                </div>
+              </div>
+            )}
+
             <p className="article-summary">{article.summary}</p>
+
+            {article.thesis_sentence && (
+              <div className="sentence-block">
+                <h4>Thesis sentence</h4>
+                <p>{article.thesis_sentence}</p>
+              </div>
+            )}
+
+            {article.support_sentences && article.support_sentences.length > 0 && (
+              <div className="sentence-block">
+                <h4>Support sentences</h4>
+                <ul className="sentence-list">
+                  {article.support_sentences.map((sentence, index) => (
+                    <li key={`${article.id}-support-${index}`}>{sentence}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {inputMode === 'stance' && !article.central_claim_summary && (
+              <p className="claim-missing">
+                No LLM-coded central claim is available for this article yet, so it stayed in the
+                ranking based on topic relevance alone.
+              </p>
+            )}
+
             <p className="article-meta">
               {article.author_display || article.author_raw || 'Unknown author'} | {formatDate(article.date)}
             </p>
@@ -132,8 +364,133 @@ function App(): JSX.Element {
         ))}
       </div>
 
-      {/* Chat (only when USE_LLM = True in routes.py) */}
-      {useLlm && <Chat onSearchTerm={handleSearch} />}
+      {useLlm && <Chat onSearchTerm={handleEssaySearch} />}
+
+      {isAboutOpen && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setIsAboutOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="about-reranking-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <p className="modal-eyebrow">About</p>
+                <h3 id="about-reranking-title">Two-stage search</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setIsAboutOpen(false)}
+                aria-label="Close About popup"
+              >
+                Close
+              </button>
+            </div>
+            <div className="modal-stage-list">
+              <p className="modal-copy">
+                <strong>Stage 1:</strong> TF-IDF retrieves the top {rerankTopK}{' '}
+                {rerankTopK === 1 ? 'article' : 'articles'} that are most relevant to your topic.
+              </p>
+              <p className="modal-copy">
+                <strong>Stage 2:</strong> NLI reranks those {rerankTopK}{' '}
+                {rerankTopK === 1 ? 'article' : 'articles'} by comparing your opinion with each
+                article&apos;s LLM-coded central claim to estimate whether the article supports,
+                contradicts, or stays neutral toward your stance.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isSettingsOpen && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setIsSettingsOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="search-settings-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <p className="modal-eyebrow">Settings</p>
+                <h3 id="search-settings-title">Stance search settings</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setIsSettingsOpen(false)}
+                aria-label="Close settings popup"
+              >
+                Close
+              </button>
+            </div>
+            <div className="modal-settings-grid">
+              <label className="weight-card full-row">
+                <span>Top K</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="1"
+                  value={rerankTopK}
+                  onChange={(e) => setRerankTopK(parseTopKInput(e.target.value, rerankTopK))}
+                />
+                <p className="setting-help-text">
+                  How many TF-IDF topic matches move from Stage 1 into stance reranking.
+                </p>
+              </label>
+              <div className="weight-card full-row weights-group-card">
+                <span>Weights</span>
+                <div className="weight-pair-grid">
+                  <label className="paired-weight-field">
+                    <span>Topic weight</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.05"
+                      value={topicWeight}
+                      onChange={(e) => setTopicWeight(parseWeightInput(e.target.value, topicWeight))}
+                    />
+                  </label>
+                  <label className="paired-weight-field">
+                    <span>Stance weight</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.05"
+                      value={stanceWeight}
+                      onChange={(e) => setStanceWeight(parseWeightInput(e.target.value, stanceWeight))}
+                    />
+                  </label>
+                </div>
+                <div className="parameter-help-list">
+                  <p className="parameter-help-item">
+                    <strong>Topic weight:</strong> how much the final score prioritizes topical
+                    similarity.
+                  </p>
+                  <p className="parameter-help-item">
+                    <strong>Stance weight:</strong> how much the final score prioritizes whether the
+                    article&apos;s central claim supports, contradicts, or stays neutral toward your
+                    position.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -37,7 +37,7 @@ def keyword_search(query):
 
     return [serialize_article(article) for article in results]
 
-def tfidf_cos_search(query):
+def tfidf_cos_search(query, top_n=100):
     if not query or not query.strip():
         return []
     query = query.strip()
@@ -48,7 +48,7 @@ def tfidf_cos_search(query):
     if processor is None:
         return []
 
-    ranked = processor.search(query, top_n=100)
+    ranked = processor.search(query, top_n=top_n)
     return build_matches(ranked)
 
 def json_search(query):
@@ -60,6 +60,28 @@ def json_search(query):
         return tfidf_cos_search(query)
     except Exception:
         return keyword_search(query)
+
+
+def stance_search(topic, opinion, topic_weight=0.5, stance_weight=0.5, top_n=20):
+    from backend.stance_rerank import rerank_article_matches
+
+    topic_text = str(topic or "").strip()
+    opinion_text = str(opinion or "").strip()
+    if len(topic_text) < 2 or len(opinion_text) < 2:
+        return []
+
+    topic_matches = tfidf_cos_search(topic_text, top_n=top_n)
+    if not topic_matches:
+        return []
+
+    return rerank_article_matches(
+        article_matches=topic_matches,
+        topic=topic_text,
+        opinion=opinion_text,
+        topic_weight=topic_weight,
+        stance_weight=stance_weight,
+        top_n=top_n,
+    )
 
 def _extract_pdf_text(uploaded_file, max_pages=20, max_chars=20000):
     """
@@ -102,47 +124,65 @@ def _extract_pdf_text(uploaded_file, max_pages=20, max_chars=20000):
             pass
 
 
-def _extract_search_text():
-    """
-    Support:
-      - GET query params
-      - POST JSON payloads
-      - POST form payloads
-      - optional uploaded PDF under field name 'pdf'
+def _request_payload():
+    if request.method == "GET":
+        return request.args.to_dict(flat=True)
 
-    Returns combined search text from typed text and extracted PDF text.
-    """
-    typed_text = ""
+    if request.is_json:
+        return request.get_json(silent=True) or {}
 
-    if request.method == "POST":
-        if request.is_json:
-            payload = request.get_json(silent=True) or {}
-            typed_text = (
-                payload.get("q")
-                or payload.get("query")
-                or payload.get("text")
-                or payload.get("title")
-                or ""
-            )
-            return str(typed_text).strip()
+    return request.form.to_dict(flat=True)
 
-        typed_text = (
-            request.form.get("q")
-            or request.form.get("query")
-            or request.form.get("text")
-            or request.form.get("title")
-            or ""
-        )
 
-        uploaded_pdf = request.files.get("pdf")
-        pdf_text = _extract_pdf_text(uploaded_pdf)
+def _coerce_float(value, default):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
-        parts = [str(typed_text).strip(), pdf_text.strip()]
-        combined = "\n\n".join(part for part in parts if part)
-        return combined.strip()
 
-    typed_text = request.args.get("q", "") or request.args.get("title", "")
-    return str(typed_text).strip()
+def _coerce_int(value, default, minimum=1, maximum=100):
+    try:
+        resolved = int(value)
+    except (TypeError, ValueError):
+        resolved = int(default)
+    return max(int(minimum), min(int(maximum), resolved))
+
+
+def _extract_request_context():
+    payload = _request_payload()
+    mode = str(payload.get("mode") or "essay").strip().lower()
+    topic = str(payload.get("topic") or "").strip()
+    opinion = str(payload.get("opinion") or "").strip()
+    topic_weight = _coerce_float(payload.get("topic_weight"), 0.5)
+    stance_weight = _coerce_float(payload.get("stance_weight"), 0.5)
+    rerank_top_k = _coerce_int(payload.get("top_k"), 20, minimum=1, maximum=100)
+
+    typed_text = (
+        payload.get("q")
+        or payload.get("query")
+        or payload.get("text")
+        or payload.get("title")
+        or ""
+    )
+    typed_text = str(typed_text).strip()
+
+    pdf_text = ""
+    if request.method == "POST" and not request.is_json:
+        pdf_text = _extract_pdf_text(request.files.get("pdf"))
+
+    parts = [typed_text, pdf_text.strip()]
+    essay_text = "\n\n".join(part for part in parts if part).strip()
+
+    return {
+        "mode": mode,
+        "topic": topic,
+        "opinion": opinion,
+        "topic_weight": topic_weight,
+        "stance_weight": stance_weight,
+        "rerank_top_k": rerank_top_k,
+        "essay_text": essay_text,
+    }
 
 
 def register_routes(app):
@@ -161,8 +201,24 @@ def register_routes(app):
     @app.route("/api/articles", methods=["GET", "POST"])
     @app.route("/api/articles/search", methods=["POST"])
     def articles_search():
-        text = _extract_search_text()
-        return jsonify(json_search(text))
+        context = _extract_request_context()
+
+        try:
+            if context["mode"] == "stance":
+                results = stance_search(
+                    topic=context["topic"],
+                    opinion=context["opinion"],
+                    topic_weight=context["topic_weight"],
+                    stance_weight=context["stance_weight"],
+                    top_n=context["rerank_top_k"],
+                )
+            else:
+                results = json_search(context["essay_text"])
+            return jsonify(results)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 500
 
     if USE_LLM:
         from llm_routes import register_chat_route

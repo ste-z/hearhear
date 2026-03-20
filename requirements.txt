@@ -7,8 +7,11 @@ gunicorn==25.0.3
 numpy
 pandas
 pypdf
-matplotlib
-seaborn
 scikit-learn
+torch
+transformers
+sentencepiece
 python-dotenv
+openai
+spacy
 git+https://github.com/MrPeterss/infosci-spark-client.git
