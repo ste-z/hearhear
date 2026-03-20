@@ -50,11 +50,16 @@
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  align-self: flex-start;
+  padding: 5px;
+  border-radius: 999px;
+  border: 1px solid #e1e6ef;
+  background: rgba(32, 33, 36, 0.04);
 }
 
 .mode-pill {
-  border: 1px solid #d7dbe3;
-  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid transparent;
+  background: transparent;
   border-radius: 999px;
   padding: 10px 16px;
   font-family: 'Open Sans', sans-serif;
@@ -62,18 +67,20 @@
   font-weight: 700;
   color: #3c4043;
   cursor: pointer;
-  transition: 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .mode-pill:hover {
-  border-color: #1a73e8;
-  color: #1a73e8;
+  background: rgba(255, 255, 255, 0.78);
+  border-color: #d7dbe3;
+  color: #202124;
 }
 
 .mode-pill.active {
-  background: #1a73e8;
-  border-color: #1a73e8;
-  color: #fff;
+  background: #fff3d6;
+  border-color: #f1d48a;
+  color: #8a5c00;
+  box-shadow: 0 8px 18px rgba(244, 180, 0, 0.14);
 }
 
 .stance-panel {
@@ -179,21 +186,22 @@
 }
 
 .utility-pill {
-  border: 1px solid #d6e3ff;
-  background: #f5f8ff;
+  border: 1px solid #d7dbe3;
+  background: rgba(255, 255, 255, 0.92);
   border-radius: 999px;
   padding: 10px 16px;
   font-family: 'Open Sans', sans-serif;
   font-size: 0.92rem;
   font-weight: 700;
-  color: #1a4fb8;
+  color: #4b5563;
   cursor: pointer;
-  transition: 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
 .utility-pill:hover {
-  border-color: #1a73e8;
-  background: #edf4ff;
+  border-color: #bfc8d8;
+  background: #f8fafc;
+  color: #202124;
 }
 
 .essay-panel {
@@ -346,10 +354,97 @@
   gap: 16px;
 }
 
+.essay-option-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 22px;
+  border: 1px solid #dfe6f4;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 248, 255, 0.95));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.essay-option-strip-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 0 4px;
+}
+
+.essay-option-strip-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.essay-option-strip-title {
+  font-family: 'Kanit', sans-serif;
+  font-size: 1.05rem;
+  color: #202124;
+}
+
+.essay-option-strip-note {
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #5f6368;
+}
+
+.essay-option-arrow-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.essay-option-arrow {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #d6e3ff;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1a4fb8;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.essay-option-arrow:hover {
+  background: #edf4ff;
+  border-color: #9bc0ff;
+  transform: translateY(-1px);
+}
+
 .essay-candidate-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  display: flex;
+  overflow-x: auto;
   gap: 14px;
+  padding: 4px 4px 10px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  scrollbar-color: #b9c9e8 transparent;
+}
+
+.essay-candidate-grid::-webkit-scrollbar {
+  height: 10px;
+}
+
+.essay-candidate-grid::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.essay-candidate-grid::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, #cad8f1, #aebfe4);
+  border-radius: 999px;
 }
 
 .candidate-card {
@@ -362,19 +457,23 @@
   flex-direction: column;
   gap: 12px;
   cursor: pointer;
+  flex: 0 0 min(340px, 82vw);
+  min-height: 220px;
   animation: candidate-rise 0.45s ease both;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
   box-shadow: 0 10px 24px rgba(32, 33, 36, 0.06);
+  scroll-snap-align: start;
 }
 
 .candidate-card:hover {
   transform: translateY(-2px);
   border-color: #9bc0ff;
+  box-shadow: 0 16px 28px rgba(32, 33, 36, 0.1);
 }
 
 .candidate-card.selected {
   border-color: #1a73e8;
-  background: #f4f8ff;
+  background: linear-gradient(180deg, #f7fbff, #edf4ff);
   box-shadow: 0 16px 30px rgba(26, 115, 232, 0.14);
 }
 
@@ -386,7 +485,7 @@
 }
 
 .candidate-rank,
-.candidate-score {
+.candidate-selected-badge {
   font-family: 'Open Sans', sans-serif;
   font-size: 0.76rem;
   font-weight: 700;
@@ -398,7 +497,7 @@
   color: #5f6368;
 }
 
-.candidate-score {
+.candidate-selected-badge {
   color: #1a4fb8;
 }
 
@@ -407,25 +506,10 @@
   font-size: 1rem;
   line-height: 1.6;
   color: #202124;
-}
-
-.candidate-metrics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.candidate-metrics span {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: #f7faff;
-  border: 1px solid #d6e3ff;
-  font-family: 'Open Sans', sans-serif;
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #4a5873;
+  display: -webkit-box;
+  -webkit-line-clamp: 7;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .essay-submit-panel {
@@ -974,8 +1058,14 @@
     align-items: stretch;
   }
 
-  .essay-candidate-grid {
-    grid-template-columns: 1fr;
+  .essay-option-strip-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .essay-option-strip-controls {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .modal-card {

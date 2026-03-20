@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { Article, EssayClaimCandidate, EssayClaimCandidateResponse } from './types'
 import Chat from './Chat'
@@ -23,6 +23,7 @@ function App(): JSX.Element {
   const [essayCandidates, setEssayCandidates] = useState<EssayClaimCandidate[]>([])
   const [essayPreparedText, setEssayPreparedText] = useState<string>('')
   const [selectedEssayCandidateId, setSelectedEssayCandidateId] = useState<string | null>(null)
+  const essayOptionsRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     fetch('/api/config').then(r => r.json()).then(data => setUseLlm(data.use_llm))
@@ -32,57 +33,8 @@ function App(): JSX.Element {
     if (inputMode !== 'stance') {
       return
     }
-
-    const trimmedTopic = topic.trim()
-    const trimmedOpinion = opinion.trim()
-    if (trimmedTopic === '' || trimmedOpinion === '') {
-      setArticles([])
-      setError(null)
-      setLoading(false)
-      return
-    }
-
-    const controller = new AbortController()
-    const timeoutId = setTimeout(async () => {
-      setLoading(true)
-      setError(null)
-
-      try {
-        const response = await fetch('/api/articles', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            mode: 'stance',
-            topic: trimmedTopic,
-            opinion: trimmedOpinion,
-            topic_weight: topicWeight,
-            stance_weight: stanceWeight,
-            top_k: rerankTopK,
-          }),
-          signal: controller.signal,
-        })
-
-        const data = await response.json()
-        if (!response.ok) {
-          throw new Error(data?.error || `Request failed (${response.status})`)
-        }
-        setArticles(Array.isArray(data) ? data : [])
-      } catch (fetchError) {
-        if (fetchError instanceof DOMException && fetchError.name === 'AbortError') return
-        console.error('Search request failed:', fetchError)
-        setArticles([])
-        setError(fetchError instanceof Error ? fetchError.message : 'Search request failed.')
-      } finally {
-        setLoading(false)
-      }
-    }, 300)
-
-    return () => {
-      controller.abort()
-      clearTimeout(timeoutId)
-    }
+    setArticles([])
+    setError(null)
   }, [inputMode, opinion, rerankTopK, stanceWeight, topic, topicWeight])
 
   useEffect(() => {
@@ -108,6 +60,9 @@ function App(): JSX.Element {
   }, [])
 
   const trimmedEssayText = searchTerm.trim()
+  const trimmedTopic = topic.trim()
+  const trimmedOpinion = opinion.trim()
+  const canSearchStance = inputMode === 'stance' && trimmedTopic !== '' && trimmedOpinion !== ''
   const canAnalyzeEssay = inputMode === 'essay' && (trimmedEssayText !== '' || !!pdfFile)
   const selectedEssayCandidate = useMemo(
     () => essayCandidates.find(candidate => candidate.sentence_id === selectedEssayCandidateId) ?? null,
@@ -152,6 +107,43 @@ function App(): JSX.Element {
     setSearchTerm(value)
   }
 
+  const handleSubmitStance = async (): Promise<void> => {
+    if (!canSearchStance || loading) return
+
+    setLoading(true)
+    setError(null)
+    setArticles([])
+
+    try {
+      const response = await fetch('/api/articles', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mode: 'stance',
+          topic: trimmedTopic,
+          opinion: trimmedOpinion,
+          topic_weight: topicWeight,
+          stance_weight: stanceWeight,
+          top_k: rerankTopK,
+        }),
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data?.error || `Request failed (${response.status})`)
+      }
+      setArticles(Array.isArray(data) ? data : [])
+    } catch (fetchError) {
+      console.error('Search request failed:', fetchError)
+      setArticles([])
+      setError(fetchError instanceof Error ? fetchError.message : 'Search request failed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleAnalyzeEssay = async (): Promise<void> => {
     if (!canAnalyzeEssay || loading) return
 
@@ -181,7 +173,7 @@ function App(): JSX.Element {
       setEssayCandidates(data.candidates || [])
       setSelectedEssayCandidateId(data.candidates?.[0]?.sentence_id || null)
       if (!data.candidates || data.candidates.length === 0) {
-        setError('No claim candidates were found. Try a longer essay or cleaner PDF text.')
+        setError('No thesis options were found. Try a longer essay or cleaner PDF text.')
       }
     } catch (fetchError) {
       console.error('Essay analysis failed:', fetchError)
@@ -231,9 +223,19 @@ function App(): JSX.Element {
     }
   }
 
+  const scrollEssayOptions = (direction: 'left' | 'right'): void => {
+    const container = essayOptionsRef.current
+    if (!container) return
+    const amount = Math.max(240, Math.round(container.clientWidth * 0.7))
+    container.scrollBy({
+      left: direction === 'left' ? -amount : amount,
+      behavior: 'smooth',
+    })
+  }
+
   const resultsLabel = useMemo(() => {
     if (inputMode === 'stance') {
-      return 'Top topic matches reranked by claim-level stance alignment'
+      return articles.length > 0 ? 'Top matches by topic and claim-level stance alignment' : ''
     }
     if (articles.length > 0) {
       return 'Essay matches reranked by your selected thesis sentence'
@@ -244,7 +246,8 @@ function App(): JSX.Element {
     return 'Paste or upload an essay, then identify its central thesis before searching'
   }, [articles.length, essayCandidates.length, inputMode])
 
-  const aboutTitle = inputMode === 'stance' ? 'Two-stage stance search' : 'Essay-guided search'
+  const aboutTitle = inputMode === 'stance' ? 'Topic and Stance Search' : 'Essay-guided search'
+  const showResultsHeader = Boolean(resultsLabel || loading || error)
   const showScoreGrid = (article: Article): boolean => (
     article.combined_score !== undefined ||
     article.stance_score_normalized !== undefined ||
@@ -312,7 +315,7 @@ function App(): JSX.Element {
               <div className="essay-stage-number">1</div>
               <div className="essay-stage-copy">
                 <h3>Add your essay</h3>
-                <p>Paste text or upload a PDF. We’ll sentence-split it and score which lines look most thesis-like.</p>
+                <p>Paste text or upload a PDF. We'll score lines which look most thesis-like.</p>
               </div>
             </div>
 
@@ -338,7 +341,7 @@ function App(): JSX.Element {
               <div className="essay-upload-header">
                 <span className="stance-prefix">Upload PDF</span>
                 <p className="essay-upload-copy">
-                  Use a PDF instead of pasted text. The extracted text will be used for thesis detection and article matching.
+                  Use a PDF instead of pasted text. 
                 </p>
               </div>
               <div className="essay-upload-controls">
@@ -377,11 +380,8 @@ function App(): JSX.Element {
                 onClick={handleAnalyzeEssay}
                 disabled={!canAnalyzeEssay || loading}
               >
-                Find thesis candidates
+                Find thesis options
               </button>
-              <p className="essay-action-help">
-                We score each sentence against the hypothesis “This sentence is the author&apos;s main claim.”
-              </p>
             </div>
 
             {essayCandidates.length > 0 && (
@@ -390,36 +390,55 @@ function App(): JSX.Element {
                   <div className="essay-stage-number">2</div>
                   <div className="essay-stage-copy">
                     <h3>Pick the central thesis</h3>
-                    <p>Select the one sentence that best captures the essay’s main claim. You can change your mind before submitting.</p>
+                    <p>Select the one sentence that best captures the essay's main claim or thesis statement.</p>
                   </div>
                 </div>
 
-                <div className="essay-candidate-grid">
-                  {essayCandidates.map((candidate, index) => {
-                    const isSelected = candidate.sentence_id === selectedEssayCandidateId
-                    return (
-                      <button
-                        key={candidate.sentence_id}
-                        type="button"
-                        className={`candidate-card ${isSelected ? 'selected' : ''}`}
-                        onClick={() => setSelectedEssayCandidateId(candidate.sentence_id)}
-                        style={{ animationDelay: `${index * 70}ms` }}
-                      >
-                        <div className="candidate-card-header">
-                          <span className="candidate-rank">Candidate {index + 1}</span>
-                          <span className="candidate-score">
-                            Claimness {formatScore(candidate.claim_score_normalized)}
-                          </span>
-                        </div>
-                        <p className="candidate-sentence">{candidate.sentence}</p>
-                        <div className="candidate-metrics">
-                          <span>Entail {formatPercent(candidate.entailment_prob)}</span>
-                          <span>Neutral {formatPercent(candidate.neutral_prob)}</span>
-                          <span>Contradict {formatPercent(candidate.contradiction_prob)}</span>
-                        </div>
-                      </button>
-                    )
-                  })}
+                <div className="essay-option-strip">
+                  <div className="essay-option-strip-header">
+                    <p className="essay-option-strip-title">Thesis options</p>
+                    <div className="essay-option-strip-controls">
+                      <p className="essay-option-strip-note">Scroll sideways to compare them.</p>
+                      <div className="essay-option-arrow-group">
+                        <button
+                          type="button"
+                          className="essay-option-arrow"
+                          onClick={() => scrollEssayOptions('left')}
+                          aria-label="Scroll thesis options left"
+                        >
+                          {'<'}
+                        </button>
+                        <button
+                          type="button"
+                          className="essay-option-arrow"
+                          onClick={() => scrollEssayOptions('right')}
+                          aria-label="Scroll thesis options right"
+                        >
+                          {'>'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="essay-candidate-grid" ref={essayOptionsRef}>
+                    {essayCandidates.map((candidate, index) => {
+                      const isSelected = candidate.sentence_id === selectedEssayCandidateId
+                      return (
+                        <button
+                          key={candidate.sentence_id}
+                          type="button"
+                          className={`candidate-card ${isSelected ? 'selected' : ''}`}
+                          onClick={() => setSelectedEssayCandidateId(candidate.sentence_id)}
+                          style={{ animationDelay: `${index * 70}ms` }}
+                        >
+                          <div className="candidate-card-header">
+                            <span className="candidate-rank">Option {index + 1}</span>
+                            {isSelected && <span className="candidate-selected-badge">Selected</span>}
+                          </div>
+                          <p className="candidate-sentence">{candidate.sentence}</p>
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
 
                 <div className="essay-submit-panel">
@@ -431,7 +450,7 @@ function App(): JSX.Element {
                   </div>
                   <button
                     type="button"
-                    className="primary-action-button secondary-action"
+                    className="primary-action-button"
                     onClick={handleSubmitEssay}
                     disabled={!canSubmitEssay || loading}
                   >
@@ -444,6 +463,16 @@ function App(): JSX.Element {
         )}
 
         <div className="stance-actions">
+          {inputMode === 'stance' && (
+            <button
+              type="button"
+              className="primary-action-button"
+              onClick={handleSubmitStance}
+              disabled={!canSearchStance || loading}
+            >
+              Search
+            </button>
+          )}
           <button
             type="button"
             className="utility-pill"
@@ -461,11 +490,13 @@ function App(): JSX.Element {
         </div>
       </div>
 
-      <div className="results-header">
-        <p className="results-label">{resultsLabel}</p>
-        {loading && <p className="results-status">Working...</p>}
-        {error && <p className="results-status error">{error}</p>}
-      </div>
+      {showResultsHeader && (
+        <div className="results-header">
+          {resultsLabel && <p className="results-label">{resultsLabel}</p>}
+          {loading && <p className="results-status">Working...</p>}
+          {error && <p className="results-status error">{error}</p>}
+        </div>
+      )}
 
       <div id="answer-box">
         {articles.map((article) => (
@@ -577,26 +608,49 @@ function App(): JSX.Element {
               {inputMode === 'stance' ? (
                 <>
                   <p className="modal-copy">
-                    <strong>Stage 1:</strong> TF-IDF retrieves the top {rerankTopK}{' '}
-                    {rerankTopK === 1 ? 'article' : 'articles'} that are most relevant to your topic.
+                    <strong>Stage 1: Topic relevance.</strong> We first identify articles that are
+                    relevant to your topic. To do this, we compute the similarity between your
+                    input and each Guardian article using TF-IDF (Term Frequency-Inverse Document
+                    Frequency) representations combined with cosine similarity. This helps us find
+                    articles that discuss similar themes and keywords.
                   </p>
                   <p className="modal-copy">
-                    <strong>Stage 2:</strong> NLI reranks those {rerankTopK}{' '}
-                    {rerankTopK === 1 ? 'article' : 'articles'} by comparing your opinion with each
-                    article&apos;s LLM-coded central claim to estimate whether the article supports,
-                    contradicts, or stays neutral toward your stance.
+                    <strong>Stage 2: Stance relevance.</strong> From the top {rerankTopK}{' '}
+                    {rerankTopK === 1 ? 'article' : 'articles'} identified in Stage 1, we then rank
+                    them based on how they relate to your opinion. We use a Natural Language
+                    Inference (NLI) model, DeBERTa (Decoding-enhanced BERT with disentangled
+                    attention), to compare your claim with each article&apos;s central argument
+                    (extracted using an LLM). The model estimates whether each article supports,
+                    contradicts, or is neutral toward your stance, and we rank the results
+                    accordingly.
                   </p>
                 </>
               ) : (
                 <>
                   <p className="modal-copy">
-                    <strong>Stage 1:</strong> the essay is sentence-split and each sentence is scored
-                    for “claimness” against the hypothesis that it is the author&apos;s main claim.
+                    <strong>Stage 1: Essay thesis detection.</strong> We first split your essay into
+                    individual sentences using our sentence segmentation pipeline. Then we use a
+                    DeBERTa Natural Language Inference (NLI) model to compare each sentence against
+                    the hypothesis, &ldquo;This sentence is the author&apos;s main claim.&rdquo; This gives
+                    each sentence a claimness score, and we present the top options so you can
+                    choose the sentence that best represents your essay&apos;s central thesis.
                   </p>
                   <p className="modal-copy">
-                    <strong>Stage 2:</strong> you choose the best thesis candidate, then the whole essay
-                    retrieves top TF-IDF matches and the selected thesis sentence reranks those articles
-                    with NLI against each article&apos;s LLM-coded central claim.
+                    <strong>Stage 2: Topic relevance.</strong> After you select the best thesis
+                    sentence, we identify articles that are relevant to your essay as a whole. To
+                    do this, we compute the similarity between your full essay and each Guardian
+                    article using TF-IDF (Term Frequency-Inverse Document Frequency)
+                    representations combined with cosine similarity. This surfaces articles that
+                    discuss similar themes, issues, and vocabulary.
+                  </p>
+                  <p className="modal-copy">
+                    <strong>Stage 3: Thesis relevance.</strong> From the top {rerankTopK}{' '}
+                    {rerankTopK === 1 ? 'article' : 'articles'} identified in Stage 2, we then rank
+                    them based on how they relate to your selected thesis. We use a DeBERTa NLI
+                    model to compare your chosen thesis sentence with each article&apos;s central
+                    argument, which was extracted beforehand using an LLM. The model estimates
+                    whether each article supports, contradicts, or is neutral toward your thesis,
+                    and we rank the results accordingly.
                   </p>
                 </>
               )}
