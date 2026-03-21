@@ -5,6 +5,68 @@ import Chat from './Chat'
 
 type InputMode = 'stance' | 'essay'
 
+type ConfigResponse = {
+  use_llm: boolean
+}
+
+type ApiErrorPayload = {
+  error?: string
+}
+
+const summarizeApiText = (value: string, maxLength = 180): string => (
+  value.replace(/\s+/g, ' ').trim().slice(0, maxLength)
+)
+
+const readApiJson = async <T,>(response: Response): Promise<T> => {
+  const rawText = await response.text()
+  let payload: unknown = null
+
+  if (rawText) {
+    try {
+      payload = JSON.parse(rawText)
+    } catch {
+      payload = rawText
+    }
+  }
+
+  const apiError = (
+    payload &&
+    typeof payload === 'object' &&
+    'error' in payload &&
+    typeof (payload as ApiErrorPayload).error === 'string'
+  )
+    ? (payload as ApiErrorPayload).error
+    : null
+
+  if (!response.ok) {
+    if (apiError) {
+      throw new Error(apiError)
+    }
+
+    if (typeof payload === 'string') {
+      const snippet = summarizeApiText(payload)
+      if (snippet.startsWith('<')) {
+        throw new Error(
+          `The server returned an HTML error page (${response.status}) instead of JSON. Check the server logs or try a smaller PDF.`,
+        )
+      }
+      throw new Error(snippet || `Request failed (${response.status})`)
+    }
+
+    throw new Error(`Request failed (${response.status})`)
+  }
+
+  if (typeof payload === 'string') {
+    const snippet = summarizeApiText(payload)
+    if (snippet.startsWith('<')) {
+      throw new Error('The server returned HTML instead of JSON.')
+    }
+    throw new Error(snippet || 'The server returned text instead of JSON.')
+  }
+
+  return (payload ?? null) as T
+}
+
 function App(): JSX.Element {
   const [useLlm, setUseLlm] = useState<boolean | null>(null)
   const [inputMode, setInputMode] = useState<InputMode>('stance')
@@ -27,7 +89,31 @@ function App(): JSX.Element {
   const essayOptionsRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    fetch('/api/config').then(r => r.json()).then(data => setUseLlm(data.use_llm))
+    let isActive = true
+
+    const loadConfig = async (): Promise<void> => {
+      try {
+        const response = await fetch('/api/config')
+        const data = await readApiJson<ConfigResponse>(response)
+        if (!isActive) return
+        setUseLlm(Boolean(data.use_llm))
+      } catch (configError) {
+        console.error('Config request failed:', configError)
+        if (!isActive) return
+        setUseLlm(false)
+        setError(
+          configError instanceof Error
+            ? configError.message
+            : 'Failed to load app configuration.',
+        )
+      }
+    }
+
+    void loadConfig()
+
+    return () => {
+      isActive = false
+    }
   }, [])
 
   useEffect(() => {
@@ -131,10 +217,7 @@ function App(): JSX.Element {
         }),
       })
 
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data?.error || `Request failed (${response.status})`)
-      }
+      const data = await readApiJson<Article[]>(response)
       setArticles(Array.isArray(data) ? data : [])
     } catch (fetchError) {
       console.error('Search request failed:', fetchError)
@@ -165,10 +248,7 @@ function App(): JSX.Element {
         method: 'POST',
         body: formData,
       })
-      const data: EssayClaimCandidateResponse & { error?: string } = await response.json()
-      if (!response.ok) {
-        throw new Error(data?.error || `Request failed (${response.status})`)
-      }
+      const data = await readApiJson<EssayClaimCandidateResponse>(response)
 
       setEssayPreparedText(data.essay_text || trimmedEssayText)
       setEssayCandidates(data.candidates || [])
@@ -210,10 +290,7 @@ function App(): JSX.Element {
         }),
       })
 
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data?.error || `Request failed (${response.status})`)
-      }
+      const data = await readApiJson<Article[]>(response)
       setArticles(Array.isArray(data) ? data : [])
     } catch (fetchError) {
       console.error('Essay search failed:', fetchError)

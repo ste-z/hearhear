@@ -16,8 +16,12 @@ FROM python:3.10-slim AS python-deps
 
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
+ENV HF_HOME=/opt/huggingface
+ENV TRANSFORMERS_CACHE=/opt/huggingface
+
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN python -c "from transformers import AutoModelForSequenceClassification, AutoTokenizer; model='cross-encoder/nli-deberta-v3-small'; AutoTokenizer.from_pretrained(model); AutoModelForSequenceClassification.from_pretrained(model)"
 
 # Stage 3: Final runtime image
 FROM python:3.10-slim
@@ -26,10 +30,14 @@ RUN apt-get update && apt-get install -y git
 
 ENV CONTAINER_HOME=/var/www
 ENV PYTHONPATH=$CONTAINER_HOME:$CONTAINER_HOME/src
+ENV HF_HOME=/opt/huggingface
+ENV TRANSFORMERS_CACHE=/opt/huggingface
+ENV TRANSFORMERS_OFFLINE=1
 
 WORKDIR $CONTAINER_HOME
 
 COPY --from=python-deps /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+COPY --from=python-deps /opt/huggingface /opt/huggingface
 COPY src/ $CONTAINER_HOME/src/
 COPY backend/ $CONTAINER_HOME/backend/
 COPY --from=frontend-build /app/frontend/dist $CONTAINER_HOME/frontend/dist

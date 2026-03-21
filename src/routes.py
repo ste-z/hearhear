@@ -6,6 +6,7 @@ To enable AI chat, set USE_LLM = True below. See llm_routes.py for AI code.
 import os
 from flask import send_from_directory, request, jsonify
 from sqlalchemy import or_
+from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from models import GuardianArticle
 from search_helpers import build_matches, build_vector_processor, serialize_article
 from io import BytesIO
@@ -247,6 +248,23 @@ def _extract_request_context():
     }
 
 
+def _api_error_response(exc):
+    if isinstance(exc, RequestEntityTooLarge):
+        return jsonify({"error": "Uploaded file is too large. Try a smaller PDF."}), 413
+
+    if isinstance(exc, ValueError):
+        return jsonify({"error": str(exc)}), 400
+
+    if isinstance(exc, RuntimeError):
+        return jsonify({"error": str(exc)}), 500
+
+    if isinstance(exc, HTTPException):
+        message = str(exc.description or exc.name or "Request failed.")
+        return jsonify({"error": message}), int(exc.code or 500)
+
+    return jsonify({"error": "Unexpected server error while processing the request."}), 500
+
+
 def register_routes(app):
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')
@@ -263,9 +281,8 @@ def register_routes(app):
     @app.route("/api/articles", methods=["GET", "POST"])
     @app.route("/api/articles/search", methods=["POST"])
     def articles_search():
-        context = _extract_request_context()
-
         try:
+            context = _extract_request_context()
             if context["mode"] == "stance":
                 results = stance_search(
                     topic=context["topic"],
@@ -286,26 +303,23 @@ def register_routes(app):
             else:
                 results = json_search(context["essay_text"])
             return jsonify(results)
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
-        except RuntimeError as exc:
-            return jsonify({"error": str(exc)}), 500
+        except Exception as exc:
+            app.logger.exception("API request to /api/articles failed")
+            return _api_error_response(exc)
 
     @app.route("/api/essay/claim-candidates", methods=["POST"])
     def essay_claim_candidates_route():
-        context = _extract_request_context()
-
         try:
+            context = _extract_request_context()
             return jsonify(
                 essay_claim_candidates(
                     essay_text=context["essay_text"],
                     top_n=context["candidate_top_n"],
                 )
             )
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
-        except RuntimeError as exc:
-            return jsonify({"error": str(exc)}), 500
+        except Exception as exc:
+            app.logger.exception("API request to /api/essay/claim-candidates failed")
+            return _api_error_response(exc)
 
     if USE_LLM:
         from llm_routes import register_chat_route

@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 
 
@@ -40,8 +41,17 @@ def load_nli_bundle(model_name=MODEL_NAME):
     torch = _import_torch()
     AutoModelForSequenceClassification, AutoTokenizer = _import_transformers()
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSequenceClassification.from_pretrained(model_name)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSequenceClassification.from_pretrained(model_name)
+    except OSError as exc:
+        cache_dir = os.getenv("HF_HOME") or os.getenv("TRANSFORMERS_CACHE")
+        cache_note = f" Cache directory: {cache_dir}." if cache_dir else ""
+        raise RuntimeError(
+            "The NLI model could not be loaded. Ensure the Hugging Face files are "
+            f"available in the deployment image or that the runtime can download them.{cache_note}"
+        ) from exc
+
     device = _default_device(torch)
     model.to(device)
     model.eval()
