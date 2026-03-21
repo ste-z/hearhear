@@ -19,6 +19,7 @@ function App(): JSX.Element {
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [isAboutOpen, setIsAboutOpen] = useState<boolean>(false)
+  const [activeAboutTab, setActiveAboutTab] = useState<InputMode>('stance')
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
   const [essayCandidates, setEssayCandidates] = useState<EssayClaimCandidate[]>([])
   const [essayPreparedText, setEssayPreparedText] = useState<string>('')
@@ -233,6 +234,11 @@ function App(): JSX.Element {
     })
   }
 
+  const openAbout = (tab: InputMode = inputMode): void => {
+    setActiveAboutTab(tab)
+    setIsAboutOpen(true)
+  }
+
   const resultsLabel = useMemo(() => {
     if (inputMode === 'stance') {
       return articles.length > 0 ? 'Top matches by topic and claim-level stance alignment' : ''
@@ -243,7 +249,6 @@ function App(): JSX.Element {
     return ''
   }, [articles.length, essayCandidates.length, inputMode])
 
-  const aboutTitle = inputMode === 'stance' ? 'Topic and Stance Search' : 'Essay-guided search'
   const showResultsHeader = Boolean(resultsLabel || loading || error)
   const showScoreGrid = (article: Article): boolean => (
     article.combined_score !== undefined ||
@@ -261,7 +266,7 @@ function App(): JSX.Element {
           <button
             type="button"
             className="top-nav-button"
-            onClick={() => setIsAboutOpen(true)}
+            onClick={() => openAbout()}
           >
             About
           </button>
@@ -618,12 +623,12 @@ function App(): JSX.Element {
             className="modal-card about-modal"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="about-reranking-title"
+            aria-labelledby="about-modal-title"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="modal-header">
               <div>
-                <h3 id="about-reranking-title">{aboutTitle}</h3>
+                <h3 id="about-modal-title">About</h3>
               </div>
               <button
                 type="button"
@@ -634,21 +639,50 @@ function App(): JSX.Element {
                 Close
               </button>
             </div>
+            <div className="about-tablist" role="tablist" aria-label="About search modes">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeAboutTab === 'stance'}
+                className={`about-tab ${activeAboutTab === 'stance' ? 'active' : ''}`}
+                onClick={() => setActiveAboutTab('stance')}
+              >
+                Topic and Stance Search
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeAboutTab === 'essay'}
+                className={`about-tab ${activeAboutTab === 'essay' ? 'active' : ''}`}
+                onClick={() => setActiveAboutTab('essay')}
+              >
+                Essay-Guided Search
+              </button>
+            </div>
             <div className="modal-stage-list">
-              {inputMode === 'stance' ? (
+              {activeAboutTab === 'stance' ? (
                 <>
                   <section className="about-section">
                     <p className="about-section-label">Stage 1</p>
                     <p className="modal-copy">
-                      Find articles that are relevant to your topic using TF-IDF and cosine
-                      similarity over the Guardian corpus.
+                      <strong>Stage 1: Topic relevance.</strong> We first identify articles that are
+                      relevant to your topic. To do this, we compute the similarity between your
+                      input and each Guardian article using TF-IDF (Term Frequency-Inverse Document
+                      Frequency) representations combined with cosine similarity. This helps us find
+                      articles that discuss similar themes and keywords.
                     </p>
                   </section>
                   <section className="about-section">
                     <p className="about-section-label">Stage 2</p>
                     <p className="modal-copy">
-                      Re-rank the top {rerankTopK} {rerankTopK === 1 ? 'article' : 'articles'} by
-                      stance using DeBERTa NLI against each article&apos;s extracted central claim.
+                      <strong>Stage 2: Stance relevance.</strong> From the top {rerankTopK}{' '}
+                      {rerankTopK === 1 ? 'article' : 'articles'} identified in Stage 1, we then rank
+                      them based on how they relate to your opinion. We use a Natural Language
+                      Inference (NLI) model, DeBERTa (Decoding-enhanced BERT with disentangled
+                      attention), to compare your claim with each article&apos;s central argument
+                      (extracted using an LLM). The model estimates whether each article supports,
+                      contradicts, or is neutral toward your stance, and we rank the results
+                      accordingly.
                     </p>
                   </section>
                 </>
@@ -657,22 +691,35 @@ function App(): JSX.Element {
                   <section className="about-section">
                     <p className="about-section-label">Stage 1</p>
                     <p className="modal-copy">
-                      Split the essay into sentences and score which one looks most like the main
-                      thesis using DeBERTa NLI.
+                      <strong>Stage 1: Essay thesis detection.</strong> We first split your essay into
+                      individual sentences using our sentence segmentation pipeline. Then we use a
+                      DeBERTa Natural Language Inference (NLI) model to compare each sentence against
+                      the hypothesis, &ldquo;This sentence is the author&apos;s main claim.&rdquo; This gives
+                      each sentence a claimness score, and we present the top options so you can
+                      choose the sentence that best represents your essay&apos;s central thesis.
                     </p>
                   </section>
                   <section className="about-section">
                     <p className="about-section-label">Stage 2</p>
                     <p className="modal-copy">
-                      Match the full essay to relevant Guardian articles with TF-IDF and cosine
-                      similarity.
+                      <strong>Stage 2: Topic relevance.</strong> After you select the best thesis
+                      sentence, we identify articles that are relevant to your essay as a whole. To
+                      do this, we compute the similarity between your full essay and each Guardian
+                      article using TF-IDF (Term Frequency-Inverse Document Frequency)
+                      representations combined with cosine similarity. This surfaces articles that
+                      discuss similar themes, issues, and vocabulary.
                     </p>
                   </section>
                   <section className="about-section">
                     <p className="about-section-label">Stage 3</p>
                     <p className="modal-copy">
-                      Re-rank the top {rerankTopK} {rerankTopK === 1 ? 'article' : 'articles'} by
-                      comparing your selected thesis to each article&apos;s extracted central claim.
+                      <strong>Stage 3: Thesis relevance.</strong> From the top {rerankTopK}{' '}
+                      {rerankTopK === 1 ? 'article' : 'articles'} identified in Stage 2, we then rank
+                      them based on how they relate to your selected thesis. We use a DeBERTa NLI
+                      model to compare your chosen thesis sentence with each article&apos;s central
+                      argument, which was extracted beforehand using an LLM. The model estimates
+                      whether each article supports, contradicts, or is neutral toward your thesis,
+                      and we rank the results accordingly.
                     </p>
                   </section>
                 </>
