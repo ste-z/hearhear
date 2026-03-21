@@ -173,7 +173,7 @@ function App(): JSX.Element {
       setEssayCandidates(data.candidates || [])
       setSelectedEssayCandidateId(data.candidates?.[0]?.sentence_id || null)
       if (!data.candidates || data.candidates.length === 0) {
-        setError('No thesis options were found. Try a longer essay or cleaner PDF text.')
+        setError('No thesis were found. Try a longer essay or cleaner PDF text.')
       }
     } catch (fetchError) {
       console.error('Essay analysis failed:', fetchError)
@@ -240,10 +240,7 @@ function App(): JSX.Element {
     if (articles.length > 0) {
       return 'Essay matches reranked by your selected thesis sentence'
     }
-    if (essayCandidates.length > 0) {
-      return 'Choose the sentence that best states your essay’s central thesis'
-    }
-    return 'Paste or upload an essay, then identify its central thesis before searching'
+    return ''
   }, [articles.length, essayCandidates.length, inputMode])
 
   const aboutTitle = inputMode === 'stance' ? 'Topic and Stance Search' : 'Essay-guided search'
@@ -258,6 +255,19 @@ function App(): JSX.Element {
 
   return (
     <div className={`full-body-container ${useLlm ? 'llm-mode' : ''}`}>
+      <div className="top-nav" aria-label="Page navigation">
+        <div className="top-nav-spacer" aria-hidden="true" />
+        <div className="top-nav-actions">
+          <button
+            type="button"
+            className="top-nav-button"
+            onClick={() => setIsAboutOpen(true)}
+          >
+            About
+          </button>
+        </div>
+      </div>
+
       <div className="top-text">
         <div className="hero-copy">
           <h1>hear! hear!</h1>
@@ -291,7 +301,7 @@ function App(): JSX.Element {
                 <span className="stance-prefix">Regarding</span>
                 <input
                   type="text"
-                  placeholder="Climate protest, immigration, housing policy..."
+                  placeholder="Immigration"
                   value={topic}
                   onChange={(e) => setTopic(e.target.value)}
                   aria-label="Topic"
@@ -300,7 +310,7 @@ function App(): JSX.Element {
               <label className="stance-prompt-line opinion-line">
                 <span className="stance-prefix">I believe</span>
                 <textarea
-                  placeholder="'Governments should welcome refugees.', 'Climate protests are effective,' 'Housing policy needs reform' ..."
+                  placeholder="Governments should welcome refugees."
                   value={opinion}
                   onChange={(e) => setOpinion(e.target.value)}
                   rows={4}
@@ -380,7 +390,7 @@ function App(): JSX.Element {
                 onClick={handleAnalyzeEssay}
                 disabled={!canAnalyzeEssay || loading}
               >
-                Find thesis options
+                Extract thesis
               </button>
             </div>
 
@@ -476,16 +486,9 @@ function App(): JSX.Element {
           <button
             type="button"
             className="utility-pill"
-            onClick={() => setIsAboutOpen(true)}
-          >
-            About
-          </button>
-          <button
-            type="button"
-            className="utility-pill"
             onClick={() => setIsSettingsOpen(true)}
           >
-            Search settings
+            Settings
           </button>
         </div>
       </div>
@@ -493,7 +496,7 @@ function App(): JSX.Element {
       {showResultsHeader && (
         <div className="results-header">
           {resultsLabel && <p className="results-label">{resultsLabel}</p>}
-          {loading && <p className="results-status">Working...</p>}
+          {loading && <p className="results-status">Thinking...</p>}
           {error && <p className="results-status error">{error}</p>}
         </div>
       )}
@@ -612,7 +615,7 @@ function App(): JSX.Element {
           role="presentation"
         >
           <div
-            className="modal-card"
+            className="modal-card about-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="about-reranking-title"
@@ -620,7 +623,6 @@ function App(): JSX.Element {
           >
             <div className="modal-header">
               <div>
-                <p className="modal-eyebrow">About</p>
                 <h3 id="about-reranking-title">{aboutTitle}</h3>
               </div>
               <button
@@ -635,51 +637,44 @@ function App(): JSX.Element {
             <div className="modal-stage-list">
               {inputMode === 'stance' ? (
                 <>
-                  <p className="modal-copy">
-                    <strong>Stage 1: Topic relevance.</strong> We first identify articles that are
-                    relevant to your topic. To do this, we compute the similarity between your
-                    input and each Guardian article using TF-IDF (Term Frequency-Inverse Document
-                    Frequency) representations combined with cosine similarity. This helps us find
-                    articles that discuss similar themes and keywords.
-                  </p>
-                  <p className="modal-copy">
-                    <strong>Stage 2: Stance relevance.</strong> From the top {rerankTopK}{' '}
-                    {rerankTopK === 1 ? 'article' : 'articles'} identified in Stage 1, we then rank
-                    them based on how they relate to your opinion. We use a Natural Language
-                    Inference (NLI) model, DeBERTa (Decoding-enhanced BERT with disentangled
-                    attention), to compare your claim with each article&apos;s central argument
-                    (extracted using an LLM). The model estimates whether each article supports,
-                    contradicts, or is neutral toward your stance, and we rank the results
-                    accordingly.
-                  </p>
+                  <section className="about-section">
+                    <p className="about-section-label">Stage 1</p>
+                    <p className="modal-copy">
+                      Find articles that are relevant to your topic using TF-IDF and cosine
+                      similarity over the Guardian corpus.
+                    </p>
+                  </section>
+                  <section className="about-section">
+                    <p className="about-section-label">Stage 2</p>
+                    <p className="modal-copy">
+                      Re-rank the top {rerankTopK} {rerankTopK === 1 ? 'article' : 'articles'} by
+                      stance using DeBERTa NLI against each article&apos;s extracted central claim.
+                    </p>
+                  </section>
                 </>
               ) : (
                 <>
-                  <p className="modal-copy">
-                    <strong>Stage 1: Essay thesis detection.</strong> We first split your essay into
-                    individual sentences using our sentence segmentation pipeline. Then we use a
-                    DeBERTa Natural Language Inference (NLI) model to compare each sentence against
-                    the hypothesis, &ldquo;This sentence is the author&apos;s main claim.&rdquo; This gives
-                    each sentence a claimness score, and we present the top options so you can
-                    choose the sentence that best represents your essay&apos;s central thesis.
-                  </p>
-                  <p className="modal-copy">
-                    <strong>Stage 2: Topic relevance.</strong> After you select the best thesis
-                    sentence, we identify articles that are relevant to your essay as a whole. To
-                    do this, we compute the similarity between your full essay and each Guardian
-                    article using TF-IDF (Term Frequency-Inverse Document Frequency)
-                    representations combined with cosine similarity. This surfaces articles that
-                    discuss similar themes, issues, and vocabulary.
-                  </p>
-                  <p className="modal-copy">
-                    <strong>Stage 3: Thesis relevance.</strong> From the top {rerankTopK}{' '}
-                    {rerankTopK === 1 ? 'article' : 'articles'} identified in Stage 2, we then rank
-                    them based on how they relate to your selected thesis. We use a DeBERTa NLI
-                    model to compare your chosen thesis sentence with each article&apos;s central
-                    argument, which was extracted beforehand using an LLM. The model estimates
-                    whether each article supports, contradicts, or is neutral toward your thesis,
-                    and we rank the results accordingly.
-                  </p>
+                  <section className="about-section">
+                    <p className="about-section-label">Stage 1</p>
+                    <p className="modal-copy">
+                      Split the essay into sentences and score which one looks most like the main
+                      thesis using DeBERTa NLI.
+                    </p>
+                  </section>
+                  <section className="about-section">
+                    <p className="about-section-label">Stage 2</p>
+                    <p className="modal-copy">
+                      Match the full essay to relevant Guardian articles with TF-IDF and cosine
+                      similarity.
+                    </p>
+                  </section>
+                  <section className="about-section">
+                    <p className="about-section-label">Stage 3</p>
+                    <p className="modal-copy">
+                      Re-rank the top {rerankTopK} {rerankTopK === 1 ? 'article' : 'articles'} by
+                      comparing your selected thesis to each article&apos;s extracted central claim.
+                    </p>
+                  </section>
                 </>
               )}
             </div>
