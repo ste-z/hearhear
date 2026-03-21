@@ -1,0 +1,1 @@
+{"index_name": "guardian_tfidf", "saved_at_utc": "2026-03-20T07:28:55.485242+00:00", "n_docs": 9338, "n_terms": 102299, "id_column": "id", "text_column": "body_text", "has_articles": true, "vectorizer_class": "TfidfVectorizer", "db_row_count": 9338, "source_db_path": "instance/data.db"}

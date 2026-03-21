@@ -1,8 +1,8 @@
 from functools import lru_cache
 
 
-MODEL_NAME = "cross-encoder/nli-deberta-v3-base"
-DEFAULT_BATCH_SIZE = 16
+MODEL_NAME = "cross-encoder/nli-deberta-v3-small"
+DEFAULT_BATCH_SIZE = 10
 DEFAULT_MAX_LENGTH = 512
 CLAIMNESS_HYPOTHESIS = "This sentence is the author's main claim."
 
