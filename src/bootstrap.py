@@ -6,7 +6,7 @@ from backend.data_import import load_and_clean_guardian_years
 from models import GuardianArticle, db
 
 
-DEFAULT_YEARS = set(range(2024, 2026))
+DEFAULT_YEARS = set(range(2010, 2026))
 DEFAULT_MIN_BODY_TEXT_CHARS = 1000
 DEFAULT_BATCH_SIZE = 500
 
