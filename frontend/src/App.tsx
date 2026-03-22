@@ -442,11 +442,20 @@ function App(): JSX.Element {
     if (typeof window === 'undefined') return
     if (!hasSubmittedSearch) return
 
+    let secondFrameId = 0
+
     const frameId = window.requestAnimationFrame(() => {
-      scrollToNode(resultsSectionRef.current)
+      secondFrameId = window.requestAnimationFrame(() => {
+        scrollToNode(resultsSectionRef.current)
+      })
     })
 
-    return () => window.cancelAnimationFrame(frameId)
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      if (secondFrameId) {
+        window.cancelAnimationFrame(secondFrameId)
+      }
+    }
   }, [hasSubmittedSearch])
 
   const trimmedEssayText = searchTerm.trim()
@@ -520,9 +529,14 @@ function App(): JSX.Element {
   }
 
   const scrollToNode = (node: HTMLDivElement | null): void => {
-    node?.scrollIntoView({
+    if (typeof window === 'undefined' || !node) return
+
+    const target = node.querySelector<HTMLElement>('.results-paper') ?? node
+    const targetTop = window.scrollY + target.getBoundingClientRect().top - 16
+
+    window.scrollTo({
+      top: Math.max(0, targetTop),
       behavior: 'smooth',
-      block: 'start',
     })
   }
 
@@ -580,7 +594,6 @@ function App(): JSX.Element {
     if (typeof document !== 'undefined') {
       document.body.style.overflow = ''
     }
-    scrollToNode(resultsSectionRef.current)
     setLoading(true)
     setError(null)
     setArticles([])
@@ -657,7 +670,6 @@ function App(): JSX.Element {
     if (typeof document !== 'undefined') {
       document.body.style.overflow = ''
     }
-    scrollToNode(resultsSectionRef.current)
     setLoading(true)
     setError(null)
 
@@ -868,7 +880,7 @@ function App(): JSX.Element {
                       <span className="essay-progress-number">1</span>
                       <div className="essay-progress-copy">
                         <span className="essay-progress-title">Add your essay</span>
-                        <span className="essay-progress-note">Paste text or bring in a PDF.</span>
+                        <span className="essay-progress-note">Paste text or import from a PDF.</span>
                       </div>
                     </button>
 
@@ -990,7 +1002,7 @@ function App(): JSX.Element {
                         className={`essay-upload-trigger ${isImportingPdf ? 'disabled' : ''}`}
                         aria-disabled={isImportingPdf}
                       >
-                        {isImportingPdf ? 'reading PDF...' : (importedPdfName ? 'replace with another PDF' : 'fill editor from PDF')}
+                        {isImportingPdf ? 'reading PDF...' : (importedPdfName ? 'replace with another PDF' : 'Import from PDF')}
                       </label>
                       <input
                         id="pdf-upload"
@@ -1023,7 +1035,6 @@ function App(): JSX.Element {
                     <div className="essay-option-strip-header">
                       <p className="essay-option-strip-title">Thesis options</p>
                       <div className="essay-option-strip-controls">
-                        <p className="essay-option-strip-note">Scroll sideways to compare them.</p>
                         <div className="essay-option-arrow-group">
                           <button
                             type="button"
@@ -1079,7 +1090,7 @@ function App(): JSX.Element {
                       onClick={handleSubmitEssay}
                       disabled={!canSubmitEssay || loading}
                     >
-                      {(loading && essayWorkflowStep === 2) ? 'Searching...' : 'Search with selected thesis'}
+                      {(loading && essayWorkflowStep === 2) ? 'Searching...' : 'Search'}
                     </button>
                   </div>
                 </div>
