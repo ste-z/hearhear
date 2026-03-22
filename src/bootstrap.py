@@ -10,6 +10,7 @@ from backend.claim_store import (
     iter_claim_records,
 )
 from backend.data_import import load_and_clean_guardian_years
+from backend.runtime_debug import log_runtime_event
 from models import GuardianArticle, GuardianArticleClaim, db
 
 
@@ -306,6 +307,42 @@ def _seed_guardian_articles(
     return "raw_source"
 
 
+def _warm_runtime_assets():
+    try:
+        from search_helpers import build_vector_processor
+
+        log_runtime_event("startup_warm.vector_index_start")
+        vector_index = build_vector_processor(force_rebuild=False)
+        log_runtime_event(
+            "startup_warm.vector_index_done",
+            n_docs=getattr(vector_index, "n_docs", None),
+            n_terms=getattr(vector_index, "n_terms", None),
+        )
+        print("TF-IDF search index loaded into memory.")
+    except Exception as exc:
+        print(
+            "Warning: TF-IDF warm-up failed; the first search may still cold-start. "
+            f"Details: {exc}"
+        )
+
+    try:
+        from backend.nli_processor import load_nli_bundle
+
+        log_runtime_event("startup_warm.nli_start")
+        bundle = load_nli_bundle()
+        log_runtime_event(
+            "startup_warm.nli_done",
+            model_name=bundle.get("model_name"),
+            device=str(bundle.get("device")),
+        )
+        print("NLI model loaded into memory.")
+    except Exception as exc:
+        print(
+            "Warning: NLI warm-up failed; the first stance rerank may still cold-start. "
+            f"Details: {exc}"
+        )
+
+
 def initialize_offline_data_pipeline(
     app,
     project_root,
@@ -377,3 +414,5 @@ def initialize_offline_data_pipeline(
             print("TF-IDF artifacts are ready.")
         except Exception as exc:
             print(f"Warning: TF-IDF precompute failed; search may fail until rebuilt. Details: {exc}")
+
+        _warm_runtime_assets()
