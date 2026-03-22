@@ -14,7 +14,7 @@ from backend.runtime_debug import log_runtime_event
 from models import GuardianArticle, GuardianArticleClaim, db
 
 
-DEFAULT_YEARS = set(range(2010, 2026))
+DEFAULT_YEARS = set(range(2015, 2026))
 DEFAULT_MIN_BODY_TEXT_CHARS = 1000
 DEFAULT_BATCH_SIZE = 500
 DEFAULT_CLAIM_BATCH_SIZE = 500
