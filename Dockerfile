@@ -27,12 +27,13 @@ RUN python -c "from transformers import AutoModelForSequenceClassification, Auto
 FROM python-deps AS backend-artifacts
 
 ENV CONTAINER_HOME=/var/www
+ENV PYTHONPATH=$CONTAINER_HOME:$CONTAINER_HOME/src
 
 WORKDIR $CONTAINER_HOME
 
 COPY backend/ $CONTAINER_HOME/backend/
 
-RUN python backend/text_preprocess.py --ensure-postings
+RUN python -m backend.text_preprocess --ensure-postings
 
 # Stage 4: Final runtime image
 FROM python:3.10-slim
