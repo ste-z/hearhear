@@ -18,6 +18,7 @@ DEFAULT_TFIDF_PARAMS = {
     "lowercase": True,
     "strip_accents": "unicode",
     "stop_words": "english",
+    "min_df": 2,
 }
 
 # Keep matrix chunks comfortably below the common 100 MB git hosting limit.
