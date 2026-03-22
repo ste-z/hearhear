@@ -10,6 +10,7 @@ from backend.data_import import (
     load_and_clean_guardian_years,
     normalize_guardian_article_columns,
 )
+from backend.runtime_debug import log_runtime_event
 from backend.text_processor import DEFAULT_TFIDF_PARAMS, VectorizedText
 
 
@@ -153,7 +154,19 @@ def preprocess_tfidf_index(
         raise FileNotFoundError(f"Database not found: {db_path}")
 
     db_row_count = _current_db_row_count(db_path)
+    log_runtime_event(
+        "tfidf_preprocess.start",
+        db_path=str(db_path),
+        index_name=index_name,
+        db_row_count=db_row_count,
+        force_rebuild=bool(force_rebuild),
+    )
     if not force_rebuild and _is_existing_index_fresh(index_dir, index_name, db_row_count):
+        log_runtime_event(
+            "tfidf_preprocess.up_to_date",
+            index_name=index_name,
+            db_row_count=db_row_count,
+        )
         return {
             "built": False,
             "reason": "up_to_date",
@@ -168,6 +181,11 @@ def preprocess_tfidf_index(
     else:
         articles = _load_guardian_articles_from_raw(years=_db_years(db_path))
         source_kind = "raw_csv"
+    log_runtime_event(
+        "tfidf_preprocess.source_ready",
+        source_kind=source_kind,
+        article_count=int(len(articles)),
+    )
 
     if articles.empty:
         raise ValueError("No guardian_articles rows found; cannot build TF-IDF index.")

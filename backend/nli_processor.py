@@ -1,6 +1,8 @@
 import os
 from functools import lru_cache
 
+from backend.runtime_debug import log_runtime_event
+
 
 MODEL_NAME = "cross-encoder/nli-deberta-v3-small"
 DEFAULT_BATCH_SIZE = 10
@@ -38,6 +40,7 @@ def _default_device(torch):
 
 @lru_cache(maxsize=1)
 def load_nli_bundle(model_name=MODEL_NAME):
+    log_runtime_event("nli_bundle.load_start", model_name=model_name)
     torch = _import_torch()
     AutoModelForSequenceClassification, AutoTokenizer = _import_transformers()
 
@@ -55,6 +58,11 @@ def load_nli_bundle(model_name=MODEL_NAME):
     device = _default_device(torch)
     model.to(device)
     model.eval()
+    log_runtime_event(
+        "nli_bundle.load_done",
+        model_name=model_name,
+        device=str(device),
+    )
 
     id2label = {
         int(idx): str(label).lower()
@@ -96,6 +104,13 @@ def score_nli_pairs(
     if not cleaned_premises or not cleaned_hypothesis:
         return []
 
+    log_runtime_event(
+        "nli_pairs.start",
+        premise_count=len(cleaned_premises),
+        hypothesis_chars=len(cleaned_hypothesis),
+        batch_size=int(batch_size),
+        max_length=int(max_length),
+    )
     bundle = load_nli_bundle(model_name=model_name)
     torch = bundle["torch"]
     tokenizer = bundle["tokenizer"]
@@ -104,9 +119,16 @@ def score_nli_pairs(
     label_map = bundle["label_map"]
 
     rows = []
-    for start_idx in range(0, len(cleaned_premises), int(batch_size)):
+    total_batches = (len(cleaned_premises) + int(batch_size) - 1) // int(batch_size)
+    for batch_idx, start_idx in enumerate(range(0, len(cleaned_premises), int(batch_size)), start=1):
         batch_premises = cleaned_premises[start_idx:start_idx + int(batch_size)]
         batch_hypotheses = [cleaned_hypothesis] * len(batch_premises)
+        log_runtime_event(
+            "nli_pairs.batch_start",
+            batch_index=batch_idx,
+            batch_total=total_batches,
+            batch_size=len(batch_premises),
+        )
         encoded = tokenizer(
             batch_premises,
             batch_hypotheses,
@@ -119,6 +141,11 @@ def score_nli_pairs(
 
         with torch.inference_mode():
             probs = torch.softmax(model(**encoded).logits, dim=-1).cpu().numpy()
+        log_runtime_event(
+            "nli_pairs.batch_done",
+            batch_index=batch_idx,
+            batch_total=total_batches,
+        )
 
         for row in probs:
             entailment_prob = float(row[label_map["entailment"]])
@@ -135,6 +162,7 @@ def score_nli_pairs(
                     ),
                 }
             )
+    log_runtime_event("nli_pairs.done", row_count=len(rows))
     return rows
 
 

@@ -3,6 +3,8 @@ import gzip
 from pathlib import Path
 from threading import Lock
 
+from backend.runtime_debug import log_runtime_event
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_BATCH_CLAIM_RESULTS_DIR = (
@@ -68,6 +70,7 @@ def load_claim_store(root_dir=None, force_reload=False):
         and _claim_store_fingerprint == fingerprint
     )
     if cache_ok:
+        log_runtime_event("claim_store.cache_hit", root_dir=str(resolved_root_dir))
         return _claim_store_cache
 
     with _claim_store_lock:
@@ -79,14 +82,26 @@ def load_claim_store(root_dir=None, force_reload=False):
             and _claim_store_fingerprint == fingerprint
         )
         if cache_ok:
+            log_runtime_event("claim_store.cache_hit_after_lock", root_dir=str(resolved_root_dir))
             return _claim_store_cache
 
+        log_runtime_event(
+            "claim_store.load_start",
+            root_dir=str(resolved_root_dir),
+            file_count=len(claim_files),
+        )
         by_article_id = {}
         source_count = 0
 
-        for path in claim_files:
+        for idx, path in enumerate(claim_files, start=1):
             source_count += 1
             source_mtime_ns = path.stat().st_mtime_ns
+            log_runtime_event(
+                "claim_store.file_start",
+                file_index=idx,
+                file_total=len(claim_files),
+                file_name=path.name,
+            )
             rows = _read_jsonl(path)
             for row in rows:
                 article_id = str(row.get("article_id") or "").strip()
@@ -105,6 +120,13 @@ def load_claim_store(root_dir=None, force_reload=False):
                 record["_source_path"] = str(path)
                 record["_source_mtime_ns"] = source_mtime_ns
                 by_article_id[article_id] = record
+            log_runtime_event(
+                "claim_store.file_done",
+                file_index=idx,
+                file_total=len(claim_files),
+                loaded_rows=len(rows),
+                distinct_articles=len(by_article_id),
+            )
 
         claim_store = {
             "by_article_id": by_article_id,
@@ -115,6 +137,11 @@ def load_claim_store(root_dir=None, force_reload=False):
         }
         _claim_store_cache = claim_store
         _claim_store_fingerprint = fingerprint
+        log_runtime_event(
+            "claim_store.load_done",
+            article_count=len(by_article_id),
+            source_count=source_count,
+        )
         return claim_store
 
 

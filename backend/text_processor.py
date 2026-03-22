@@ -11,6 +11,8 @@ from scipy.sparse import load_npz, save_npz
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from backend.runtime_debug import log_runtime_event
+
 
 DEFAULT_TFIDF_PARAMS = {
     "analyzer": "word",
@@ -218,9 +220,24 @@ class VectorizedText:
         if top_n <= 0:
             return []
 
+        log_runtime_event(
+            "vector_search.query_vector_start",
+            query_chars=len(str(query or "")),
+            top_n=top_n,
+            n_docs=self.n_docs,
+            n_terms=self.n_terms,
+        )
         query_vec = self.vectorizer.transform([str(query)])
+        log_runtime_event("vector_search.query_vector_done")
+        log_runtime_event("vector_search.cosine_similarity_start")
         cosine_similarities = cosine_similarity(query_vec, self.term_doc_matrix).ravel()
+        log_runtime_event(
+            "vector_search.cosine_similarity_done",
+            similarity_count=int(cosine_similarities.shape[0]),
+        )
+        log_runtime_event("vector_search.argsort_start")
         top_indices = np.argsort(cosine_similarities)[::-1][:top_n]
+        log_runtime_event("vector_search.argsort_done")
 
         results = []
         for idx in top_indices:
@@ -235,6 +252,7 @@ class VectorizedText:
                 payload = doc_id
             results.append((payload, score))
 
+        log_runtime_event("vector_search.results_done", result_count=len(results))
         return results
 
     @staticmethod
@@ -300,14 +318,41 @@ class VectorizedText:
     @classmethod
     def _load_term_doc_matrix(cls, matrix_path, chunk_paths):
         if chunk_paths:
+            log_runtime_event(
+                "vector_index.matrix_chunked_load_start",
+                chunk_count=len(chunk_paths),
+            )
             serialized = io.BytesIO()
-            for chunk_path in chunk_paths:
+            for idx, chunk_path in enumerate(chunk_paths, start=1):
+                log_runtime_event(
+                    "vector_index.matrix_chunk_read",
+                    chunk_index=idx,
+                    chunk_total=len(chunk_paths),
+                    chunk_name=chunk_path.name,
+                )
                 with open(chunk_path, "rb") as f:
                     serialized.write(f.read())
             serialized.seek(0)
-            return load_npz(serialized)
+            log_runtime_event("vector_index.matrix_chunked_load_npz_start")
+            matrix = load_npz(serialized)
+            log_runtime_event(
+                "vector_index.matrix_chunked_load_done",
+                n_rows=int(matrix.shape[0]),
+                n_cols=int(matrix.shape[1]),
+            )
+            return matrix
 
-        return load_npz(matrix_path)
+        log_runtime_event(
+            "vector_index.matrix_single_load_start",
+            matrix_name=Path(matrix_path).name,
+        )
+        matrix = load_npz(matrix_path)
+        log_runtime_event(
+            "vector_index.matrix_single_load_done",
+            n_rows=int(matrix.shape[0]),
+            n_cols=int(matrix.shape[1]),
+        )
+        return matrix
 
     def save(self, index_dir, index_name, extra_meta=None):
         paths = self.artifact_paths(index_dir, index_name)
@@ -391,6 +436,11 @@ class VectorizedText:
     def load(cls, index_dir, index_name):
         paths = cls.artifact_paths(index_dir, index_name)
         chunk_paths = cls.term_doc_matrix_chunk_paths(index_dir, index_name)
+        log_runtime_event(
+            "vector_index.load_start",
+            index_name=index_name,
+            chunk_count=len(chunk_paths),
+        )
 
         required = [
             paths["vectorizer"],
@@ -407,6 +457,7 @@ class VectorizedText:
 
         with open(paths["vectorizer"], "rb") as f:
             vectorizer = pickle.load(f)
+        log_runtime_event("vector_index.vectorizer_loaded")
         term_doc_matrix = cls._load_term_doc_matrix(
             matrix_path=paths["term_doc_matrix"],
             chunk_paths=chunk_paths,
@@ -414,8 +465,10 @@ class VectorizedText:
 
         with open(paths["terms"], "r", encoding="utf-8") as f:
             terms = json.load(f)
+        log_runtime_event("vector_index.terms_loaded", n_terms=len(terms))
         with open(paths["doc_ids"], "r", encoding="utf-8") as f:
             doc_ids = json.load(f)
+        log_runtime_event("vector_index.doc_ids_loaded", n_doc_ids=len(doc_ids))
 
         meta = {}
         if paths["meta"].exists():
@@ -424,7 +477,12 @@ class VectorizedText:
 
         articles = None
         if paths["articles"].exists():
+            log_runtime_event("vector_index.articles_load_start")
             articles = pd.read_pickle(paths["articles"])
+            log_runtime_event(
+                "vector_index.articles_load_done",
+                n_article_rows=int(len(articles)),
+            )
 
         id_column = meta.get("id_column", "id")
         text_column = meta.get("text_column", "body_text")
@@ -437,5 +495,11 @@ class VectorizedText:
             articles=articles,
             id_column=id_column,
             text_column=text_column,
+        )
+        log_runtime_event(
+            "vector_index.load_done",
+            index_name=index_name,
+            n_docs=instance.n_docs,
+            n_terms=instance.n_terms,
         )
         return instance, meta

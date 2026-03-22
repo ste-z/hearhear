@@ -4,6 +4,7 @@ from backend.nli_processor import (
     score_nli_pairs,
     stance_label_from_probs,
 )
+from backend.runtime_debug import log_runtime_event
 
 
 DEFAULT_TOPIC_WEIGHT = 0.5
@@ -110,9 +111,16 @@ def rerank_article_matches_by_statement(
     if not matches:
         return []
 
+    log_runtime_event(
+        "stance_rerank.start",
+        match_count=len(matches),
+        statement_chars=len(str(statement or "").strip()),
+        top_n=resolved_top_n,
+    )
     topic_weight, stance_weight = _resolve_weight_pair(topic_weight, stance_weight)
     query_statement = str(statement or "").strip()
     if not query_statement:
+        log_runtime_event("stance_rerank.no_statement")
         return matches
 
     indexed_claims = []
@@ -124,8 +132,14 @@ def rerank_article_matches_by_statement(
         if claim_summary:
             indexed_claims.append(idx)
             premises.append(claim_summary)
+    log_runtime_event(
+        "stance_rerank.claims_ready",
+        claim_premise_count=len(premises),
+        match_count=len(matches),
+    )
 
     nli_rows = score_nli_pairs(premises, query_statement) if premises else []
+    log_runtime_event("stance_rerank.nli_done", nli_row_count=len(nli_rows))
     nli_by_match_idx = dict(zip(indexed_claims, nli_rows))
     topic_scores = _normalize_topic_scores(matches)
 
@@ -184,6 +198,7 @@ def rerank_article_matches_by_statement(
     for rank_idx, match in enumerate(reranked, start=1):
         match["rerank_position"] = rank_idx
 
+    log_runtime_event("stance_rerank.done", reranked_count=len(reranked))
     return reranked
 
 

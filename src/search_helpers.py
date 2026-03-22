@@ -1,6 +1,7 @@
 from pathlib import Path
 from threading import Lock
 
+from backend.runtime_debug import log_runtime_event
 from flask import current_app, has_app_context
 
 from models import GuardianArticle
@@ -76,6 +77,10 @@ def build_vector_processor(force_rebuild=False):
         and _vector_index_doc_count == current_doc_count
     )
     if cache_ok:
+        log_runtime_event(
+            "vector_processor.cache_hit",
+            doc_count=current_doc_count,
+        )
         return _vector_index
 
     with _vector_index_lock:
@@ -86,6 +91,10 @@ def build_vector_processor(force_rebuild=False):
             and _vector_index_doc_count == current_doc_count
         )
         if cache_ok:
+            log_runtime_event(
+                "vector_processor.cache_hit_after_lock",
+                doc_count=current_doc_count,
+            )
             return _vector_index
 
         from backend.text_preprocess import (
@@ -95,12 +104,18 @@ def build_vector_processor(force_rebuild=False):
         )
         from backend.text_processor import VectorizedText
 
+        log_runtime_event(
+            "vector_processor.build_start",
+            doc_count=current_doc_count,
+            force_rebuild=bool(force_rebuild),
+        )
         preprocess_tfidf_index(
             db_path=_resolve_db_path(),
             index_dir=DEFAULT_INDEX_DIR,
             index_name=DEFAULT_INDEX_NAME,
             force_rebuild=force_rebuild,
         )
+        log_runtime_event("vector_processor.load_start", index_name=DEFAULT_INDEX_NAME)
         vector_index, _meta = VectorizedText.load(
             index_dir=DEFAULT_INDEX_DIR,
             index_name=DEFAULT_INDEX_NAME,
@@ -108,4 +123,10 @@ def build_vector_processor(force_rebuild=False):
 
         _vector_index = vector_index
         _vector_index_doc_count = current_doc_count
+        log_runtime_event(
+            "vector_processor.load_done",
+            doc_count=current_doc_count,
+            n_docs=getattr(vector_index, "n_docs", None),
+            n_terms=getattr(vector_index, "n_terms", None),
+        )
         return _vector_index

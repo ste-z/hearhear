@@ -7,6 +7,7 @@ import os
 from flask import send_from_directory, request, jsonify
 from sqlalchemy import or_
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
+from backend.runtime_debug import log_runtime_event
 from models import GuardianArticle
 from search_helpers import build_matches, build_vector_processor, serialize_article
 from io import BytesIO
@@ -45,11 +46,18 @@ def tfidf_cos_search(query, top_n=100):
     if len(query) < 3:
         return []
 
+    log_runtime_event(
+        "tfidf_cos_search.start",
+        query_chars=len(query),
+        top_n=int(top_n),
+    )
     processor = build_vector_processor()
     if processor is None:
+        log_runtime_event("tfidf_cos_search.no_processor")
         return []
 
     ranked = processor.search(query, top_n=top_n)
+    log_runtime_event("tfidf_cos_search.done", result_count=len(ranked))
     return build_matches(ranked)
 
 def json_search(query):
@@ -58,8 +66,10 @@ def json_search(query):
     Defaults to TF-IDF cosine search, falls back to keyword SQL search.
     """
     try:
+        log_runtime_event("json_search.try_tfidf", query_chars=len(str(query or "").strip()))
         return tfidf_cos_search(query)
     except Exception:
+        log_runtime_event("json_search.fallback_keyword")
         return keyword_search(query)
 
 
@@ -73,8 +83,15 @@ def stance_search(topic, opinion, topic_weight=0.5, stance_weight=0.5, top_n=20)
 
     topic_matches = tfidf_cos_search(topic_text, top_n=top_n)
     if not topic_matches:
+        log_runtime_event("stance_search.no_topic_matches")
         return []
 
+    log_runtime_event(
+        "stance_search.rerank_start",
+        topic_chars=len(topic_text),
+        opinion_chars=len(opinion_text),
+        top_n=int(top_n),
+    )
     return rerank_article_matches(
         article_matches=topic_matches,
         topic=topic_text,
@@ -123,10 +140,18 @@ def essay_search(
 
     topic_matches = tfidf_cos_search(resolved_essay, top_n=top_n)
     if not topic_matches:
+        log_runtime_event("essay_search.no_topic_matches")
         return []
     if not resolved_thesis:
+        log_runtime_event("essay_search.return_topic_matches", result_count=len(topic_matches))
         return topic_matches
 
+    log_runtime_event(
+        "essay_search.rerank_start",
+        essay_chars=len(resolved_essay),
+        thesis_chars=len(resolved_thesis),
+        top_n=int(top_n),
+    )
     reranked = rerank_article_matches_by_statement(
         article_matches=topic_matches,
         statement=resolved_thesis,
@@ -283,6 +308,14 @@ def register_routes(app):
     def articles_search():
         try:
             context = _extract_request_context()
+            log_runtime_event(
+                "articles_search.start",
+                mode=context["mode"],
+                essay_chars=len(context["essay_text"]),
+                topic_chars=len(context["topic"]),
+                opinion_chars=len(context["opinion"]),
+                rerank_top_k=context["rerank_top_k"],
+            )
             if context["mode"] == "stance":
                 results = stance_search(
                     topic=context["topic"],
@@ -302,6 +335,11 @@ def register_routes(app):
                 )
             else:
                 results = json_search(context["essay_text"])
+            log_runtime_event(
+                "articles_search.done",
+                mode=context["mode"],
+                result_count=len(results),
+            )
             return jsonify(results)
         except Exception as exc:
             app.logger.exception("API request to /api/articles failed")
@@ -311,6 +349,11 @@ def register_routes(app):
     def essay_claim_candidates_route():
         try:
             context = _extract_request_context()
+            log_runtime_event(
+                "essay_claim_candidates.start",
+                essay_chars=len(context["essay_text"]),
+                candidate_top_n=context["candidate_top_n"],
+            )
             return jsonify(
                 essay_claim_candidates(
                     essay_text=context["essay_text"],

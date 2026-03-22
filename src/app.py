@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 
@@ -38,6 +39,19 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialize database with app
 db.init_app(app)
+
+gunicorn_error_logger = logging.getLogger("gunicorn.error")
+runtime_logger = logging.getLogger("hearhear.runtime")
+if gunicorn_error_logger.handlers:
+    runtime_logger.handlers = gunicorn_error_logger.handlers
+    runtime_logger.setLevel(gunicorn_error_logger.level or logging.INFO)
+    runtime_logger.propagate = False
+elif not runtime_logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    runtime_logger.addHandler(handler)
+    runtime_logger.setLevel(logging.INFO)
+    runtime_logger.propagate = False
 
 # Register routes
 register_routes(app)
