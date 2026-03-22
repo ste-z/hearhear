@@ -321,6 +321,19 @@ def register_routes(app):
             app.logger.exception("API request to /api/essay/claim-candidates failed")
             return _api_error_response(exc)
 
+    @app.route("/api/essay/extract-text", methods=["POST"])
+    def essay_extract_text_route():
+        try:
+            essay_text = _extract_pdf_text(request.files.get("pdf"))
+            if not essay_text:
+                raise ValueError(
+                    "We couldn't read text from that PDF. Try another file or paste the essay manually."
+                )
+            return jsonify({"essay_text": essay_text})
+        except Exception as exc:
+            app.logger.exception("API request to /api/essay/extract-text failed")
+            return _api_error_response(exc)
+
     if USE_LLM:
         from llm_routes import register_chat_route
         register_chat_route(app, json_search)
