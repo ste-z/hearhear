@@ -38,3 +38,4 @@ backend/data/processed/guardian_articles_filtered.parquet
 # backend/data/processed/vector_index/guardian_tfidf_term_doc_matrix.npz
 # backend/data/processed/vector_index/guardian_tfidf_terms.json
 # backend/data/processed/vector_index/guardian_tfidf_vectorizer.pkl
+backend/data/processed/vector_index/tmp*.npy

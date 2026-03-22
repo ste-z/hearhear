@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -56,8 +57,20 @@ elif not runtime_logger.handlers:
 # Register routes
 register_routes(app)
 
+
+def _should_warm_runtime_assets():
+    # Skip heavy warm-up in the Werkzeug reloader parent process.
+    if __name__ == "__main__":
+        return os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    return True
+
+
 # Prepare DB + vector artifacts
-initialize_offline_data_pipeline(app=app, project_root=PROJECT_ROOT)
+initialize_offline_data_pipeline(
+    app=app,
+    project_root=PROJECT_ROOT,
+    warm_runtime_assets=_should_warm_runtime_assets(),
+)
 
 if __name__ == '__main__':
     app.run(debug=True, host="0.0.0.0", port=5001)

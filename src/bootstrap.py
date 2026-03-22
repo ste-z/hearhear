@@ -312,7 +312,10 @@ def _warm_runtime_assets():
         from search_helpers import build_vector_processor
 
         log_runtime_event("startup_warm.vector_index_start")
-        vector_index = build_vector_processor(force_rebuild=False)
+        vector_index = build_vector_processor(
+            force_rebuild=False,
+            ensure_preprocessed=False,
+        )
         log_runtime_event(
             "startup_warm.vector_index_done",
             n_docs=getattr(vector_index, "n_docs", None),
@@ -348,6 +351,7 @@ def initialize_offline_data_pipeline(
     project_root,
     years=DEFAULT_YEARS,
     min_body_text_chars=DEFAULT_MIN_BODY_TEXT_CHARS,
+    warm_runtime_assets=True,
 ):
     """
     Ensure all offline assets are ready:
@@ -415,4 +419,5 @@ def initialize_offline_data_pipeline(
         except Exception as exc:
             print(f"Warning: TF-IDF precompute failed; search may fail until rebuilt. Details: {exc}")
 
-        _warm_runtime_assets()
+        if warm_runtime_assets:
+            _warm_runtime_assets()
