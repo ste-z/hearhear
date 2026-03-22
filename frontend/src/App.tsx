@@ -48,6 +48,27 @@ const introClaimsByTopic: Record<IntroTopic, readonly string[]> = {
 
 const finalIntroTopic = introTopicSequence[introTopicSequence.length - 1]
 const introClaimSequence = introClaimsByTopic[finalIntroTopic]
+const landingSeenStorageKey = 'hearhear.hasSeenLanding'
+
+const hasSeenLanding = (): boolean => {
+  if (typeof window === 'undefined') return false
+
+  try {
+    return window.localStorage.getItem(landingSeenStorageKey) === 'true'
+  } catch {
+    return false
+  }
+}
+
+const markLandingAsSeen = (): void => {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(landingSeenStorageKey, 'true')
+  } catch {
+    // Ignore storage failures and fall back to the current in-memory session.
+  }
+}
 
 const summarizeApiText = (value: string, maxLength = 180): string => (
   value.replace(/\s+/g, ' ').trim().slice(0, maxLength)
@@ -104,11 +125,16 @@ const readApiJson = async <T,>(response: Response): Promise<T> => {
 }
 
 function App(): JSX.Element {
+  const hasSeenLandingRef = useRef<boolean>(hasSeenLanding())
   const [useLlm, setUseLlm] = useState<boolean | null>(null)
   const [introSequenceKey, setIntroSequenceKey] = useState<number>(0)
-  const [introStage, setIntroStage] = useState<IntroStage>(0)
-  const [typedTopic, setTypedTopic] = useState<string>('')
-  const [typedClaim, setTypedClaim] = useState<string>('')
+  const [introStage, setIntroStage] = useState<IntroStage>(hasSeenLandingRef.current ? 2 : 0)
+  const [typedTopic, setTypedTopic] = useState<string>(
+    hasSeenLandingRef.current ? finalIntroTopic : '',
+  )
+  const [typedClaim, setTypedClaim] = useState<string>(
+    hasSeenLandingRef.current ? introClaimSequence[introClaimSequence.length - 1] : '',
+  )
   const [inputMode, setInputMode] = useState<InputMode>('stance')
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [topic, setTopic] = useState<string>('')
@@ -131,7 +157,7 @@ function App(): JSX.Element {
   const essayOptionsRef = useRef<HTMLDivElement | null>(null)
   const resultsSectionRef = useRef<HTMLDivElement | null>(null)
   const touchStartYRef = useRef<number | null>(null)
-  const [isSearchStageVisible, setIsSearchStageVisible] = useState<boolean>(false)
+  const [isSearchStageVisible, setIsSearchStageVisible] = useState<boolean>(hasSeenLandingRef.current)
   const [hasSubmittedSearch, setHasSubmittedSearch] = useState<boolean>(false)
 
   useEffect(() => {
@@ -163,6 +189,20 @@ function App(): JSX.Element {
   }, [])
 
   useEffect(() => {
+    if (!hasSeenLandingRef.current) {
+      markLandingAsSeen()
+      hasSeenLandingRef.current = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isSearchStageVisible) {
+      setIntroStage(2)
+      setTypedTopic(finalIntroTopic)
+      setTypedClaim(introClaimSequence[introClaimSequence.length - 1])
+      return
+    }
+
     let isCancelled = false
     const timeoutIds: number[] = []
 
@@ -267,7 +307,7 @@ function App(): JSX.Element {
       isCancelled = true
       timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId))
     }
-  }, [introSequenceKey])
+  }, [introSequenceKey, isSearchStageVisible])
 
   useEffect(() => {
     if (inputMode !== 'stance') {
