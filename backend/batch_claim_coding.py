@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import os
 import re
 import time
@@ -27,10 +28,11 @@ DEFAULT_REASONING_EFFORT = "minimal"
 DEFAULT_MAX_OUTPUT_TOKENS = 250
 DEFAULT_COMPLETION_WINDOW = "24h"
 DEFAULT_ARTICLES_PER_BATCH = 300
-DEFAULT_MAX_ESTIMATED_ENQUEUED_TOKENS = 1_500_000
+DEFAULT_MAX_ESTIMATED_ENQUEUED_TOKENS = 1_900_000
 PROMPT_VERSION = "openai_claim_coding_v2"
 TERMINAL_BATCH_STATUSES = {"completed", "failed", "cancelled", "expired"}
 ACTIVE_BATCH_STATUSES = {"submitted", "validating", "in_progress", "finalizing", "cancelling"}
+LOGGER = logging.getLogger(__name__)
 
 CLAIM_CODING_INSTRUCTIONS = """
 You are annotating argument structure in opinion and analysis articles.
@@ -246,6 +248,123 @@ def _path_exists(path):
     return bool(path) and Path(path).exists()
 
 
+def _configure_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+
+
+def _chunk_log_label(chunk):
+    chunk_index = chunk.get("chunk_index")
+    total_chunks = chunk.get("total_chunks")
+    if chunk_index is None:
+        return "chunk"
+    if total_chunks is None:
+        return f"chunk {chunk_index}"
+    return f"chunk {int(chunk_index):03d}/{int(total_chunks):03d}"
+
+
+def _format_plan_summary(summary):
+    return (
+        f"prepared={summary['prepared_chunks']} "
+        f"active={summary['active_chunks']} "
+        f"completed={summary['completed_chunks']} "
+        f"failed={summary['failed_chunks']} "
+        f"next_pending={summary['next_pending_chunk_index']}"
+    )
+
+
+def _count_nonempty_lines(path):
+    count = 0
+    with Path(path).open("r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                count += 1
+    return count
+
+
+def _sync_chunk_artifact_paths(chunk, batch):
+    batch_id = chunk.get("batch_id")
+    if not batch_id:
+        return {
+            "download_needed": False,
+            "expected_output_path": None,
+            "expected_error_path": None,
+        }
+
+    run_dir = Path(chunk["run_dir"])
+    output_file_id = batch.get("output_file_id")
+    error_file_id = batch.get("error_file_id")
+    expected_output_path = run_dir / f"{batch_id}_output.jsonl"
+    expected_error_path = run_dir / f"{batch_id}_errors.jsonl"
+
+    output_file_path = chunk.get("output_file_path")
+    if output_file_id and not _path_exists(output_file_path) and expected_output_path.exists():
+        output_file_path = str(expected_output_path)
+        chunk["output_file_path"] = output_file_path
+
+    error_file_path = chunk.get("error_file_path")
+    if error_file_id and not _path_exists(error_file_path) and expected_error_path.exists():
+        error_file_path = str(expected_error_path)
+        chunk["error_file_path"] = error_file_path
+
+    output_ready = (not output_file_id) or _path_exists(output_file_path)
+    error_ready = (not error_file_id) or _path_exists(error_file_path)
+
+    return {
+        "download_needed": not (output_ready and error_ready),
+        "expected_output_path": str(expected_output_path) if output_file_id else None,
+        "expected_error_path": str(expected_error_path) if error_file_id else None,
+    }
+
+
+def _sync_chunk_parsed_paths(chunk):
+    run_dir = Path(chunk["run_dir"])
+    expected_parsed_jsonl_path = run_dir / "parsed_claim_coding_results.jsonl"
+    expected_parsed_csv_path = run_dir / "parsed_claim_coding_results.csv"
+
+    parsed_jsonl_path = chunk.get("parsed_jsonl_path")
+    if not _path_exists(parsed_jsonl_path) and expected_parsed_jsonl_path.exists():
+        parsed_jsonl_path = str(expected_parsed_jsonl_path)
+        chunk["parsed_jsonl_path"] = parsed_jsonl_path
+
+    parsed_csv_path = chunk.get("parsed_csv_path")
+    if not _path_exists(parsed_csv_path) and expected_parsed_csv_path.exists():
+        parsed_csv_path = str(expected_parsed_csv_path)
+        chunk["parsed_csv_path"] = parsed_csv_path
+
+    parsed_ready = _path_exists(parsed_jsonl_path) and _path_exists(parsed_csv_path)
+    if parsed_ready and chunk.get("parsed_count") is None:
+        chunk["parsed_count"] = _count_nonempty_lines(parsed_jsonl_path)
+        chunk["parse_error"] = None
+
+    return {
+        "parsed_ready": parsed_ready,
+        "parsed_jsonl_path": parsed_jsonl_path,
+        "parsed_csv_path": parsed_csv_path,
+    }
+
+
+def _resolve_chunk_plan_path(plan_path):
+    plan_path = Path(plan_path)
+    if plan_path.is_file():
+        return plan_path
+
+    if plan_path.is_dir():
+        candidate = plan_path / "chunk_plan.json"
+        if candidate.is_file():
+            return candidate
+        raise FileNotFoundError(
+            f"No chunk_plan.json found in plan directory: {plan_path}"
+        )
+
+    raise FileNotFoundError(
+        "Chunk plan not found. Pass the path to chunk_plan.json or the parent run directory "
+        f"that contains it: {plan_path}"
+    )
+
+
 def _load_client():
     load_dotenv(PROJECT_ROOT / ".env")
     api_key = os.getenv("OPENAI_API_KEY")
@@ -375,6 +494,13 @@ def build_batch_files(
         "prepared_at": datetime.now(timezone.utc).isoformat(),
     }
     _write_json(summary_path, summary)
+    LOGGER.info(
+        "Prepared batch files in %s with %s requests from %s articles (estimated_enqueued_tokens=%s)",
+        run_dir,
+        len(request_rows),
+        int(len(articles)),
+        int(estimated_enqueued_tokens),
+    )
     return summary
 
 
@@ -439,6 +565,12 @@ def build_chunked_batch_plan(
         "chunks": chunk_rows,
     }
     _write_json(plan["plan_path"], plan)
+    LOGGER.info(
+        "Built chunk plan %s with %s chunks covering %s articles",
+        plan["plan_path"],
+        total_chunks,
+        int(len(articles)),
+    )
     return plan
 
 
@@ -478,16 +610,26 @@ def sync_chunk_plan(
     plan_path,
     auto_download=True,
     auto_parse=True,
+    force=False,
 ):
-    plan_path = Path(plan_path)
+    plan_path = _resolve_chunk_plan_path(plan_path)
     plan = _read_json(plan_path)
     updated_chunks = []
+    checked_chunks = 0
+    status_changes = 0
+    downloaded_chunks = 0
+    parsed_chunks = 0
+
+    LOGGER.info("Refreshing chunk plan status from %s", plan_path)
 
     for chunk in plan["chunks"]:
         batch_id = chunk.get("batch_id")
         if not batch_id:
             continue
 
+        checked_chunks += 1
+        chunk_label = _chunk_log_label(chunk)
+        previous_status = chunk.get("status")
         batch = retrieve_batch(batch_id)
         batch_status = batch.get("status")
         chunk["status"] = batch_status
@@ -495,10 +637,21 @@ def sync_chunk_plan(
         chunk["batch_path"] = str(Path(chunk["run_dir"]) / f"{batch_id}_batch.json")
         _write_json(chunk["batch_path"], batch)
 
+        if batch_status != previous_status:
+            status_changes += 1
+            LOGGER.info(
+                "%s batch %s status changed: %s -> %s",
+                chunk_label,
+                batch_id,
+                previous_status,
+                batch_status,
+            )
+
         request_counts = batch.get("request_counts") or {}
         chunk["request_counts"] = request_counts
         chunk["usage"] = batch.get("usage")
         chunk["batch_errors"] = batch.get("errors")
+        artifact_state = _sync_chunk_artifact_paths(chunk, batch)
         updated_chunks.append(
             {
                 "chunk_index": chunk["chunk_index"],
@@ -509,35 +662,110 @@ def sync_chunk_plan(
         )
 
         if auto_download and batch_status in TERMINAL_BATCH_STATUSES:
-            try:
-                artifacts = download_batch_artifacts(batch_id=batch_id, output_dir=chunk["run_dir"])
-                chunk["batch_path"] = artifacts.get("batch_path")
-                chunk["output_file_path"] = artifacts.get("output_file_path")
-                chunk["error_file_path"] = artifacts.get("error_file_path")
-            except Exception as exc:
-                chunk["download_error"] = f"{type(exc).__name__}: {exc}"
+            if force or artifact_state["download_needed"]:
+                try:
+                    if force and not artifact_state["download_needed"]:
+                        LOGGER.info("%s force re-downloading artifacts for batch %s", chunk_label, batch_id)
+                    else:
+                        LOGGER.info("%s downloading artifacts for batch %s", chunk_label, batch_id)
+                    artifacts = download_batch_artifacts(batch_id=batch_id, output_dir=chunk["run_dir"])
+                    chunk["batch_path"] = artifacts.get("batch_path")
+                    chunk["output_file_path"] = artifacts.get("output_file_path")
+                    chunk["error_file_path"] = artifacts.get("error_file_path")
+                    chunk["download_error"] = None
+                    downloaded_chunks += 1
+                    artifact_state = _sync_chunk_artifact_paths(chunk, batch)
+                    LOGGER.info(
+                        "%s downloaded artifacts for batch %s (output_file=%s, error_file=%s)",
+                        chunk_label,
+                        batch_id,
+                        artifacts.get("output_file_path"),
+                        artifacts.get("error_file_path"),
+                    )
+                except Exception as exc:
+                    chunk["download_error"] = f"{type(exc).__name__}: {exc}"
+                    LOGGER.warning(
+                        "%s failed to download artifacts for batch %s: %s: %s",
+                        chunk_label,
+                        batch_id,
+                        type(exc).__name__,
+                        exc,
+                    )
+            else:
+                LOGGER.info(
+                    "%s skipping artifact download for batch %s because local files already exist (output_file=%s, error_file=%s)",
+                    chunk_label,
+                    batch_id,
+                    chunk.get("output_file_path") or artifact_state["expected_output_path"],
+                    chunk.get("error_file_path") or artifact_state["expected_error_path"],
+                )
 
         if auto_parse and batch_status == "completed" and _path_exists(chunk.get("output_file_path")):
-            try:
-                parsed = parse_batch_results(
-                    output_file_path=chunk["output_file_path"],
-                    manifest_path=chunk["manifest_path"],
-                    error_file_path=chunk.get("error_file_path"),
-                    output_dir=chunk["run_dir"],
+            parsed_state = _sync_chunk_parsed_paths(chunk)
+            if force or not parsed_state["parsed_ready"]:
+                try:
+                    if force and parsed_state["parsed_ready"]:
+                        LOGGER.info("%s force re-processing output for batch %s", chunk_label, batch_id)
+                    else:
+                        LOGGER.info(
+                            "%s parsing output for batch %s from %s",
+                            chunk_label,
+                            batch_id,
+                            chunk["output_file_path"],
+                        )
+                    parsed = parse_batch_results(
+                        output_file_path=chunk["output_file_path"],
+                        manifest_path=chunk["manifest_path"],
+                        error_file_path=chunk.get("error_file_path"),
+                        output_dir=chunk["run_dir"],
+                    )
+                    chunk["parsed_jsonl_path"] = parsed.get("parsed_jsonl_path")
+                    chunk["parsed_csv_path"] = parsed.get("parsed_csv_path")
+                    chunk["parsed_count"] = parsed.get("count")
+                    chunk["parse_error"] = None
+                    parsed_chunks += 1
+                    LOGGER.info(
+                        "%s processed batch %s output into %s parsed rows",
+                        chunk_label,
+                        batch_id,
+                        parsed.get("count"),
+                    )
+                except Exception as exc:
+                    chunk["parse_error"] = f"{type(exc).__name__}: {exc}"
+                    LOGGER.warning(
+                        "%s failed to parse output for batch %s: %s: %s",
+                        chunk_label,
+                        batch_id,
+                        type(exc).__name__,
+                        exc,
+                    )
+            else:
+                LOGGER.info(
+                    "%s skipping parse for batch %s because parsed outputs already exist (jsonl=%s, csv=%s)",
+                    chunk_label,
+                    batch_id,
+                    chunk.get("parsed_jsonl_path"),
+                    chunk.get("parsed_csv_path"),
                 )
-                chunk["parsed_jsonl_path"] = parsed.get("parsed_jsonl_path")
-                chunk["parsed_csv_path"] = parsed.get("parsed_csv_path")
-                chunk["parsed_count"] = parsed.get("count")
-                chunk["parse_error"] = None
-            except Exception as exc:
-                chunk["parse_error"] = f"{type(exc).__name__}: {exc}"
 
     plan["updated_at"] = datetime.now(timezone.utc).isoformat()
     _write_json(plan_path, plan)
+    summary = summarize_chunk_plan(plan)
+    if checked_chunks == 0:
+        LOGGER.info("No submitted batches found in %s", plan_path)
+    LOGGER.info(
+        "Chunk plan refresh complete for %s: checked=%s status_changes=%s downloads=%s parses=%s %s",
+        plan_path,
+        checked_chunks,
+        status_changes,
+        downloaded_chunks,
+        parsed_chunks,
+        _format_plan_summary(summary),
+    )
     return {
         "plan_path": str(plan_path),
         "parent_run_dir": plan["parent_run_dir"],
-        "summary": summarize_chunk_plan(plan),
+        "summary": summary,
         "updated_chunks": updated_chunks,
     }
 
@@ -548,7 +776,7 @@ def submit_chunk_plan(
     max_estimated_enqueued_tokens=DEFAULT_MAX_ESTIMATED_ENQUEUED_TOKENS,
     completion_window=DEFAULT_COMPLETION_WINDOW,
 ):
-    plan_path = Path(plan_path)
+    plan_path = _resolve_chunk_plan_path(plan_path)
     plan = _read_json(plan_path)
 
     submitted_chunks = []
@@ -560,11 +788,19 @@ def submit_chunk_plan(
         if chunk.get("batch_id") and chunk.get("status") in ACTIVE_BATCH_STATUSES
     )
 
+    LOGGER.info(
+        "Submitting pending chunks from %s (active_estimated_enqueued_tokens=%s, max_estimated_enqueued_tokens=%s)",
+        plan_path,
+        active_estimated_tokens,
+        int(max_estimated_enqueued_tokens),
+    )
+
     for chunk in plan["chunks"]:
         if chunk.get("batch_id") or chunk.get("status") in ACTIVE_BATCH_STATUSES:
             continue
 
         if max_chunks_to_submit is not None and submitted_count >= int(max_chunks_to_submit):
+            LOGGER.info("Reached max_chunks_to_submit=%s", int(max_chunks_to_submit))
             break
 
         chunk_estimated_tokens = int(chunk.get("estimated_enqueued_tokens") or 0)
@@ -573,9 +809,24 @@ def submit_chunk_plan(
             > int(max_estimated_enqueued_tokens)
         )
         if would_exceed_budget:
+            LOGGER.info(
+                "Stopped before %s because token budget would be exceeded (%s + %s + %s > %s)",
+                _chunk_log_label(chunk),
+                active_estimated_tokens,
+                submitted_estimated_tokens,
+                chunk_estimated_tokens,
+                int(max_estimated_enqueued_tokens),
+            )
             break
 
+        chunk_label = _chunk_log_label(chunk)
         try:
+            LOGGER.info(
+                "%s submitting %s requests from %s",
+                chunk_label,
+                chunk.get("request_count"),
+                chunk.get("run_dir"),
+            )
             submission = submit_batch_from_prepared_files(
                 requests_path=chunk["requests_path"],
                 manifest_path=chunk["manifest_path"],
@@ -602,9 +853,21 @@ def submit_chunk_plan(
                     "run_dir": chunk["run_dir"],
                 }
             )
+            LOGGER.info(
+                "%s submitted as batch %s with initial status %s",
+                chunk_label,
+                batch["id"],
+                batch["status"],
+            )
         except Exception as exc:
             chunk["status"] = "submit_failed"
             chunk["submit_error"] = f"{type(exc).__name__}: {exc}"
+            LOGGER.warning(
+                "%s submission failed: %s: %s",
+                chunk_label,
+                type(exc).__name__,
+                exc,
+            )
             break
 
     plan["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -632,18 +895,31 @@ def run_chunk_plan(
     max_chunks_to_submit=None,
     max_estimated_enqueued_tokens=DEFAULT_MAX_ESTIMATED_ENQUEUED_TOKENS,
     completion_window=DEFAULT_COMPLETION_WINDOW,
-    poll_seconds=120,
+    poll_seconds=30,
     until_done=False,
     auto_download=True,
     auto_parse=True,
+    force=False,
 ):
+    plan_path = _resolve_chunk_plan_path(plan_path)
     cycles = []
+    cycle_number = 0
+
+    LOGGER.info(
+        "Starting run-plan for %s (until_done=%s, poll_seconds=%s)",
+        plan_path,
+        bool(until_done),
+        float(poll_seconds),
+    )
 
     while True:
+        cycle_number += 1
+        LOGGER.info("Run-plan cycle %s started", cycle_number)
         sync_result = sync_chunk_plan(
             plan_path=plan_path,
             auto_download=auto_download,
             auto_parse=auto_parse,
+            force=force,
         )
         submit_result = submit_chunk_plan(
             plan_path=plan_path,
@@ -663,9 +939,13 @@ def run_chunk_plan(
             }
         )
 
+        LOGGER.info("Run-plan cycle %s summary: %s", cycle_number, _format_plan_summary(summary))
+
         if not until_done or summary["done"]:
+            LOGGER.info("Run-plan exiting after cycle %s", cycle_number)
             break
 
+        LOGGER.info("Sleeping for %s seconds before next run-plan cycle", float(poll_seconds))
         time.sleep(float(poll_seconds))
 
     return {
@@ -688,6 +968,7 @@ def submit_batch_from_prepared_files(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     client = _load_client()
+    LOGGER.info("Uploading batch input file %s", requests_path)
     with requests_path.open("rb") as f:
         input_file = client.files.create(file=f, purpose="batch")
 
@@ -702,16 +983,26 @@ def submit_batch_from_prepared_files(
         },
     )
 
+    input_file_dict = _sdk_to_dict(input_file)
+    batch_dict = _sdk_to_dict(batch)
+
     submission = {
         "run_dir": str(run_dir),
         "requests_path": str(requests_path),
         "manifest_path": str(manifest_path),
-        "input_file": _sdk_to_dict(input_file),
-        "batch": _sdk_to_dict(batch),
+        "input_file": input_file_dict,
+        "batch": batch_dict,
         "submitted_at": datetime.now(timezone.utc).isoformat(),
     }
     submission_path = run_dir / "batch_submission.json"
     submission_path.write_text(json.dumps(submission, indent=2), encoding="utf-8")
+    LOGGER.info(
+        "Created batch %s from %s (input_file_id=%s, completion_window=%s)",
+        batch_dict.get("id"),
+        requests_path,
+        input_file_dict.get("id"),
+        completion_window,
+    )
     return submission
 
 
@@ -737,6 +1028,7 @@ def download_batch_artifacts(batch_id, output_dir=DEFAULT_OUTPUT_DIR):
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    LOGGER.info("Downloading artifacts for batch %s into %s", batch_id, output_dir)
     batch_path = output_dir / f"{batch_id}_batch.json"
     batch_path.write_text(json.dumps(batch_dict, indent=2), encoding="utf-8")
 
@@ -751,18 +1043,27 @@ def download_batch_artifacts(batch_id, output_dir=DEFAULT_OUTPUT_DIR):
     output_file_id = batch_dict.get("output_file_id")
     error_file_id = batch_dict.get("error_file_id")
     if output_file_id:
+        LOGGER.info("Downloading output file %s for batch %s", output_file_id, batch_id)
         result["output_file_path"] = _download_file_content(
             client=client,
             file_id=output_file_id,
             target_path=output_dir / f"{batch_id}_output.jsonl",
         )
     if error_file_id:
+        LOGGER.info("Downloading error file %s for batch %s", error_file_id, batch_id)
         result["error_file_path"] = _download_file_content(
             client=client,
             file_id=error_file_id,
             target_path=output_dir / f"{batch_id}_errors.jsonl",
         )
 
+    LOGGER.info(
+        "Finished downloading artifacts for batch %s (status=%s, output_file=%s, error_file=%s)",
+        batch_id,
+        result["status"],
+        result["output_file_path"],
+        result["error_file_path"],
+    )
     return result
 
 
@@ -823,6 +1124,11 @@ def extract_output_text_from_response_body(body):
 
 
 def parse_batch_results(output_file_path, manifest_path, error_file_path=None, output_dir=None):
+    LOGGER.info(
+        "Parsing batch results from %s with manifest %s",
+        output_file_path,
+        manifest_path,
+    )
     output_rows = _read_jsonl(output_file_path)
     manifest_rows = _read_jsonl(manifest_path)
     manifest_by_custom_id = {row["custom_id"]: row for row in manifest_rows}
@@ -916,6 +1222,19 @@ def parse_batch_results(output_file_path, manifest_path, error_file_path=None, o
         result["parsed_jsonl_path"] = str(parsed_jsonl_path)
         result["parsed_csv_path"] = str(parsed_csv_path)
 
+    error_count = sum(1 for row in parsed_rows if row.get("error"))
+    LOGGER.info(
+        "Parsed %s rows from %s (%s rows with errors)",
+        len(parsed_rows),
+        output_file_path,
+        error_count,
+    )
+    if output_dir:
+        LOGGER.info(
+            "Wrote parsed outputs to %s and %s",
+            result.get("parsed_jsonl_path"),
+            result.get("parsed_csv_path"),
+        )
     return result
 
 
@@ -945,6 +1264,12 @@ def submit_guardian_claim_batch(
     )
     if filtered_articles.empty:
         raise ValueError("No articles matched the requested years and filters.")
+
+    LOGGER.info(
+        "Preparing and submitting a single batch from %s filtered articles (years=%s)",
+        int(len(filtered_articles)),
+        years,
+    )
 
     prepared = build_batch_files(
         articles=filtered_articles,
@@ -995,6 +1320,13 @@ def submit_guardian_claim_batches_chunked(
     )
     if filtered_articles.empty:
         raise ValueError("No articles matched the requested years and filters.")
+
+    LOGGER.info(
+        "Preparing a chunked batch plan from %s filtered articles (years=%s, articles_per_batch=%s)",
+        int(len(filtered_articles)),
+        years,
+        int(articles_per_batch),
+    )
 
     plan = build_chunked_batch_plan(
         articles=filtered_articles,
@@ -1060,7 +1392,11 @@ def _parse_args():
         "submit-plan",
         help="Submit pending chunks from an existing chunk plan.",
     )
-    submit_plan_parser.add_argument("--plan-path", required=True)
+    submit_plan_parser.add_argument(
+        "--plan-path",
+        required=True,
+        help="Path to chunk_plan.json or the parent run directory that contains it.",
+    )
     submit_plan_parser.add_argument("--max-chunks-to-submit", type=int)
     submit_plan_parser.add_argument(
         "--max-estimated-enqueued-tokens",
@@ -1073,15 +1409,28 @@ def _parse_args():
         "status-plan",
         help="Refresh and summarize all chunk statuses for an existing chunk plan.",
     )
-    status_plan_parser.add_argument("--plan-path", required=True)
+    status_plan_parser.add_argument(
+        "--plan-path",
+        required=True,
+        help="Path to chunk_plan.json or the parent run directory that contains it.",
+    )
     status_plan_parser.add_argument("--no-auto-download", action="store_true")
     status_plan_parser.add_argument("--no-auto-parse", action="store_true")
+    status_plan_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download artifacts and re-parse outputs even if local files already exist.",
+    )
 
     run_plan_parser = subparsers.add_parser(
         "run-plan",
         help="Refresh chunk statuses, download/parse completed outputs, and submit the next safe chunk(s).",
     )
-    run_plan_parser.add_argument("--plan-path", required=True)
+    run_plan_parser.add_argument(
+        "--plan-path",
+        required=True,
+        help="Path to chunk_plan.json or the parent run directory that contains it.",
+    )
     run_plan_parser.add_argument("--max-chunks-to-submit", type=int)
     run_plan_parser.add_argument(
         "--max-estimated-enqueued-tokens",
@@ -1089,15 +1438,21 @@ def _parse_args():
         default=DEFAULT_MAX_ESTIMATED_ENQUEUED_TOKENS,
     )
     run_plan_parser.add_argument("--completion-window", default=DEFAULT_COMPLETION_WINDOW)
-    run_plan_parser.add_argument("--poll-seconds", type=float, default=120)
+    run_plan_parser.add_argument("--poll-seconds", type=float, default=30)
     run_plan_parser.add_argument("--until-done", action="store_true")
     run_plan_parser.add_argument("--no-auto-download", action="store_true")
     run_plan_parser.add_argument("--no-auto-parse", action="store_true")
+    run_plan_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download artifacts and re-parse outputs even if local files already exist.",
+    )
 
     return parser.parse_args()
 
 
 def main():
+    _configure_logging()
     args = _parse_args()
 
     if args.command == "submit":
@@ -1176,6 +1531,7 @@ def main():
             plan_path=args.plan_path,
             auto_download=not args.no_auto_download,
             auto_parse=not args.no_auto_parse,
+            force=args.force,
         )
         print(json.dumps(result, indent=2))
         return
@@ -1190,6 +1546,7 @@ def main():
             until_done=args.until_done,
             auto_download=not args.no_auto_download,
             auto_parse=not args.no_auto_parse,
+            force=args.force,
         )
         print(json.dumps(result, indent=2))
         return
