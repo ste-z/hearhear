@@ -39,10 +39,26 @@ Thumbs.db
 README.md
 *.md
 
+# Local-only project assets
+assets/
+notebooks/
+instance/
+
 # Tests
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Large offline artifacts not needed in the deployed image
+backend/data/processed/openai_claim_batches/
+backend/data/processed/guardian_articles_filtered.parquet
+backend/data/processed/vector_index/
+backend/data/raw/guardian_opinion_2005_2025.parquet
+backend/data/raw/guardian_by_year/guardian_opinion_2005.csv
+backend/data/raw/guardian_by_year/guardian_opinion_2006.csv
+backend/data/raw/guardian_by_year/guardian_opinion_2007.csv
+backend/data/raw/guardian_by_year/guardian_opinion_2008.csv
+backend/data/raw/guardian_by_year/guardian_opinion_2009.csv
 
 # Misc
 helpers/

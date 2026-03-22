@@ -1,5 +1,7 @@
 import json
 import pickle
+import io
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,6 +19,9 @@ DEFAULT_TFIDF_PARAMS = {
     "strip_accents": "unicode",
     "stop_words": "english",
 }
+
+# Keep matrix chunks comfortably below the common 100 MB git hosting limit.
+MAX_TERM_DOC_MATRIX_CHUNK_BYTES = 95 * 1024 * 1024
 
 
 class VectorizedText:
@@ -243,13 +248,111 @@ class VectorizedText:
             "meta": directory / f"{index_name}_meta.json",
         }
 
+    @classmethod
+    def term_doc_matrix_chunk_paths(cls, index_dir, index_name):
+        matrix_path = cls.artifact_paths(index_dir, index_name)["term_doc_matrix"]
+        chunk_prefix = f"{matrix_path.name}.part-"
+        return sorted(
+            path
+            for path in matrix_path.parent.glob(f"{chunk_prefix}*")
+            if path.is_file() and not path.name.endswith(".tmp")
+        )
+
+    @staticmethod
+    def _unlink_paths(paths):
+        for path in list(paths):
+            resolved = Path(path)
+            if resolved.exists():
+                resolved.unlink()
+
+    @classmethod
+    def _write_term_doc_matrix_chunks(cls, source_path, index_dir, index_name):
+        directory = Path(index_dir)
+        temp_chunk_paths = []
+        final_chunk_paths = []
+        chunk_prefix = f"{index_name}_term_doc_matrix.npz.part-"
+
+        with open(source_path, "rb") as source:
+            chunk_idx = 0
+            while True:
+                chunk = source.read(MAX_TERM_DOC_MATRIX_CHUNK_BYTES)
+                if not chunk:
+                    break
+
+                final_path = directory / f"{chunk_prefix}{chunk_idx:03d}"
+                temp_path = directory / f"{chunk_prefix}{chunk_idx:03d}.tmp"
+                with open(temp_path, "wb") as f:
+                    f.write(chunk)
+
+                temp_chunk_paths.append(temp_path)
+                final_chunk_paths.append(final_path)
+                chunk_idx += 1
+
+        if not final_chunk_paths:
+            raise ValueError("Serialized term document matrix was empty.")
+
+        for temp_path, final_path in zip(temp_chunk_paths, final_chunk_paths):
+            temp_path.replace(final_path)
+
+        return final_chunk_paths
+
+    @classmethod
+    def _load_term_doc_matrix(cls, matrix_path, chunk_paths):
+        if chunk_paths:
+            serialized = io.BytesIO()
+            for chunk_path in chunk_paths:
+                with open(chunk_path, "rb") as f:
+                    serialized.write(f.read())
+            serialized.seek(0)
+            return load_npz(serialized)
+
+        return load_npz(matrix_path)
+
     def save(self, index_dir, index_name, extra_meta=None):
         paths = self.artifact_paths(index_dir, index_name)
         Path(index_dir).mkdir(parents=True, exist_ok=True)
+        existing_chunk_paths = self.term_doc_matrix_chunk_paths(index_dir, index_name)
 
         with open(paths["vectorizer"], "wb") as f:
             pickle.dump(self.vectorizer, f)
-        save_npz(paths["term_doc_matrix"], self.term_doc_matrix)
+
+        temp_matrix_path = None
+        matrix_storage = "single_file"
+        matrix_artifact_paths = [paths["term_doc_matrix"]]
+        try:
+            with tempfile.NamedTemporaryFile(
+                suffix=".npz",
+                dir=index_dir,
+                delete=False,
+            ) as temp_file:
+                temp_matrix_path = Path(temp_file.name)
+
+            save_npz(temp_matrix_path, self.term_doc_matrix)
+            serialized_matrix_size = temp_matrix_path.stat().st_size
+
+            if serialized_matrix_size > MAX_TERM_DOC_MATRIX_CHUNK_BYTES:
+                matrix_storage = "chunked"
+                matrix_artifact_paths = self._write_term_doc_matrix_chunks(
+                    source_path=temp_matrix_path,
+                    index_dir=index_dir,
+                    index_name=index_name,
+                )
+                stale_chunk_paths = [
+                    path for path in existing_chunk_paths if path not in matrix_artifact_paths
+                ]
+                self._unlink_paths(stale_chunk_paths)
+                if paths["term_doc_matrix"].exists():
+                    paths["term_doc_matrix"].unlink()
+                for chunk_path in matrix_artifact_paths:
+                    if not chunk_path.exists():
+                        raise FileNotFoundError(f"Missing expected matrix chunk: {chunk_path}")
+            else:
+                self._unlink_paths(existing_chunk_paths)
+                temp_matrix_path.replace(paths["term_doc_matrix"])
+                temp_matrix_path = None
+        finally:
+            if temp_matrix_path is not None and temp_matrix_path.exists():
+                temp_matrix_path.unlink()
 
         with open(paths["terms"], "w", encoding="utf-8") as f:
             json.dump(self.terms, f)
@@ -268,6 +371,10 @@ class VectorizedText:
             "text_column": self.text_column,
             "has_articles": self.articles is not None,
             "vectorizer_class": self.vectorizer.__class__.__name__,
+            "term_doc_matrix_storage": matrix_storage,
+            "term_doc_matrix_files": [path.name for path in matrix_artifact_paths],
+            "term_doc_matrix_chunk_count": len(matrix_artifact_paths),
+            "term_doc_matrix_max_chunk_bytes": MAX_TERM_DOC_MATRIX_CHUNK_BYTES,
         }
         if extra_meta:
             meta.update(extra_meta)
@@ -275,18 +382,22 @@ class VectorizedText:
         with open(paths["meta"], "w", encoding="utf-8") as f:
             json.dump(meta, f)
 
-        return paths
+        returned_paths = dict(paths)
+        returned_paths["term_doc_matrix_files"] = matrix_artifact_paths
+        return returned_paths
 
     @classmethod
     def load(cls, index_dir, index_name):
         paths = cls.artifact_paths(index_dir, index_name)
+        chunk_paths = cls.term_doc_matrix_chunk_paths(index_dir, index_name)
 
         required = [
             paths["vectorizer"],
-            paths["term_doc_matrix"],
             paths["terms"],
             paths["doc_ids"],
         ]
+        if not paths["term_doc_matrix"].exists() and not chunk_paths:
+            required.append(paths["term_doc_matrix"])
         missing = [str(path) for path in required if not path.exists()]
         if missing:
             raise FileNotFoundError(
@@ -295,7 +406,10 @@ class VectorizedText:
 
         with open(paths["vectorizer"], "rb") as f:
             vectorizer = pickle.load(f)
-        term_doc_matrix = load_npz(paths["term_doc_matrix"])
+        term_doc_matrix = cls._load_term_doc_matrix(
+            matrix_path=paths["term_doc_matrix"],
+            chunk_paths=chunk_paths,
+        )
 
         with open(paths["terms"], "r", encoding="utf-8") as f:
             terms = json.load(f)

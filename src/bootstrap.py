@@ -41,7 +41,13 @@ def _clean_datetime(value):
     return value
 
 
-def _existing_data_needs_refresh():
+def _normalized_years(years):
+    return {int(year) for year in set(years or [])}
+
+
+def _existing_data_needs_refresh(expected_years=None):
+    expected_year_set = _normalized_years(expected_years)
+
     missing_author_exists = db.session.query(GuardianArticle.id).filter(
         and_(
             GuardianArticle.n_contributors == 0,
@@ -61,11 +67,19 @@ def _existing_data_needs_refresh():
         func.length(func.coalesce(GuardianArticle.body_text, "")) < DEFAULT_MIN_BODY_TEXT_CHARS,
     ).limit(1).first() is not None
 
+    existing_years = {
+        int(year)
+        for (year,) in db.session.query(GuardianArticle.year).distinct().all()
+        if year is not None
+    }
+    year_range_mismatch = bool(expected_year_set) and existing_years != expected_year_set
+
     return any([
         missing_author_exists,
         missing_body_exists,
         missing_summary_exists,
         short_body_exists,
+        year_range_mismatch,
     ])
 
 
@@ -136,8 +150,8 @@ def initialize_offline_data_pipeline(
         existing_count = GuardianArticle.query.count()
         should_seed = existing_count == 0
 
-        if existing_count > 0 and _existing_data_needs_refresh():
-            print("Existing Guardian rows do not match cleaning rules. Rebuilding dataset.")
+        if existing_count > 0 and _existing_data_needs_refresh(expected_years=years):
+            print("Existing Guardian rows do not match the configured source data. Rebuilding dataset.")
             GuardianArticle.query.delete()
             db.session.commit()
             should_seed = True
