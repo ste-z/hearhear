@@ -31,6 +31,12 @@ DEFAULT_RAW_DATA_DIR = PROJECT_ROOT / "backend" / "data" / "raw" / "guardian_by_
 DEFAULT_MIN_BODY_TEXT_CHARS = 1000
 
 
+def _normalized_years(years):
+    if years is None:
+        return None
+    return sorted({int(year) for year in years if year is not None})
+
+
 def _load_guardian_articles_from_sqlite(db_path):
     query = """
         SELECT
@@ -120,6 +126,21 @@ def _db_has_complete_body_text(db_path):
     return total_count > 0 and nonempty_count == total_count
 
 
+def _filter_articles_to_years(articles, years=None):
+    if articles is None:
+        return pd.DataFrame()
+    if articles.empty:
+        return articles
+
+    normalized_years = _normalized_years(years)
+    if not normalized_years or "year" not in articles.columns:
+        return articles
+
+    filtered = articles.copy()
+    article_years = pd.to_numeric(filtered["year"], errors="coerce").astype("Int64")
+    return filtered.loc[article_years.isin(normalized_years)].reset_index(drop=True)
+
+
 def _load_index_meta(paths):
     meta_path = paths["meta"]
     if not _artifact_exists(meta_path):
@@ -133,7 +154,7 @@ def _load_index_meta(paths):
         return {}
 
 
-def _is_existing_index_fresh(index_dir, index_name, db_row_count):
+def _is_existing_index_fresh(index_dir, index_name, db_row_count, expected_years=None):
     paths = TfidfMatrixIndex.artifact_paths(index_dir, index_name)
     if not _artifact_exists(paths["meta"]):
         return False
@@ -171,6 +192,15 @@ def _is_existing_index_fresh(index_dir, index_name, db_row_count):
     if meta.get("search_backend") != "postings":
         return False
 
+    normalized_expected_years = _normalized_years(expected_years)
+    if normalized_expected_years is not None:
+        try:
+            stored_source_years = _normalized_years(meta.get("source_years"))
+        except (TypeError, ValueError):
+            return False
+        if stored_source_years != normalized_expected_years:
+            return False
+
     if not TfidfPostingsIndex.artifacts_within_size_limit(
         index_dir=index_dir,
         index_name=index_name,
@@ -192,9 +222,11 @@ def preprocess_tfidf_index(
     index_dir=DEFAULT_INDEX_DIR,
     index_name=DEFAULT_INDEX_NAME,
     force_rebuild=False,
+    years=None,
 ):
     db_path = Path(db_path)
     index_dir = Path(index_dir)
+    normalized_years = _normalized_years(years)
 
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
@@ -206,8 +238,14 @@ def preprocess_tfidf_index(
         index_name=index_name,
         db_row_count=db_row_count,
         force_rebuild=bool(force_rebuild),
+        requested_years=normalized_years,
     )
-    if not force_rebuild and _is_existing_index_fresh(index_dir, index_name, db_row_count):
+    if not force_rebuild and _is_existing_index_fresh(
+        index_dir,
+        index_name,
+        db_row_count,
+        expected_years=normalized_years,
+    ):
         log_runtime_event(
             "tfidf_preprocess.up_to_date",
             index_name=index_name,
@@ -224,13 +262,22 @@ def preprocess_tfidf_index(
     source_kind = "sqlite"
     if _db_has_complete_body_text(db_path):
         articles = _load_guardian_articles_from_sqlite(db_path)
+        articles = _filter_articles_to_years(articles, years=normalized_years)
     else:
-        articles = _load_guardian_articles_from_raw(years=_db_years(db_path))
+        source_years = normalized_years or _db_years(db_path)
+        articles = _load_guardian_articles_from_raw(years=source_years)
         source_kind = "raw_csv"
+    source_years = normalized_years or sorted(
+        {
+            int(year)
+            for year in pd.to_numeric(articles.get("year"), errors="coerce").dropna().tolist()
+        }
+    )
     log_runtime_event(
         "tfidf_preprocess.source_ready",
         source_kind=source_kind,
         article_count=int(len(articles)),
+        source_years=source_years,
     )
 
     if articles.empty:
@@ -251,6 +298,7 @@ def preprocess_tfidf_index(
             "db_row_count": int(db_row_count),
             "source_db_path": _relative_db_path_for_meta(db_path),
             "text_source": source_kind,
+            "source_years": source_years,
             "vectorizer_params": dict(DEFAULT_TFIDF_PARAMS),
         },
         include_matrix_artifacts=False,

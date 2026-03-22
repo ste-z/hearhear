@@ -10,10 +10,11 @@ from backend.claim_store import (
     iter_claim_records,
 )
 from backend.data_import import load_and_clean_guardian_years
+from backend.runtime_debug import log_runtime_event
 from models import GuardianArticle, GuardianArticleClaim, db
 
 
-DEFAULT_YEARS = set(range(2010, 2026))
+DEFAULT_YEARS = set(range(2015, 2026))
 DEFAULT_MIN_BODY_TEXT_CHARS = 1000
 DEFAULT_BATCH_SIZE = 500
 DEFAULT_CLAIM_BATCH_SIZE = 500
@@ -61,6 +62,23 @@ def _clean_datetime(value):
 
 def _normalized_years(years):
     return {int(year) for year in set(years or [])}
+
+
+def _filter_articles_to_years(articles, years=None):
+    if articles is None:
+        return pd.DataFrame()
+    if not isinstance(articles, pd.DataFrame):
+        raise TypeError("articles must be a pandas DataFrame.")
+    if articles.empty:
+        return articles.reset_index(drop=True).copy()
+
+    expected_years = _normalized_years(years)
+    if not expected_years or "year" not in articles.columns:
+        return articles.reset_index(drop=True).copy()
+
+    normalized = articles.reset_index(drop=True).copy()
+    article_years = pd.to_numeric(normalized["year"], errors="coerce").astype("Int64")
+    return normalized.loc[article_years.isin(expected_years)].reset_index(drop=True).copy()
 
 
 def _env_flag(name, default=False):
@@ -235,7 +253,7 @@ def _seed_guardian_claims(
     return "packaged_claim_results"
 
 
-def _load_bundled_guardian_articles():
+def _load_bundled_guardian_articles(years=None):
     articles_path = DEFAULT_BUNDLED_INDEX_DIR / f"{DEFAULT_BUNDLED_INDEX_NAME}_articles.pkl"
     if not articles_path.exists():
         return pd.DataFrame()
@@ -250,7 +268,7 @@ def _load_bundled_guardian_articles():
         print(f"Warning: bundled article snapshot at {articles_path} is not a DataFrame.")
         return pd.DataFrame()
 
-    return articles.reset_index(drop=True).copy()
+    return _filter_articles_to_years(articles, years=years)
 
 
 def _seed_guardian_articles(
@@ -262,7 +280,9 @@ def _seed_guardian_articles(
     store_body_text=False,
 ):
     if bundled_articles is None:
-        bundled_articles = _load_bundled_guardian_articles()
+        bundled_articles = _load_bundled_guardian_articles(years=years)
+    else:
+        bundled_articles = _filter_articles_to_years(bundled_articles, years=years)
     if not bundled_articles.empty:
         print("Seeding Guardian articles from bundled vector index metadata.")
         _persist_guardian_articles(
@@ -287,11 +307,51 @@ def _seed_guardian_articles(
     return "raw_source"
 
 
+def _warm_runtime_assets():
+    try:
+        from search_helpers import build_vector_processor
+
+        log_runtime_event("startup_warm.vector_index_start")
+        vector_index = build_vector_processor(
+            force_rebuild=False,
+            ensure_preprocessed=False,
+        )
+        log_runtime_event(
+            "startup_warm.vector_index_done",
+            n_docs=getattr(vector_index, "n_docs", None),
+            n_terms=getattr(vector_index, "n_terms", None),
+        )
+        print("TF-IDF search index loaded into memory.")
+    except Exception as exc:
+        print(
+            "Warning: TF-IDF warm-up failed; the first search may still cold-start. "
+            f"Details: {exc}"
+        )
+
+    try:
+        from backend.nli_processor import load_nli_bundle
+
+        log_runtime_event("startup_warm.nli_start")
+        bundle = load_nli_bundle()
+        log_runtime_event(
+            "startup_warm.nli_done",
+            model_name=bundle.get("model_name"),
+            device=str(bundle.get("device")),
+        )
+        print("NLI model loaded into memory.")
+    except Exception as exc:
+        print(
+            "Warning: NLI warm-up failed; the first stance rerank may still cold-start. "
+            f"Details: {exc}"
+        )
+
+
 def initialize_offline_data_pipeline(
     app,
     project_root,
     years=DEFAULT_YEARS,
     min_body_text_chars=DEFAULT_MIN_BODY_TEXT_CHARS,
+    warm_runtime_assets=True,
 ):
     """
     Ensure all offline assets are ready:
@@ -303,7 +363,7 @@ def initialize_offline_data_pipeline(
         db.create_all()
 
         store_body_text = _should_store_body_text()
-        bundled_articles = _load_bundled_guardian_articles()
+        bundled_articles = _load_bundled_guardian_articles(years=years)
         bundled_articles_available = not bundled_articles.empty
         existing_count = GuardianArticle.query.count()
         should_seed = existing_count == 0
@@ -353,7 +413,11 @@ def initialize_offline_data_pipeline(
                 index_dir=DEFAULT_INDEX_DIR,
                 index_name=DEFAULT_INDEX_NAME,
                 force_rebuild=False,
+                years=years,
             )
             print("TF-IDF artifacts are ready.")
         except Exception as exc:
             print(f"Warning: TF-IDF precompute failed; search may fail until rebuilt. Details: {exc}")
+
+        if warm_runtime_assets:
+            _warm_runtime_assets()

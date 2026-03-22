@@ -88,7 +88,7 @@ def build_matches(ranked_articles):
     return matches
 
 
-def build_vector_processor(force_rebuild=False):
+def build_vector_processor(force_rebuild=False, ensure_preprocessed=True):
     global _vector_index, _vector_index_doc_count
 
     current_doc_count = GuardianArticle.query.count()
@@ -130,12 +130,13 @@ def build_vector_processor(force_rebuild=False):
             doc_count=current_doc_count,
             force_rebuild=bool(force_rebuild),
         )
-        preprocess_tfidf_index(
-            db_path=_resolve_db_path(),
-            index_dir=DEFAULT_INDEX_DIR,
-            index_name=DEFAULT_INDEX_NAME,
-            force_rebuild=force_rebuild,
-        )
+        if ensure_preprocessed:
+            preprocess_tfidf_index(
+                db_path=_resolve_db_path(),
+                index_dir=DEFAULT_INDEX_DIR,
+                index_name=DEFAULT_INDEX_NAME,
+                force_rebuild=force_rebuild,
+            )
         log_runtime_event("vector_processor.load_start", index_name=DEFAULT_INDEX_NAME)
         vector_index, _meta = load_search_index(
             index_dir=DEFAULT_INDEX_DIR,
