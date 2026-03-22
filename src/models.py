@@ -22,3 +22,22 @@ class GuardianArticle(db.Model):
 
     def __repr__(self):
         return f"GuardianArticle<{self.id}>"
+
+
+class GuardianArticleClaim(db.Model):
+    __tablename__ = "guardian_article_claims"
+
+    article_id = db.Column(db.String(255), primary_key=True)
+    title = db.Column(db.String(512), nullable=True)
+    year = db.Column(db.Integer, nullable=True, index=True)
+    central_claim_summary = db.Column(db.Text, nullable=False)
+    has_clear_central_thesis = db.Column(db.Boolean, nullable=True)
+    thesis_sentence_id = db.Column(db.String(64), nullable=True)
+    thesis_sentence = db.Column(db.Text, nullable=True)
+    support_sentence_ids = db.Column(db.JSON, nullable=False, default=list)
+    support_sentences = db.Column(db.JSON, nullable=False, default=list)
+    secondary_claim_ids = db.Column(db.JSON, nullable=False, default=list)
+    secondary_claim_sentences = db.Column(db.JSON, nullable=False, default=list)
+
+    def __repr__(self):
+        return f"GuardianArticleClaim<{self.article_id}>"

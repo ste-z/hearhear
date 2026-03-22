@@ -51,7 +51,14 @@ def tfidf_cos_search(query, top_n=100):
         query_chars=len(query),
         top_n=int(top_n),
     )
-    processor = build_vector_processor()
+    try:
+        processor = build_vector_processor()
+    except RuntimeError as exc:
+        log_runtime_event(
+            "tfidf_cos_search.keyword_fallback",
+            reason=str(exc),
+        )
+        return keyword_search(query)
     if processor is None:
         log_runtime_event("tfidf_cos_search.no_processor")
         return []

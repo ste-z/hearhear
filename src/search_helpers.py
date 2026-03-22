@@ -61,9 +61,30 @@ def serialize_article(article, score=None):
 
 
 def build_matches(ranked_articles):
+    doc_ids_to_lookup = [
+        article
+        for article, _score in ranked_articles
+        if isinstance(article, str) and article.strip()
+    ]
+    article_map = {}
+    if doc_ids_to_lookup:
+        log_runtime_event(
+            "search_matches.db_lookup_start",
+            doc_id_count=len(doc_ids_to_lookup),
+        )
+        rows = GuardianArticle.query.filter(GuardianArticle.id.in_(doc_ids_to_lookup)).all()
+        article_map = {row.id: row for row in rows}
+        log_runtime_event(
+            "search_matches.db_lookup_done",
+            fetched_count=len(article_map),
+        )
+
     matches = []
     for article, score in ranked_articles:
-        matches.append(serialize_article(article, score=score))
+        resolved_article = article_map.get(article) if isinstance(article, str) else article
+        if resolved_article is None:
+            resolved_article = {"id": article}
+        matches.append(serialize_article(resolved_article, score=score))
     return matches
 
 
@@ -102,7 +123,7 @@ def build_vector_processor(force_rebuild=False):
             DEFAULT_INDEX_NAME,
             preprocess_tfidf_index,
         )
-        from backend.text_processor import VectorizedText
+        from backend.text_processor import load_search_index
 
         log_runtime_event(
             "vector_processor.build_start",
@@ -116,9 +137,11 @@ def build_vector_processor(force_rebuild=False):
             force_rebuild=force_rebuild,
         )
         log_runtime_event("vector_processor.load_start", index_name=DEFAULT_INDEX_NAME)
-        vector_index, _meta = VectorizedText.load(
+        vector_index, _meta = load_search_index(
             index_dir=DEFAULT_INDEX_DIR,
             index_name=DEFAULT_INDEX_NAME,
+            load_articles=False,
+            allow_matrix_fallback=False,
         )
 
         _vector_index = vector_index

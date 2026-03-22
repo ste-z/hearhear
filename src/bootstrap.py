@@ -4,13 +4,19 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import and_, func
 
+from backend.claim_store import (
+    PACKAGED_CLAIM_RESULTS_DIR,
+    expected_claim_record_count,
+    iter_claim_records,
+)
 from backend.data_import import load_and_clean_guardian_years
-from models import GuardianArticle, db
+from models import GuardianArticle, GuardianArticleClaim, db
 
 
 DEFAULT_YEARS = set(range(2010, 2026))
 DEFAULT_MIN_BODY_TEXT_CHARS = 1000
 DEFAULT_BATCH_SIZE = 500
+DEFAULT_CLAIM_BATCH_SIZE = 500
 DEFAULT_BUNDLED_INDEX_DIR = Path(__file__).resolve().parent.parent / "backend" / "data" / "processed" / "vector_index"
 DEFAULT_BUNDLED_INDEX_NAME = "guardian_tfidf"
 STORE_GUARDIAN_BODY_TEXT_ENV = "STORE_GUARDIAN_BODY_TEXT_IN_DB"
@@ -120,6 +126,24 @@ def _clear_stored_body_text():
     return int(updated or 0)
 
 
+def _claim_row_count():
+    return int(db.session.query(func.count(GuardianArticleClaim.article_id)).scalar() or 0)
+
+
+def _existing_claims_need_refresh(claim_root_dir=PACKAGED_CLAIM_RESULTS_DIR):
+    expected_count = expected_claim_record_count(root_dir=claim_root_dir)
+    existing_count = _claim_row_count()
+
+    if expected_count is not None and existing_count != expected_count:
+        return True
+
+    missing_summary_exists = db.session.query(GuardianArticleClaim.article_id).filter(
+        func.trim(func.coalesce(GuardianArticleClaim.central_claim_summary, "")) == "",
+    ).limit(1).first() is not None
+
+    return missing_summary_exists
+
+
 def _persist_guardian_articles(df, batch_size=DEFAULT_BATCH_SIZE, store_body_text=False):
     if df is None or df.empty:
         print("Guardian dataset is empty; skipping initialization.")
@@ -158,6 +182,57 @@ def _persist_guardian_articles(df, batch_size=DEFAULT_BATCH_SIZE, store_body_tex
         db.session.commit()
 
     print(f"Database initialized with {GuardianArticle.query.count()} Guardian articles.")
+
+
+def _persist_guardian_claims(
+    claim_root_dir=PACKAGED_CLAIM_RESULTS_DIR,
+    batch_size=DEFAULT_CLAIM_BATCH_SIZE,
+):
+    claim_root_dir = Path(claim_root_dir)
+    if not claim_root_dir.exists():
+        print(f"Claim results directory not found at {claim_root_dir}; skipping claim initialization.")
+        return
+
+    batch = []
+    for record in iter_claim_records(root_dir=claim_root_dir):
+        claim = GuardianArticleClaim(
+            article_id=_clean_str(record.get("article_id")),
+            title=_clean_str(record.get("title")),
+            year=record.get("year"),
+            central_claim_summary=_clean_str(record.get("central_claim_summary")),
+            has_clear_central_thesis=record.get("has_clear_central_thesis"),
+            thesis_sentence_id=_clean_str(record.get("thesis_sentence_id")),
+            thesis_sentence=_clean_str(record.get("thesis_sentence")),
+            support_sentence_ids=_clean_list(record.get("support_sentence_ids")),
+            support_sentences=_clean_list(record.get("support_sentences")),
+            secondary_claim_ids=_clean_list(record.get("secondary_claim_ids")),
+            secondary_claim_sentences=_clean_list(record.get("secondary_claim_sentences")),
+        )
+        batch.append(claim)
+
+        if len(batch) >= batch_size:
+            db.session.bulk_save_objects(batch)
+            db.session.commit()
+            batch.clear()
+
+    if batch:
+        db.session.bulk_save_objects(batch)
+        db.session.commit()
+
+    print(
+        f"Claims database initialized with {_claim_row_count()} rows from {claim_root_dir}."
+    )
+
+
+def _seed_guardian_claims(
+    claim_root_dir=PACKAGED_CLAIM_RESULTS_DIR,
+    batch_size=DEFAULT_CLAIM_BATCH_SIZE,
+):
+    _persist_guardian_claims(
+        claim_root_dir=claim_root_dir,
+        batch_size=batch_size,
+    )
+    return "packaged_claim_results"
 
 
 def _load_bundled_guardian_articles():
@@ -219,9 +294,10 @@ def initialize_offline_data_pipeline(
     min_body_text_chars=DEFAULT_MIN_BODY_TEXT_CHARS,
 ):
     """
-    Ensure both offline assets are ready:
+    Ensure all offline assets are ready:
       1) SQLite guardian_articles table
-      2) TF-IDF vector index artifacts
+      2) SQLite guardian_article_claims table
+      3) TF-IDF vector index artifacts
     """
     with app.app_context():
         db.create_all()
@@ -253,6 +329,17 @@ def initialize_offline_data_pipeline(
             cleared_rows = _clear_stored_body_text()
             if cleared_rows:
                 print(f"Cleared stored article body text from {cleared_rows} Guardian rows.")
+
+        existing_claim_count = _claim_row_count()
+        should_seed_claims = existing_claim_count == 0
+        if existing_claim_count > 0 and _existing_claims_need_refresh():
+            print("Existing Guardian claim rows do not match the packaged claim data. Rebuilding claim table.")
+            GuardianArticleClaim.query.delete()
+            db.session.commit()
+            should_seed_claims = True
+
+        if should_seed_claims:
+            _seed_guardian_claims()
 
         try:
             from backend.text_preprocess import (

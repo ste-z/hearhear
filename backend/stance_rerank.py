@@ -1,4 +1,4 @@
-from backend.claim_store import get_claim_record
+from backend.claim_store import get_claim_records
 from backend.nli_processor import (
     normalize_stance_score,
     score_nli_pairs,
@@ -123,10 +123,12 @@ def rerank_article_matches_by_statement(
         log_runtime_event("stance_rerank.no_statement")
         return matches
 
+    claim_records = get_claim_records(matches)
+
     indexed_claims = []
     premises = []
     for idx, match in enumerate(matches):
-        claim_record = get_claim_record(match.get("id"))
+        claim_record = claim_records.get(str(match.get("id") or "").strip())
         matches[idx].update(_claim_payload(claim_record))
         claim_summary = matches[idx].get("central_claim_summary")
         if claim_summary:

@@ -10,24 +10,8 @@ DEFAULT_MAX_LENGTH = 512
 CLAIMNESS_HYPOTHESIS = "This sentence is the author's main claim."
 
 
-def _import_torch():
-    try:
-        import torch
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "PyTorch is required for stance reranking. Install the 'torch' package in the active environment."
-        ) from exc
-    return torch
-
-
-def _import_transformers():
-    try:
-        from transformers import AutoModelForSequenceClassification, AutoTokenizer
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "transformers is required for stance reranking. Install the 'transformers' package in the active environment."
-        ) from exc
-    return AutoModelForSequenceClassification, AutoTokenizer
+import torch
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 
 def _default_device(torch):
@@ -41,8 +25,6 @@ def _default_device(torch):
 @lru_cache(maxsize=1)
 def load_nli_bundle(model_name=MODEL_NAME):
     log_runtime_event("nli_bundle.load_start", model_name=model_name)
-    torch = _import_torch()
-    AutoModelForSequenceClassification, AutoTokenizer = _import_transformers()
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
