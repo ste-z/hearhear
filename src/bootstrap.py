@@ -40,6 +40,13 @@ def _clean_list(value):
 def _clean_datetime(value):
     if _is_missing(value):
         return None
+
+    if isinstance(value, str):
+        parsed = pd.to_datetime(value, utc=True, errors="coerce")
+        if _is_missing(parsed):
+            return None
+        return parsed.to_pydatetime()
+
     if hasattr(value, "to_pydatetime"):
         py_dt = value.to_pydatetime()
         return None if _is_missing(py_dt) else py_dt
