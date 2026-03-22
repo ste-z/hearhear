@@ -63,6 +63,23 @@ def _normalized_years(years):
     return {int(year) for year in set(years or [])}
 
 
+def _filter_articles_to_years(articles, years=None):
+    if articles is None:
+        return pd.DataFrame()
+    if not isinstance(articles, pd.DataFrame):
+        raise TypeError("articles must be a pandas DataFrame.")
+    if articles.empty:
+        return articles.reset_index(drop=True).copy()
+
+    expected_years = _normalized_years(years)
+    if not expected_years or "year" not in articles.columns:
+        return articles.reset_index(drop=True).copy()
+
+    normalized = articles.reset_index(drop=True).copy()
+    article_years = pd.to_numeric(normalized["year"], errors="coerce").astype("Int64")
+    return normalized.loc[article_years.isin(expected_years)].reset_index(drop=True).copy()
+
+
 def _env_flag(name, default=False):
     value = os.getenv(name)
     if value is None:
@@ -235,7 +252,7 @@ def _seed_guardian_claims(
     return "packaged_claim_results"
 
 
-def _load_bundled_guardian_articles():
+def _load_bundled_guardian_articles(years=None):
     articles_path = DEFAULT_BUNDLED_INDEX_DIR / f"{DEFAULT_BUNDLED_INDEX_NAME}_articles.pkl"
     if not articles_path.exists():
         return pd.DataFrame()
@@ -250,7 +267,7 @@ def _load_bundled_guardian_articles():
         print(f"Warning: bundled article snapshot at {articles_path} is not a DataFrame.")
         return pd.DataFrame()
 
-    return articles.reset_index(drop=True).copy()
+    return _filter_articles_to_years(articles, years=years)
 
 
 def _seed_guardian_articles(
@@ -262,7 +279,9 @@ def _seed_guardian_articles(
     store_body_text=False,
 ):
     if bundled_articles is None:
-        bundled_articles = _load_bundled_guardian_articles()
+        bundled_articles = _load_bundled_guardian_articles(years=years)
+    else:
+        bundled_articles = _filter_articles_to_years(bundled_articles, years=years)
     if not bundled_articles.empty:
         print("Seeding Guardian articles from bundled vector index metadata.")
         _persist_guardian_articles(
@@ -303,7 +322,7 @@ def initialize_offline_data_pipeline(
         db.create_all()
 
         store_body_text = _should_store_body_text()
-        bundled_articles = _load_bundled_guardian_articles()
+        bundled_articles = _load_bundled_guardian_articles(years=years)
         bundled_articles_available = not bundled_articles.empty
         existing_count = GuardianArticle.query.count()
         should_seed = existing_count == 0
@@ -353,6 +372,7 @@ def initialize_offline_data_pipeline(
                 index_dir=DEFAULT_INDEX_DIR,
                 index_name=DEFAULT_INDEX_NAME,
                 force_rebuild=False,
+                years=years,
             )
             print("TF-IDF artifacts are ready.")
         except Exception as exc:
