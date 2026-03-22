@@ -14,6 +14,7 @@ export type Article = {
   topic_score_normalized?: number | null
   stance_label?: string | null
   stance_entailment_prob?: number | null
+  stance_neutral_prob?: number | null
   stance_contradiction_prob?: number | null
   thesis_sentence?: string | null
   support_sentences?: string[] | null

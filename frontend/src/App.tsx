@@ -429,15 +429,41 @@ function App(): JSX.Element {
     return parsed.toLocaleDateString()
   }
 
-  const formatScore = (value?: number | null): string => {
-    if (value === undefined || value === null || Number.isNaN(value)) return 'n/a'
-    return value.toFixed(3)
+  const clampUnitScore = (value?: number | null): number | null => {
+    if (value === undefined || value === null || Number.isNaN(value)) return null
+    return Math.max(0, Math.min(1, value))
   }
 
   const formatPercent = (value?: number | null): string => {
-    if (value === undefined || value === null || Number.isNaN(value)) return 'n/a'
-    return `${Math.round(value * 100)}%`
+    const normalized = clampUnitScore(value)
+    if (normalized === null) return 'n/a'
+    return `${Math.round(normalized * 100)}%`
   }
+
+  const getMeterWidth = (value?: number | null): string => {
+    const normalized = clampUnitScore(value)
+    return `${Math.round((normalized ?? 0) * 100)}%`
+  }
+
+  const renderMetricInfo = (
+    label: string,
+    tooltipId: string,
+    explanation: string,
+  ): JSX.Element => (
+    <span className="metric-info-wrap">
+      <button
+        type="button"
+        className="metric-info-button"
+        aria-label={`Explain ${label.toLowerCase()}`}
+        aria-describedby={tooltipId}
+      >
+        i
+      </button>
+      <span id={tooltipId} role="tooltip" className="metric-info-tooltip">
+        {explanation}
+      </span>
+    </span>
+  )
 
   const parseWeightInput = (value: string, fallback: number): number => {
     if (value.trim() === '') return fallback
@@ -638,13 +664,24 @@ function App(): JSX.Element {
     setIsAboutOpen(true)
   }
   const showScoreGrid = (article: Article): boolean => (
-    article.combined_score !== undefined ||
-    article.stance_score_normalized !== undefined ||
-    article.topic_score_normalized !== undefined
+    article.combined_score != null ||
+    article.stance_score_normalized != null ||
+    article.topic_score_normalized != null
   )
-  const formatArticleLabel = (label?: string | null): string => (
-    label ? label.replace(/_/g, ' ') : 'Relevant'
+  const hasStanceSignals = (article: Article): boolean => (
+    article.stance_entailment_prob != null ||
+    article.stance_neutral_prob != null ||
+    article.stance_contradiction_prob != null
   )
+
+  const formatArticleLabel = (label?: string | null): string => {
+    const normalized = label?.toLowerCase() ?? ''
+
+    if (normalized.includes('support') || normalized.includes('entail')) return 'Supports you'
+    if (normalized.includes('contradict')) return 'Pushes back'
+    if (normalized.includes('neutral')) return 'Mixed / unclear'
+    return 'Related'
+  }
 
   const getArticleTone = (label?: string | null): string => {
     const normalized = label?.toLowerCase() ?? ''
@@ -653,6 +690,41 @@ function App(): JSX.Element {
     if (normalized.includes('contradict')) return 'contradict'
     if (normalized.includes('neutral')) return 'neutral'
     return 'default'
+  }
+
+  const getMatchSummary = (article: Article): string => {
+    if (article.stance_score_normalized === undefined || article.stance_score_normalized === null) {
+      return 'This article ranked mainly on subject overlap because no clear claim comparison was available yet.'
+    }
+
+    const normalized = article.stance_label?.toLowerCase() ?? ''
+
+    if (normalized.includes('support') || normalized.includes('entail')) {
+      return 'This article stays on your topic and likely supports your position.'
+    }
+    if (normalized.includes('contradict')) {
+      return 'This article stays on your topic but likely argues against your position.'
+    }
+    if (normalized.includes('neutral')) {
+      return 'This article stays on your topic, but its position looks mixed or unclear.'
+    }
+    return 'This article is on your topic and was compared against your statement.'
+  }
+
+  const getOverviewHint = (article: Article): string => {
+    const hasThesis = Boolean(article.thesis_sentence)
+    const hasSupport = Boolean(article.support_sentences && article.support_sentences.length > 0)
+
+    if (hasThesis && hasSupport) {
+      return 'Expand to see the thesis and support sentences.'
+    }
+    if (hasThesis) {
+      return 'Expand to see the thesis sentence.'
+    }
+    if (hasSupport) {
+      return 'Expand to see the support sentences.'
+    }
+    return 'Expand to see the article overview.'
   }
 
   const resultsDescription = useMemo(() => {
@@ -1040,8 +1112,11 @@ function App(): JSX.Element {
 
             {!loading && !error && articles.length > 0 && (
               <div id="answer-box">
-                {articles.map((article) => (
-                  <article key={article.id} className="article-item">
+                {articles.map((article) => {
+                  const articleTooltipBase = String(article.id).replace(/[^a-zA-Z0-9_-]/g, '-')
+
+                  return (
+                    <article key={article.id} className="article-item">
                     <div className="article-topline">
                       <span className={`article-kicker ${getArticleTone(article.stance_label)}`}>
                         {formatArticleLabel(article.stance_label)}
@@ -1065,50 +1140,151 @@ function App(): JSX.Element {
                     )}
 
                     {showScoreGrid(article) && (
-                      <div className="score-grid">
-                        <div className="score-chip">
-                          <span>Combined</span>
-                          <strong>{formatScore(article.combined_score)}</strong>
+                      <div className="match-panel">
+                        <div className="match-panel-header">
+                          <div className="match-panel-eyebrow">Why it ranked here</div>
+                          <div className="match-panel-summary">{getMatchSummary(article)}</div>
                         </div>
-                        <div className="score-chip">
-                          <span>Topic</span>
-                          <strong>{formatScore(article.topic_score_normalized)}</strong>
-                        </div>
-                        <div className="score-chip">
-                          <span>Stance</span>
-                          <strong>{formatScore(article.stance_score_normalized)}</strong>
-                        </div>
-                        <div className="score-chip">
-                          <span>Label</span>
-                          <strong>{formatArticleLabel(article.stance_label)}</strong>
-                        </div>
-                        <div className="score-chip">
-                          <span>Entail</span>
-                          <strong>{formatPercent(article.stance_entailment_prob)}</strong>
-                        </div>
-                        <div className="score-chip">
-                          <span>Contradict</span>
-                          <strong>{formatPercent(article.stance_contradiction_prob)}</strong>
+
+                        <div className="match-score-stack">
+                          <div className="match-metric-card overall">
+                            <div className="match-metric-header">
+                              <div className="match-metric-heading">
+                                <div className="match-metric-label">Overall match</div>
+                                {renderMetricInfo(
+                                  'Overall match',
+                                  `${articleTooltipBase}-overall-help`,
+                                  'Final ranking after combining topic match and agreement.',
+                                )}
+                              </div>
+                              <div className="match-metric-value">{formatPercent(article.combined_score)}</div>
+                            </div>
+                            <div className="match-meter" aria-hidden="true">
+                              <span
+                                className="match-meter-fill overall"
+                                style={{ width: getMeterWidth(article.combined_score) }}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="match-input-grid">
+                            <div className="match-metric-card source">
+                              <div className="match-metric-header">
+                                <div className="match-metric-heading">
+                                  <div className="match-metric-label">Topic match</div>
+                                  {renderMetricInfo(
+                                    'Topic match',
+                                    `${articleTooltipBase}-topic-help`,
+                                    'How closely the article matches your subject in the first text pass.',
+                                  )}
+                                </div>
+                                <div className="match-metric-value">{formatPercent(article.topic_score_normalized)}</div>
+                              </div>
+                              <div className="match-meter" aria-hidden="true">
+                                <span
+                                  className="match-meter-fill topic"
+                                  style={{ width: getMeterWidth(article.topic_score_normalized) }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="agreement-branch" tabIndex={0}>
+                              <div className="match-metric-card source agreement">
+                                <div className="match-metric-header">
+                                  <div className="match-metric-heading">
+                                    <div className="match-metric-label">Agreement</div>
+                                    {renderMetricInfo(
+                                      'Agreement',
+                                      `${articleTooltipBase}-agreement-help`,
+                                      'How closely the article\'s main claim seems to align with your view.',
+                                    )}
+                                  </div>
+                                  <div className="match-metric-value">{formatPercent(article.stance_score_normalized)}</div>
+                                </div>
+                                <div className="match-meter" aria-hidden="true">
+                                  <span
+                                    className="match-meter-fill stance"
+                                    style={{ width: getMeterWidth(article.stance_score_normalized) }}
+                                  />
+                                </div>
+                              </div>
+
+                              {hasStanceSignals(article) && (
+                                <div className="agreement-hover-panel">
+                                  <div className="agreement-hover-title">Agreement is based on</div>
+                                  <div className="stance-read-panel">
+                                    <div className="stance-read-grid">
+                                      <div className="stance-read-row">
+                                        <div className="stance-read-label">Supports your view</div>
+                                        <div className="stance-read-bar" aria-hidden="true">
+                                          <span
+                                            className="stance-read-fill support"
+                                            style={{ width: getMeterWidth(article.stance_entailment_prob) }}
+                                          />
+                                        </div>
+                                        <div className="stance-read-value">{formatPercent(article.stance_entailment_prob)}</div>
+                                      </div>
+
+                                      <div className="stance-read-row">
+                                        <div className="stance-read-label">Mixed or unclear</div>
+                                        <div className="stance-read-bar" aria-hidden="true">
+                                          <span
+                                            className="stance-read-fill neutral"
+                                            style={{ width: getMeterWidth(article.stance_neutral_prob) }}
+                                          />
+                                        </div>
+                                        <div className="stance-read-value">{formatPercent(article.stance_neutral_prob)}</div>
+                                      </div>
+
+                                      <div className="stance-read-row">
+                                        <div className="stance-read-label">Pushes back</div>
+                                        <div className="stance-read-bar" aria-hidden="true">
+                                          <span
+                                            className="stance-read-fill contradict"
+                                            style={{ width: getMeterWidth(article.stance_contradiction_prob) }}
+                                          />
+                                        </div>
+                                        <div className="stance-read-value">{formatPercent(article.stance_contradiction_prob)}</div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     )}
 
-                    {article.thesis_sentence && (
-                      <div className="sentence-block">
-                        <h4>Thesis sentence</h4>
-                        <p>{article.thesis_sentence}</p>
-                      </div>
-                    )}
+                    {(article.thesis_sentence || (article.support_sentences && article.support_sentences.length > 0)) && (
+                      <details className="content-disclosure">
+                        <summary className="content-disclosure-summary">
+                          <span className="content-disclosure-copy">
+                            <span className="content-disclosure-title">Overview</span>
+                            <span className="content-disclosure-hint">{getOverviewHint(article)}</span>
+                          </span>
+                          <span className="content-disclosure-status" aria-hidden="true" />
+                        </summary>
+                        <div className="sentence-block">
+                          {article.thesis_sentence && (
+                            <div className="overview-group">
+                              <div className="overview-label">Thesis sentence</div>
+                              <p>{article.thesis_sentence}</p>
+                            </div>
+                          )}
 
-                    {article.support_sentences && article.support_sentences.length > 0 && (
-                      <div className="sentence-block">
-                        <h4>Support sentences</h4>
-                        <ul className="sentence-list">
-                          {article.support_sentences.map((sentence, index) => (
-                            <li key={`${article.id}-support-${index}`}>{sentence}</li>
-                          ))}
-                        </ul>
-                      </div>
+                          {article.support_sentences && article.support_sentences.length > 0 && (
+                            <div className="overview-group">
+                              <div className="overview-label">Support sentences</div>
+                              <ul className="sentence-list">
+                                {article.support_sentences.map((sentence, index) => (
+                                  <li key={`${article.id}-support-${index}`}>{sentence}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      </details>
                     )}
 
                     {showScoreGrid(article) && !article.central_claim_summary && (
@@ -1117,23 +1293,8 @@ function App(): JSX.Element {
                       </p>
                     )}
 
-                    <div className="article-footer-row">
-                      <div className="similarity-block">
-                        <div className="similarity-title">Cosine similarity</div>
-                        <div className="similarity-row">
-                          <div className="similarity-bar">
-                            <div
-                              className="similarity-fill"
-                              style={{ width: `${(article.score ?? 0) * 100}%` }}
-                            />
-                          </div>
-                          <span className="similarity-label">
-                            {formatPercent(article.score)}
-                          </span>
-                        </div>
-                      </div>
-
-                      {article.keywords && article.keywords.length > 0 && (
+                    {article.keywords && article.keywords.length > 0 && (
+                      <div className="article-footer-row">
                         <div className="keyword-block">
                           <p>Keywords</p>
                           <div className="keyword-list">
@@ -1142,10 +1303,11 @@ function App(): JSX.Element {
                             ))}
                           </div>
                         </div>
-                      )}
-                    </div>
-                  </article>
-                ))}
+                      </div>
+                    )}
+                    </article>
+                  )
+                })}
               </div>
             )}
 
