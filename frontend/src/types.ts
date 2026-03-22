@@ -1,56 +1,35 @@
-export interface Article {
-  id: string;
-  title: string;
-  summary: string;
-  date: string | null;
-  url: string;
-  authors: string[];
-  author_display: string;
-  author_raw: string;
-  year: number;
-  n_contributors: number;
-  keywords: string[];
-  score?: number;
-  central_claim_summary?: string | null;
-  has_clear_central_thesis?: boolean | null;
-  thesis_sentence_id?: string | null;
-  thesis_sentence?: string | null;
-  support_sentence_ids?: string[];
-  support_sentences?: string[];
-  secondary_claim_ids?: string[];
-  secondary_claim_sentences?: string[];
-  claim_available?: boolean;
-  topic_statement?: string;
-  topic_score?: number | null;
-  topic_score_normalized?: number | null;
-  stance_entailment_prob?: number | null;
-  stance_neutral_prob?: number | null;
-  stance_contradiction_prob?: number | null;
-  stance_score?: number | null;
-  stance_score_normalized?: number | null;
-  stance_label?: string | null;
-  combined_score?: number | null;
-  topic_weight?: number | null;
-  stance_weight?: number | null;
-  rerank_position?: number | null;
-  selected_thesis_sentence?: string | null;
-  selected_thesis_id?: string | null;
-  essay_query_text?: string | null;
+export type Article = {
+  id: string | number
+  title: string
+  url: string
+  summary: string
+  date: string | null
+  author_display?: string | null
+  author_raw?: string | null
+  score?: number | null
+  keywords?: string[] | null
+  central_claim_summary?: string | null
+  combined_score?: number | null
+  stance_score_normalized?: number | null
+  topic_score_normalized?: number | null
+  stance_label?: string | null
+  stance_entailment_prob?: number | null
+  stance_contradiction_prob?: number | null
+  thesis_sentence?: string | null
+  support_sentences?: string[] | null
 }
 
-export interface EssayClaimCandidate {
-  sentence_id: string;
-  sentence: string;
-  entailment_prob: number;
-  neutral_prob: number;
-  contradiction_prob: number;
-  claim_score: number;
-  claim_score_normalized: number;
-  claim_label: string;
+export type EssayClaimCandidate = {
+  sentence_id: string
+  sentence: string
+  score?: number | null
 }
 
-export interface EssayClaimCandidateResponse {
-  essay_text: string;
-  sentence_count: number;
-  candidates: EssayClaimCandidate[];
+export type EssayClaimCandidateResponse = {
+  essay_text?: string
+  candidates?: EssayClaimCandidate[]
+}
+
+export type EssayTextExtractionResponse = {
+  essay_text?: string
 }
