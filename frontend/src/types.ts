@@ -45,6 +45,7 @@ export type ArticleSearchResponse = {
   results?: Article[] | null
   query_svd_corpus_chart_dimensions?: SvdLatentDimension[] | null
   query_svd_dimensions?: SvdLatentDimension[] | null
+  empty_results_message?: string | null
 }
 
 export type RetrievalModel = 'tfidf' | 'svd'

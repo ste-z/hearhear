@@ -23,12 +23,17 @@ type InputMode = 'stance' | 'essay'
 type IntroStage = 0 | 1 | 2
 type EssayStep = 1 | 2
 type EssayThesisMode = 'candidate' | 'custom'
+type RerankSelectionMode = 'manual' | 'automatic'
 
 type ConfigResponse = {
   use_llm: boolean
   default_retrieval_model?: string | null
   default_normalize_topic_scores?: boolean | null
+  default_rerank_selection_mode?: string | null
+  default_auto_rerank_thresholds?: Partial<Record<RetrievalModel, number | null>> | null
+  max_auto_rerank_candidates?: number | null
   supported_retrieval_models?: string[] | null
+  supported_rerank_selection_modes?: string[] | null
   min_article_year?: number | null
   max_article_year?: number | null
 }
@@ -67,6 +72,12 @@ const finalIntroTopic = introTopicSequence[introTopicSequence.length - 1]
 const introClaimSequence = introClaimsByTopic[finalIntroTopic]
 const landingSeenStorageKey = 'hearhear.hasSeenLanding'
 const defaultSupportedRetrievalModels: RetrievalModel[] = ['svd', 'tfidf']
+const defaultRerankSelectionMode: RerankSelectionMode = 'automatic'
+const defaultAutoRerankThresholds: Record<RetrievalModel, number> = {
+  tfidf: 0.3,
+  svd: 0.6,
+}
+const defaultMaxAutoRerankCandidates = 100
 
 const isRetrievalModel = (value: unknown): value is RetrievalModel => (
   value === 'tfidf' || value === 'svd'
@@ -78,6 +89,37 @@ const normalizeRetrievalModels = (value: unknown): RetrievalModel[] => {
   const filtered = value.filter(isRetrievalModel)
   const unique = Array.from(new Set(filtered))
   return unique.length > 0 ? unique : defaultSupportedRetrievalModels
+}
+
+const isRerankSelectionMode = (value: unknown): value is RerankSelectionMode => (
+  value === 'manual' || value === 'automatic'
+)
+
+const clampAutoRerankThreshold = (value: number): number => (
+  Math.max(0, Math.min(1, value))
+)
+
+const normalizeAutoRerankThresholds = (
+  value: unknown,
+): Record<RetrievalModel, number> => {
+  const nextThresholds = { ...defaultAutoRerankThresholds }
+  if (!value || typeof value !== 'object') {
+    return nextThresholds
+  }
+
+  for (const model of defaultSupportedRetrievalModels) {
+    const candidateValue = (value as Partial<Record<RetrievalModel, unknown>>)[model]
+    if (typeof candidateValue === 'number' && Number.isFinite(candidateValue)) {
+      nextThresholds[model] = clampAutoRerankThreshold(candidateValue)
+    } else if (typeof candidateValue === 'string' && candidateValue.trim() !== '') {
+      const parsed = Number(candidateValue)
+      if (Number.isFinite(parsed)) {
+        nextThresholds[model] = clampAutoRerankThreshold(parsed)
+      }
+    }
+  }
+
+  return nextThresholds
 }
 
 const normalizeConfigYear = (value: unknown): number | null => {
@@ -173,12 +215,14 @@ const normalizeArticleSearchResponse = (
   articles: Article[]
   querySvdCorpusChartDimensions: SvdLatentDimension[]
   querySvdDimensions: SvdLatentDimension[]
+  emptyResultsMessage: string | null
 } => {
   if (Array.isArray(payload)) {
     return {
       articles: payload,
       querySvdCorpusChartDimensions: [],
       querySvdDimensions: [],
+      emptyResultsMessage: null,
     }
   }
 
@@ -189,11 +233,15 @@ const normalizeArticleSearchResponse = (
   const querySvdDimensions = Array.isArray(payload?.query_svd_dimensions)
     ? payload.query_svd_dimensions
     : []
+  const emptyResultsMessage = typeof payload?.empty_results_message === 'string'
+    ? payload.empty_results_message
+    : null
 
   return {
     articles: results,
     querySvdCorpusChartDimensions,
     querySvdDimensions,
+    emptyResultsMessage,
   }
 }
 
@@ -209,6 +257,8 @@ const clampSvdMagnitude = (value: number): number => (
 const formatSvdValue = (value: number): string => (
   `${value >= 0 ? '+' : ''}${value.toFixed(3)}`
 )
+
+const formatThresholdValue = (value: number): string => value.toFixed(2)
 
 const getSvdAnchor = (x: number): 'start' | 'middle' | 'end' => {
   if (x < SVD_RADAR_CENTER - 18) return 'end'
@@ -635,6 +685,13 @@ function App(): JSX.Element {
   const [stanceWeight, setStanceWeight] = useState<number>(0.4)
   const [recencyWeight, setRecencyWeight] = useState<number>(0.2)
   const [rerankTopK, setRerankTopK] = useState<number>(20)
+  const [rerankSelectionMode, setRerankSelectionMode] = useState<RerankSelectionMode>(defaultRerankSelectionMode)
+  const [autoRerankThresholds, setAutoRerankThresholds] = useState<Record<RetrievalModel, number>>(
+    defaultAutoRerankThresholds,
+  )
+  const [maxAutoRerankCandidates, setMaxAutoRerankCandidates] = useState<number>(
+    defaultMaxAutoRerankCandidates,
+  )
   const [normalizeTopicScores, setNormalizeTopicScores] = useState<boolean>(false)
   const [retrievalModel, setRetrievalModel] = useState<RetrievalModel>('svd')
   const [minArticleYear, setMinArticleYear] = useState<number | null>(null)
@@ -653,6 +710,7 @@ function App(): JSX.Element {
   const [importedPdfName, setImportedPdfName] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
+  const [emptyResultsMessage, setEmptyResultsMessage] = useState<string | null>(null)
   const [isAboutOpen, setIsAboutOpen] = useState<boolean>(false)
   const [activeAboutTab, setActiveAboutTab] = useState<InputMode>('stance')
   const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false)
@@ -692,6 +750,19 @@ function App(): JSX.Element {
         setRetrievalModel(currentModel => (
           supportedModels.includes(currentModel) ? currentModel : resolvedModel
         ))
+        setRerankSelectionMode(currentMode => (
+          isRerankSelectionMode(data.default_rerank_selection_mode)
+            ? data.default_rerank_selection_mode
+            : currentMode
+        ))
+        setAutoRerankThresholds(normalizeAutoRerankThresholds(data.default_auto_rerank_thresholds))
+        if (
+          typeof data.max_auto_rerank_candidates === 'number'
+          && Number.isFinite(data.max_auto_rerank_candidates)
+          && data.max_auto_rerank_candidates > 0
+        ) {
+          setMaxAutoRerankCandidates(Math.round(data.max_auto_rerank_candidates))
+        }
         if (
           nextMinArticleYear !== null &&
           nextMaxArticleYear !== null &&
@@ -715,6 +786,9 @@ function App(): JSX.Element {
         console.error('Config request failed:', configError)
         if (!isActive) return
         setUseLlm(false)
+        setRerankSelectionMode(defaultRerankSelectionMode)
+        setAutoRerankThresholds(defaultAutoRerankThresholds)
+        setMaxAutoRerankCandidates(defaultMaxAutoRerankCandidates)
         setError(
           configError instanceof Error
             ? configError.message
@@ -858,6 +932,7 @@ function App(): JSX.Element {
     setArticles([])
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
+    setEmptyResultsMessage(null)
     setError(null)
     setHasSubmittedSearch(false)
   }, [inputMode, opinion, recencyWeight, rerankTopK, stanceWeight, topic, topicWeight])
@@ -866,9 +941,19 @@ function App(): JSX.Element {
     setArticles([])
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
+    setEmptyResultsMessage(null)
     setError(null)
     setHasSubmittedSearch(false)
-  }, [inputMode, recencyWeight, rerankTopK, retrievalModel, stanceWeight, topicWeight])
+  }, [
+    autoRerankThresholds,
+    inputMode,
+    recencyWeight,
+    rerankSelectionMode,
+    rerankTopK,
+    retrievalModel,
+    stanceWeight,
+    topicWeight,
+  ])
 
   useEffect(() => {
     if (inputMode !== 'essay') {
@@ -883,6 +968,7 @@ function App(): JSX.Element {
     setArticles([])
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
+    setEmptyResultsMessage(null)
     setError(null)
     setHasSubmittedSearch(false)
   }, [inputMode, searchTerm])
@@ -1039,6 +1125,7 @@ function App(): JSX.Element {
   const canUseTfidf = supportedRetrievalModels.includes('tfidf')
   const isSvdEnabled = retrievalModel === 'svd'
   const canToggleSvd = canUseSvd && canUseTfidf
+  const currentAutoRerankThreshold = autoRerankThresholds[retrievalModel]
   const availableYears = useMemo(() => {
     if (minArticleYear === null || maxArticleYear === null || minArticleYear > maxArticleYear) {
       return []
@@ -1127,6 +1214,24 @@ function App(): JSX.Element {
     const parsed = Number(value)
     if (Number.isNaN(parsed)) return fallback
     return Math.min(100, Math.max(1, Math.round(parsed)))
+  }
+
+  const parseAutoRerankThresholdInput = (value: string, fallback: number): number => {
+    if (value.trim() === '') return fallback
+    const parsed = Number(value)
+    if (Number.isNaN(parsed)) return fallback
+    return clampAutoRerankThreshold(parsed)
+  }
+
+  const updateCurrentAutoRerankThreshold = (value: string): void => {
+    const nextThreshold = parseAutoRerankThresholdInput(
+      value,
+      autoRerankThresholds[retrievalModel],
+    )
+    setAutoRerankThresholds(currentThresholds => ({
+      ...currentThresholds,
+      [retrievalModel]: nextThreshold,
+    }))
   }
 
   const handleYearStartChange = (value: string): void => {
@@ -1271,6 +1376,8 @@ function App(): JSX.Element {
     setError(null)
     setArticles([])
     setQuerySvdCorpusChartDimensions([])
+    setQuerySvdDimensions([])
+    setEmptyResultsMessage(null)
 
     try {
       const response = await fetch('/api/articles', {
@@ -1288,6 +1395,8 @@ function App(): JSX.Element {
           top_k: rerankTopK,
           normalize_topic_scores: normalizeTopicScores,
           retrieval_model: retrievalModel,
+          rerank_selection_mode: rerankSelectionMode,
+          rerank_threshold: currentAutoRerankThreshold,
           year_start: resolvedYearStart,
           year_end: resolvedYearEnd,
         }),
@@ -1298,11 +1407,13 @@ function App(): JSX.Element {
       setArticles(normalized.articles)
       setQuerySvdCorpusChartDimensions(normalized.querySvdCorpusChartDimensions)
       setQuerySvdDimensions(normalized.querySvdDimensions)
+      setEmptyResultsMessage(normalized.emptyResultsMessage)
     } catch (fetchError) {
       console.error('Search request failed:', fetchError)
       setArticles([])
       setQuerySvdCorpusChartDimensions([])
       setQuerySvdDimensions([])
+      setEmptyResultsMessage(null)
       setError(fetchError instanceof Error ? fetchError.message : 'Search request failed.')
     } finally {
       setLoading(false)
@@ -1317,6 +1428,7 @@ function App(): JSX.Element {
     setArticles([])
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
+    setEmptyResultsMessage(null)
 
     try {
       const formData = new FormData()
@@ -1376,8 +1488,10 @@ function App(): JSX.Element {
     }
     setLoading(true)
     setError(null)
+    setArticles([])
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
+    setEmptyResultsMessage(null)
 
     try {
       const response = await fetch('/api/articles', {
@@ -1396,6 +1510,8 @@ function App(): JSX.Element {
           top_k: rerankTopK,
           normalize_topic_scores: normalizeTopicScores,
           retrieval_model: retrievalModel,
+          rerank_selection_mode: rerankSelectionMode,
+          rerank_threshold: currentAutoRerankThreshold,
           year_start: resolvedYearStart,
           year_end: resolvedYearEnd,
         }),
@@ -1406,11 +1522,13 @@ function App(): JSX.Element {
       setArticles(normalized.articles)
       setQuerySvdCorpusChartDimensions(normalized.querySvdCorpusChartDimensions)
       setQuerySvdDimensions(normalized.querySvdDimensions)
+      setEmptyResultsMessage(normalized.emptyResultsMessage)
     } catch (fetchError) {
       console.error('Essay search failed:', fetchError)
       setArticles([])
       setQuerySvdCorpusChartDimensions([])
       setQuerySvdDimensions([])
+      setEmptyResultsMessage(null)
       setError(fetchError instanceof Error ? fetchError.message : 'Essay search failed.')
     } finally {
       setLoading(false)
@@ -1580,6 +1698,9 @@ function App(): JSX.Element {
     }
 
     if (articles.length === 0) {
+      if (emptyResultsMessage) {
+        return emptyResultsMessage
+      }
       return (
         `No matching articles came back${yearRangeSummary} this time. `
         + 'Try broadening the topic, sharpening the claim, or widening the year range.'
@@ -1590,7 +1711,7 @@ function App(): JSX.Element {
       `${articles.length} Guardian opinion ${articles.length === 1 ? 'piece' : 'pieces'}`
       + `${yearRangeSummary} ranked with your current search settings.`
     )
-  }, [articles.length, error, hasSubmittedSearch, inputMode, loading, yearRangeSummary])
+  }, [articles.length, emptyResultsMessage, error, hasSubmittedSearch, inputMode, loading, yearRangeSummary])
 
   return (
     <div className="experience-shell">
@@ -2354,7 +2475,7 @@ function App(): JSX.Element {
             {!loading && !error && articles.length === 0 && (
               <div className="results-empty-card searched">
                 <p>
-                  {`No matching articles were returned${yearRangeSummary}. Try broadening the topic, making the stance more explicit, or widening the year range.`}
+                  {emptyResultsMessage || `No matching articles were returned${yearRangeSummary}. Try broadening the topic, making the stance more explicit, or widening the year range.`}
                 </p>
               </div>
             )}
@@ -2427,9 +2548,8 @@ function App(): JSX.Element {
                   <section className="about-section">
                     <p className="about-section-label">Stage 2</p>
                     <p className="modal-copy">
-                      <strong>Stage 2: Stance relevance.</strong> From the top {rerankTopK}{' '}
-                      {rerankTopK === 1 ? 'article' : 'articles'} identified in Stage 1, we then rank
-                      them based on how they relate to your opinion. We use a Natural Language
+                      <strong>Stage 2: Stance relevance.</strong> From the candidate articles identified
+                      in Stage 1, we then rank them based on how they relate to your opinion. We use a Natural Language
                       Inference (NLI) model, DeBERTa (Decoding-enhanced BERT with disentangled
                       attention), to compare your claim with each article&apos;s central argument
                       (extracted using an LLM). The model estimates whether each article supports,
@@ -2468,9 +2588,8 @@ function App(): JSX.Element {
                   <section className="about-section">
                     <p className="about-section-label">Stage 3</p>
                     <p className="modal-copy">
-                      <strong>Stage 3: Thesis relevance.</strong> From the top {rerankTopK}{' '}
-                      {rerankTopK === 1 ? 'article' : 'articles'} identified in Stage 2, we then rank
-                      them based on how they relate to your selected thesis. We use a DeBERTa NLI
+                      <strong>Stage 3: Thesis relevance.</strong> From the candidate articles identified
+                      in Stage 2, we then rank them based on how they relate to your selected thesis. We use a DeBERTa NLI
                       model to compare your chosen thesis sentence with each article&apos;s central
                       argument, which was extracted beforehand using an LLM. The model estimates
                       whether each article supports, contradicts, or is neutral toward your thesis.
@@ -2605,20 +2724,71 @@ function App(): JSX.Element {
               </button>
             </div>
             <div className="modal-settings-grid">
-              <label className="weight-card full-row">
-                <span>Top K</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="100"
-                  step="1"
-                  value={rerankTopK}
-                  onChange={(e) => setRerankTopK(parseTopKInput(e.target.value, rerankTopK))}
-                />
+              <div className="weight-card full-row settings-selection-card">
+                <span>Stage 2 candidate selection</span>
+                <div className="retrieval-model-grid">
+                  <button
+                    type="button"
+                    className={`retrieval-model-button ${rerankSelectionMode === 'manual' ? 'active' : ''}`}
+                    onClick={() => setRerankSelectionMode('manual')}
+                  >
+                    <strong>Manual K</strong>
+                    <p>Use a fixed number of top topic matches.</p>
+                  </button>
+                  <button
+                    type="button"
+                    className={`retrieval-model-button ${rerankSelectionMode === 'automatic' ? 'active' : ''}`}
+                    onClick={() => setRerankSelectionMode('automatic')}
+                  >
+                    <strong>Automatic threshold</strong>
+                    <p>Only move articles forward when their raw topic relevance clears a threshold.</p>
+                  </button>
+                </div>
+                {rerankSelectionMode === 'manual' ? (
+                  <label className="settings-inline-field settings-range-field">
+                    <div className="settings-range-header">
+                      <span>Top K</span>
+                      <strong className="settings-range-value">{rerankTopK}</strong>
+                    </div>
+                    <input
+                      type="range"
+                      min="1"
+                      max="100"
+                      step="1"
+                      value={rerankTopK}
+                      onChange={(e) => setRerankTopK(parseTopKInput(e.target.value, rerankTopK))}
+                    />
+                    <div className="settings-range-scale" aria-hidden="true">
+                      <span>1</span>
+                      <span>100</span>
+                    </div>
+                  </label>
+                ) : (
+                  <label className="settings-inline-field settings-range-field">
+                    <div className="settings-range-header">
+                      <span>{`Topic relevance threshold (${retrievalModel === 'svd' ? 'SVD' : 'TF-IDF'})`}</span>
+                      <strong className="settings-range-value">{formatThresholdValue(currentAutoRerankThreshold)}</strong>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={currentAutoRerankThreshold}
+                      onChange={(e) => updateCurrentAutoRerankThreshold(e.target.value)}
+                    />
+                    <div className="settings-range-scale" aria-hidden="true">
+                      <span>0.00</span>
+                      <span>1.00</span>
+                    </div>
+                  </label>
+                )}
                 <p className="setting-help-text">
-                  How many top retrieval matches move into the NLI reranking stage.
+                  {rerankSelectionMode === 'manual'
+                    ? 'How many top retrieval matches move into the NLI reranking stage.'
+                    : `Articles at or above this raw topic relevance threshold move into the next stage, with at most ${maxAutoRerankCandidates} articles reranked.`}
                 </p>
-              </label>
+              </div>
               <div className="weight-card full-row settings-toggle-card">
                 <div className="settings-toggle-row">
                   <div className="settings-toggle-copy">

@@ -16,6 +16,13 @@ from backend.text_processing.search_helpers import (
 
 
 SUPPORTED_RETRIEVAL_MODELS = _SUPPORTED_RETRIEVAL_MODELS
+SUPPORTED_RERANK_SELECTION_MODES = ("manual", "automatic")
+DEFAULT_RERANK_SELECTION_MODE = "automatic"
+DEFAULT_AUTO_RERANK_THRESHOLDS = {
+    "tfidf": 0.3,
+    "svd": 0.6,
+}
+MAX_AUTO_RERANK_CANDIDATES = 100
 
 
 def _coerce_year(value):
@@ -23,6 +30,13 @@ def _coerce_year(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_float(value, default=None):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def available_article_year_range():
@@ -37,6 +51,38 @@ def available_article_year_range():
     if min_year is None or max_year is None:
         return None, None
     return int(min_year), int(max_year)
+
+
+def normalize_rerank_selection_mode(value, default=DEFAULT_RERANK_SELECTION_MODE):
+    if value is None:
+        return default
+
+    normalized = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    if not normalized:
+        return default
+
+    if normalized in {"manual", "top_k", "topk"}:
+        return "manual"
+    if normalized in {"automatic", "auto", "threshold", "thresholded"}:
+        return "automatic"
+
+    supported = ", ".join(SUPPORTED_RERANK_SELECTION_MODES)
+    raise ValueError(
+        f"Unsupported rerank_selection_mode {value!r}. Supported modes: {supported}."
+    )
+
+
+def default_auto_rerank_threshold(retrieval_model=DEFAULT_RETRIEVAL_MODEL):
+    resolved_model = normalize_retrieval_model(retrieval_model)
+    return float(DEFAULT_AUTO_RERANK_THRESHOLDS[resolved_model])
+
+
+def resolve_auto_rerank_threshold(value, retrieval_model=DEFAULT_RETRIEVAL_MODEL):
+    default_threshold = default_auto_rerank_threshold(retrieval_model=retrieval_model)
+    resolved = _coerce_float(value, default=default_threshold)
+    if resolved is None:
+        return default_threshold
+    return max(0.0, min(1.0, float(resolved)))
 
 
 def normalize_article_year_range(year_start=None, year_end=None):
@@ -106,6 +152,90 @@ def _filter_ranked_articles_by_year_range(ranked_articles, year_start=None, year
         filtered.append((article, score))
 
     return filtered
+
+
+def _filter_matches_by_topic_threshold(article_matches, threshold):
+    resolved_threshold = float(threshold)
+    return [
+        match
+        for match in article_matches
+        if _coerce_float(match.get("score"), default=0.0) >= resolved_threshold
+    ]
+
+
+def select_rerank_candidates(
+    query,
+    top_n=100,
+    retrieval_model=DEFAULT_RETRIEVAL_MODEL,
+    year_start=None,
+    year_end=None,
+    rerank_selection_mode=DEFAULT_RERANK_SELECTION_MODE,
+    rerank_threshold=None,
+):
+    resolved_model = normalize_retrieval_model(retrieval_model)
+    resolved_selection_mode = normalize_rerank_selection_mode(rerank_selection_mode)
+    resolved_top_n = max(1, int(top_n))
+
+    if resolved_selection_mode == "manual":
+        matches = retrieval_search(
+            query,
+            top_n=resolved_top_n,
+            retrieval_model=resolved_model,
+            year_start=year_start,
+            year_end=year_end,
+        )
+        log_runtime_event(
+            "rerank_candidates.manual_done",
+            retrieval_model=resolved_model,
+            requested_top_n=resolved_top_n,
+            selected_count=len(matches),
+        )
+        return {
+            "matches": matches,
+            "selection_mode": resolved_selection_mode,
+            "candidate_count": len(matches),
+            "rerank_threshold": None,
+            "empty_results_message": None,
+        }
+
+    resolved_threshold = resolve_auto_rerank_threshold(
+        rerank_threshold,
+        retrieval_model=resolved_model,
+    )
+    matches = retrieval_search(
+        query,
+        top_n=MAX_AUTO_RERANK_CANDIDATES,
+        retrieval_model=resolved_model,
+        year_start=year_start,
+        year_end=year_end,
+    )
+    selected_matches = _filter_matches_by_topic_threshold(
+        matches,
+        threshold=resolved_threshold,
+    )[:MAX_AUTO_RERANK_CANDIDATES]
+    empty_results_message = None
+    if not selected_matches:
+        retrieval_label = "SVD" if resolved_model == "svd" else "TF-IDF"
+        empty_results_message = (
+            f"No relevant articles found above the {resolved_threshold:.2f} "
+            f"topic relevance threshold for {retrieval_label}."
+        )
+
+    log_runtime_event(
+        "rerank_candidates.automatic_done",
+        retrieval_model=resolved_model,
+        candidate_limit=MAX_AUTO_RERANK_CANDIDATES,
+        threshold=resolved_threshold,
+        retrieved_count=len(matches),
+        selected_count=len(selected_matches),
+    )
+    return {
+        "matches": selected_matches,
+        "selection_mode": resolved_selection_mode,
+        "candidate_count": len(selected_matches),
+        "rerank_threshold": resolved_threshold,
+        "empty_results_message": empty_results_message,
+    }
 
 
 def keyword_search(query, top_n=100, year_start=None, year_end=None):
@@ -389,44 +519,65 @@ def stance_search(
     year_start=None,
     year_end=None,
     normalize_topic_scores=False,
+    rerank_selection_mode=DEFAULT_RERANK_SELECTION_MODE,
+    rerank_threshold=None,
 ):
     from backend.stance_processing.stance_rerank import rerank_article_matches
 
     topic_text = str(topic or "").strip()
     opinion_text = str(opinion or "").strip()
     if len(topic_text) < 2 or len(opinion_text) < 2:
-        return []
+        return {
+            "results": [],
+            "empty_results_message": None,
+        }
     resolved_model = normalize_retrieval_model(retrieval_model)
+    resolved_selection_mode = normalize_rerank_selection_mode(rerank_selection_mode)
 
-    topic_matches = retrieval_search(
-        topic_text,
+    candidate_payload = select_rerank_candidates(
+        query=topic_text,
         top_n=top_n,
         retrieval_model=resolved_model,
         year_start=year_start,
         year_end=year_end,
+        rerank_selection_mode=resolved_selection_mode,
+        rerank_threshold=rerank_threshold,
     )
+    topic_matches = candidate_payload["matches"]
     if not topic_matches:
         log_runtime_event(
             "stance_search.no_topic_matches",
             retrieval_model=resolved_model,
+            rerank_selection_mode=resolved_selection_mode,
+            rerank_threshold=candidate_payload.get("rerank_threshold"),
+            empty_results_message=candidate_payload.get("empty_results_message"),
         )
-        return []
+        return {
+            "results": [],
+            "empty_results_message": candidate_payload.get("empty_results_message"),
+        }
 
     log_runtime_event(
         "stance_search.rerank_start",
         retrieval_model=resolved_model,
         topic_chars=len(topic_text),
         opinion_chars=len(opinion_text),
-        top_n=int(top_n),
+        top_n=len(topic_matches),
         normalize_topic_scores=bool(normalize_topic_scores),
+        rerank_selection_mode=resolved_selection_mode,
+        rerank_threshold=candidate_payload.get("rerank_threshold"),
     )
-    return rerank_article_matches(
+    reranked = rerank_article_matches(
         article_matches=topic_matches,
         topic=topic_text,
         opinion=opinion_text,
         topic_weight=topic_weight,
         stance_weight=stance_weight,
         recency_weight=recency_weight,
-        top_n=top_n,
+        top_n=len(topic_matches),
         normalize_topic_scores=normalize_topic_scores,
     )
+    return {
+        "results": reranked,
+        "empty_results_message": candidate_payload.get("empty_results_message"),
+    }
