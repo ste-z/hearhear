@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import './App.css'
 import {
   Article,
+  ArticleSearchResponse,
   EssayClaimCandidate,
   EssayClaimCandidateResponse,
   EssayTextExtractionResponse,
   RetrievalModel,
+  SvdLatentDimension,
 } from './types'
 import Chat from './Chat'
 
@@ -53,21 +55,7 @@ const introClaimsByTopic: Record<IntroTopic, readonly string[]> = {
 const finalIntroTopic = introTopicSequence[introTopicSequence.length - 1]
 const introClaimSequence = introClaimsByTopic[finalIntroTopic]
 const landingSeenStorageKey = 'hearhear.hasSeenLanding'
-const defaultSupportedRetrievalModels: RetrievalModel[] = ['tfidf', 'svd']
-
-const retrievalModelCopy: Record<RetrievalModel, {
-  label: string
-  caption: string
-}> = {
-  tfidf: {
-    label: 'TF-IDF term-document',
-    caption: 'Uses the original sparse term-document representation and cosine similarity.',
-  },
-  svd: {
-    label: 'Truncated SVD',
-    caption: 'Projects articles into latent dimensions and compares cosine similarity there.',
-  },
-}
+const defaultSupportedRetrievalModels: RetrievalModel[] = ['svd', 'tfidf']
 
 const isRetrievalModel = (value: unknown): value is RetrievalModel => (
   value === 'tfidf' || value === 'svd'
@@ -155,6 +143,270 @@ const readApiJson = async <T,>(response: Response): Promise<T> => {
   return (payload ?? null) as T
 }
 
+const normalizeArticleSearchResponse = (
+  payload: Article[] | ArticleSearchResponse | null,
+): {
+  articles: Article[]
+  querySvdCorpusChartDimensions: SvdLatentDimension[]
+  querySvdDimensions: SvdLatentDimension[]
+} => {
+  if (Array.isArray(payload)) {
+    return {
+      articles: payload,
+      querySvdCorpusChartDimensions: [],
+      querySvdDimensions: [],
+    }
+  }
+
+  const results = Array.isArray(payload?.results) ? payload.results : []
+  const querySvdCorpusChartDimensions = Array.isArray(payload?.query_svd_corpus_chart_dimensions)
+    ? payload.query_svd_corpus_chart_dimensions
+    : []
+  const querySvdDimensions = Array.isArray(payload?.query_svd_dimensions)
+    ? payload.query_svd_dimensions
+    : []
+
+  return {
+    articles: results,
+    querySvdCorpusChartDimensions,
+    querySvdDimensions,
+  }
+}
+
+const SVD_RADAR_SIZE = 420
+const SVD_RADAR_CENTER = SVD_RADAR_SIZE / 2
+const SVD_RADAR_RADIUS = 104
+const SVD_RADAR_LEVELS = 4
+
+const clampSvdMagnitude = (value: number): number => (
+  Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
+)
+
+const formatSvdValue = (value: number): string => (
+  `${value >= 0 ? '+' : ''}${value.toFixed(3)}`
+)
+
+const getSvdAnchor = (x: number): 'start' | 'middle' | 'end' => {
+  if (x < SVD_RADAR_CENTER - 18) return 'end'
+  if (x > SVD_RADAR_CENTER + 18) return 'start'
+  return 'middle'
+}
+
+const getSvdPoint = (
+  index: number,
+  total: number,
+  radius: number,
+): { x: number, y: number } => {
+  const angle = (-Math.PI / 2) + ((Math.PI * 2 * index) / total)
+  return {
+    x: SVD_RADAR_CENTER + (Math.cos(angle) * radius),
+    y: SVD_RADAR_CENTER + (Math.sin(angle) * radius),
+  }
+}
+
+const buildSvdLabelLines = (dimension: SvdLatentDimension): string[] => {
+  const firstTerms = dimension.label_terms.slice(0, 3).join(' · ')
+  const secondTerms = dimension.label_terms.slice(3, 5).join(' · ')
+  return [
+    `Concept ${dimension.dimension_label}`,
+    firstTerms,
+    secondTerms,
+  ].filter(Boolean)
+}
+
+function SvdRadarChart(
+  {
+    dimensions,
+    ariaLabel = 'Radar chart of SVD concepts',
+    caption = 'Radius shows absolute loading, while labels and colors preserve the signed concept direction.',
+    emptyCopy = 'No SVD concepts are available yet.',
+  }: {
+    dimensions: SvdLatentDimension[]
+    ariaLabel?: string
+    caption?: string
+    emptyCopy?: string
+  },
+): JSX.Element {
+  const chartDimensions = dimensions.slice(0, 10)
+  if (chartDimensions.length === 0) {
+    return (
+      <div className="svd-radar-shell">
+        <p className="svd-radar-caption">{emptyCopy}</p>
+      </div>
+    )
+  }
+
+  const areaPoints = chartDimensions
+    .map((dimension, index) => {
+      const radius = clampSvdMagnitude(dimension.magnitude) * SVD_RADAR_RADIUS
+      const point = getSvdPoint(index, chartDimensions.length, radius)
+      return `${point.x},${point.y}`
+    })
+    .join(' ')
+
+  return (
+    <div className="svd-radar-shell">
+      <svg
+        className="svd-radar"
+        viewBox={`0 0 ${SVD_RADAR_SIZE} ${SVD_RADAR_SIZE}`}
+        role="img"
+        aria-label={ariaLabel}
+      >
+        {Array.from({ length: SVD_RADAR_LEVELS }, (_, levelIndex) => {
+          const scale = (levelIndex + 1) / SVD_RADAR_LEVELS
+          const points = chartDimensions
+            .map((_dimension, index) => {
+              const point = getSvdPoint(
+                index,
+                chartDimensions.length,
+                SVD_RADAR_RADIUS * scale,
+              )
+              return `${point.x},${point.y}`
+            })
+            .join(' ')
+
+          return (
+            <polygon
+              key={`ring-${scale}`}
+              className="svd-radar-ring"
+              points={points}
+            />
+          )
+        })}
+
+        <polygon className="svd-radar-area" points={areaPoints} />
+
+        {chartDimensions.map((dimension, index) => {
+          const axisPoint = getSvdPoint(index, chartDimensions.length, SVD_RADAR_RADIUS)
+          const labelPoint = getSvdPoint(index, chartDimensions.length, SVD_RADAR_RADIUS + 30)
+          const pointRadius = clampSvdMagnitude(dimension.magnitude) * SVD_RADAR_RADIUS
+          const point = getSvdPoint(index, chartDimensions.length, pointRadius)
+          const labelLines = buildSvdLabelLines(dimension)
+          const anchor = getSvdAnchor(labelPoint.x)
+          const labelStartY = labelPoint.y - ((labelLines.length - 1) * 9)
+
+          return (
+            <g key={`axis-${dimension.dimension_index}`}>
+              <line
+                className="svd-radar-axis"
+                x1={SVD_RADAR_CENTER}
+                y1={SVD_RADAR_CENTER}
+                x2={axisPoint.x}
+                y2={axisPoint.y}
+              />
+              <circle
+                className={`svd-radar-point ${dimension.pole}`}
+                cx={point.x}
+                cy={point.y}
+                r={4.4}
+              />
+              <text
+                className="svd-radar-label"
+                x={labelPoint.x}
+                y={labelStartY}
+                textAnchor={anchor}
+              >
+                {labelLines.map((line, lineIndex) => (
+                  <tspan
+                    key={`${dimension.dimension_index}-${lineIndex}`}
+                    x={labelPoint.x}
+                    dy={lineIndex === 0 ? 0 : 12}
+                    className={lineIndex === 0 ? 'svd-radar-label-index' : undefined}
+                  >
+                    {line}
+                  </tspan>
+                ))}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+      <p className="svd-radar-caption">{caption}</p>
+    </div>
+  )
+}
+
+function SvdConceptBarChart(
+  {
+    dimensions,
+  }: {
+    dimensions: SvdLatentDimension[]
+  },
+): JSX.Element {
+  const chartDimensions = dimensions.slice(0, 10)
+
+  if (chartDimensions.length === 0) {
+    return (
+      <div className="svd-concept-bar-chart">
+        <div className="svd-concept-bar-empty">
+          No article-specific SVD concepts are available yet.
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="svd-concept-bar-chart">
+      <div className="svd-concept-axis-row" aria-hidden="true">
+        <div className="svd-concept-axis-copy" />
+        <div className="svd-concept-axis">
+          <span className="svd-concept-axis-label negative">Negative</span>
+          <span className="svd-concept-axis-label positive">Positive</span>
+          <span className="svd-concept-axis-center" />
+        </div>
+        <div className="svd-concept-axis-value" />
+      </div>
+
+      <div className="svd-concept-bar-list">
+        {chartDimensions.map((dimension) => {
+          const widthPercent = `${clampSvdMagnitude(dimension.magnitude) * 100}%`
+
+          return (
+          <div
+            key={`concept-bar-${dimension.dimension_index}`}
+            className="svd-concept-bar-row"
+          >
+            <div className="svd-concept-bar-copy">
+              <div className="svd-dimension-title">
+                Concept {dimension.dimension_label}
+              </div>
+              <div className="svd-dimension-terms">
+                {dimension.label_text}
+              </div>
+            </div>
+
+            <div className="svd-concept-bar-track" aria-hidden="true">
+              <div className="svd-concept-bar-half negative">
+                {dimension.value < 0 && (
+                  <span
+                    className="svd-concept-bar-fill negative"
+                    style={{ width: widthPercent }}
+                  />
+                )}
+              </div>
+              <div className="svd-concept-bar-half positive">
+                {dimension.value >= 0 && (
+                  <span
+                    className="svd-concept-bar-fill positive"
+                    style={{ width: widthPercent }}
+                  />
+                )}
+              </div>
+              <span className="svd-concept-bar-zero" />
+            </div>
+
+            <div className="svd-concept-bar-value-block">
+              <span className="svd-dimension-value">
+                {formatSvdValue(dimension.value)}
+              </span>
+            </div>
+          </div>
+        )})}
+      </div>
+    </div>
+  )
+}
+
 function App(): JSX.Element {
   const hasSeenLandingRef = useRef<boolean>(hasSeenLanding())
   const [useLlm, setUseLlm] = useState<boolean | null>(null)
@@ -174,11 +426,13 @@ function App(): JSX.Element {
   const [stanceWeight, setStanceWeight] = useState<number>(0.4)
   const [recencyWeight, setRecencyWeight] = useState<number>(0.2)
   const [rerankTopK, setRerankTopK] = useState<number>(20)
-  const [retrievalModel, setRetrievalModel] = useState<RetrievalModel>('tfidf')
+  const [retrievalModel, setRetrievalModel] = useState<RetrievalModel>('svd')
   const [supportedRetrievalModels, setSupportedRetrievalModels] = useState<RetrievalModel[]>(
     defaultSupportedRetrievalModels,
   )
   const [articles, setArticles] = useState<Article[]>([])
+  const [querySvdCorpusChartDimensions, setQuerySvdCorpusChartDimensions] = useState<SvdLatentDimension[]>([])
+  const [querySvdDimensions, setQuerySvdDimensions] = useState<SvdLatentDimension[]>([])
   const [isImportingPdf, setIsImportingPdf] = useState<boolean>(false)
   const [importedPdfName, setImportedPdfName] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
@@ -363,6 +617,8 @@ function App(): JSX.Element {
       return
     }
     setArticles([])
+    setQuerySvdCorpusChartDimensions([])
+    setQuerySvdDimensions([])
     setError(null)
     setHasSubmittedSearch(false)
   }, [inputMode, opinion, recencyWeight, rerankTopK, stanceWeight, topic, topicWeight])
@@ -378,6 +634,8 @@ function App(): JSX.Element {
     setEssayThesisMode('candidate')
     setEssayActiveStep(1)
     setArticles([])
+    setQuerySvdCorpusChartDimensions([])
+    setQuerySvdDimensions([])
     setError(null)
     setHasSubmittedSearch(false)
   }, [inputMode, searchTerm])
@@ -529,7 +787,10 @@ function App(): JSX.Element {
   const isEssayStepTwoAvailable = essayPreparedText.trim() !== ''
   const isUsingCustomEssayThesis = essayThesisMode === 'custom'
   const essayWorkflowStep = isEssayStepTwoAvailable ? essayActiveStep : 1
-  const retrievalModelLabel = retrievalModelCopy[retrievalModel].label
+  const canUseSvd = supportedRetrievalModels.includes('svd')
+  const canUseTfidf = supportedRetrievalModels.includes('tfidf')
+  const isSvdEnabled = retrievalModel === 'svd'
+  const canToggleSvd = canUseSvd && canUseTfidf
 
   const formatDate = (isoDate: string | null): string => {
     if (!isoDate) return 'Unknown date'
@@ -621,6 +882,8 @@ function App(): JSX.Element {
     setIsImportingPdf(true)
     setError(null)
     setArticles([])
+    setQuerySvdCorpusChartDimensions([])
+    setQuerySvdDimensions([])
     setHasSubmittedSearch(false)
     setEssayCandidates([])
     setSelectedEssayCandidateId(null)
@@ -665,6 +928,7 @@ function App(): JSX.Element {
     setLoading(true)
     setError(null)
     setArticles([])
+    setQuerySvdCorpusChartDimensions([])
 
     try {
       const response = await fetch('/api/articles', {
@@ -684,11 +948,16 @@ function App(): JSX.Element {
         }),
       })
 
-      const data = await readApiJson<Article[]>(response)
-      setArticles(Array.isArray(data) ? data : [])
+      const data = await readApiJson<Article[] | ArticleSearchResponse>(response)
+      const normalized = normalizeArticleSearchResponse(data)
+      setArticles(normalized.articles)
+      setQuerySvdCorpusChartDimensions(normalized.querySvdCorpusChartDimensions)
+      setQuerySvdDimensions(normalized.querySvdDimensions)
     } catch (fetchError) {
       console.error('Search request failed:', fetchError)
       setArticles([])
+      setQuerySvdCorpusChartDimensions([])
+      setQuerySvdDimensions([])
       setError(fetchError instanceof Error ? fetchError.message : 'Search request failed.')
     } finally {
       setLoading(false)
@@ -701,6 +970,8 @@ function App(): JSX.Element {
     setLoading(true)
     setError(null)
     setArticles([])
+    setQuerySvdCorpusChartDimensions([])
+    setQuerySvdDimensions([])
 
     try {
       const formData = new FormData()
@@ -739,6 +1010,8 @@ function App(): JSX.Element {
       setEssayThesisMode('candidate')
       setEssayPreparedText('')
       setEssayActiveStep(1)
+      setQuerySvdCorpusChartDimensions([])
+      setQuerySvdDimensions([])
       setError(fetchError instanceof Error ? fetchError.message : 'Essay analysis failed.')
     } finally {
       setLoading(false)
@@ -754,6 +1027,8 @@ function App(): JSX.Element {
     }
     setLoading(true)
     setError(null)
+    setQuerySvdCorpusChartDimensions([])
+    setQuerySvdDimensions([])
 
     try {
       const response = await fetch('/api/articles', {
@@ -774,11 +1049,16 @@ function App(): JSX.Element {
         }),
       })
 
-      const data = await readApiJson<Article[]>(response)
-      setArticles(Array.isArray(data) ? data : [])
+      const data = await readApiJson<Article[] | ArticleSearchResponse>(response)
+      const normalized = normalizeArticleSearchResponse(data)
+      setArticles(normalized.articles)
+      setQuerySvdCorpusChartDimensions(normalized.querySvdCorpusChartDimensions)
+      setQuerySvdDimensions(normalized.querySvdDimensions)
     } catch (fetchError) {
       console.error('Essay search failed:', fetchError)
       setArticles([])
+      setQuerySvdCorpusChartDimensions([])
+      setQuerySvdDimensions([])
       setError(fetchError instanceof Error ? fetchError.message : 'Essay search failed.')
     } finally {
       setLoading(false)
@@ -804,6 +1084,11 @@ function App(): JSX.Element {
     article.stance_score_normalized != null ||
     article.topic_score_normalized != null ||
     article.recency_score_normalized != null
+  )
+  const hasSvdExplainability = (article: Article): boolean => (
+    (Array.isArray(article.svd_query_chart_dimensions) && article.svd_query_chart_dimensions.length > 0) ||
+    (Array.isArray(article.svd_chart_dimensions) && article.svd_chart_dimensions.length > 0) ||
+    (Array.isArray(article.svd_dimensions) && article.svd_dimensions.length > 0)
   )
   const hasStanceSignals = (article: Article): boolean => (
     article.stance_entailment_prob != null ||
@@ -869,6 +1154,31 @@ function App(): JSX.Element {
       return 'Expand to see the support sentences.'
     }
     return 'Expand to see the article overview.'
+  }
+
+  const getSvdExplainabilityHint = (article: Article): string => {
+    const queryChartCount = article.svd_query_chart_dimensions?.length ?? 0
+    const sharedDimensionCount = article.svd_chart_dimensions?.length ?? 0
+    const articleDimensionCount = article.svd_dimensions?.length ?? 0
+    if (queryChartCount > 0 && sharedDimensionCount > 0 && articleDimensionCount > 0) {
+      return `Expand to compare this article against the query concepts, the corpus concepts, and its top ${articleDimensionCount} signed concepts.`
+    }
+    if (queryChartCount > 0 && articleDimensionCount > 0) {
+      return `Expand to compare this article against the query concepts and inspect its top ${articleDimensionCount} signed concepts.`
+    }
+    if (sharedDimensionCount > 0 && articleDimensionCount > 0) {
+      return `Expand to compare this article on ${sharedDimensionCount} corpus concepts and inspect its top ${articleDimensionCount} signed concepts.`
+    }
+    if (queryChartCount > 0) {
+      return `Expand to compare this article against the query's top ${queryChartCount} concepts.`
+    }
+    if (sharedDimensionCount > 0) {
+      return `Expand to compare this article on ${sharedDimensionCount} shared corpus concepts.`
+    }
+    if (articleDimensionCount > 0) {
+      return `Expand to inspect this article's top ${articleDimensionCount} signed latent concepts.`
+    }
+    return 'Expand to inspect the latent concepts behind this match.'
   }
 
   const resultsDescription = useMemo(() => {
@@ -1245,6 +1555,24 @@ function App(): JSX.Element {
                 Search
               </button>
             )}
+            {canUseSvd && (
+              <button
+                type="button"
+                className={`retrieval-toggle-pill ${isSvdEnabled ? 'active' : ''}`}
+                aria-pressed={isSvdEnabled}
+                aria-label={isSvdEnabled ? 'Disable SVD retrieval' : 'Enable SVD retrieval'}
+                onClick={() => {
+                  if (!canToggleSvd) return
+                  setRetrievalModel(currentModel => (currentModel === 'svd' ? 'tfidf' : 'svd'))
+                }}
+                disabled={!canToggleSvd}
+              >
+                <span className="retrieval-toggle-label">Use SVD</span>
+                <span className="retrieval-toggle-switch" aria-hidden="true">
+                  <span className="retrieval-toggle-thumb" />
+                </span>
+              </button>
+            )}
             <button
               type="button"
               className="utility-pill"
@@ -1273,6 +1601,52 @@ function App(): JSX.Element {
           ref={resultsSectionRef}
           className="results-paper-section visible"
         >
+          {!loading && !error && querySvdCorpusChartDimensions.length > 0 && (
+            <div className="results-query-concepts-shell">
+              <div className="results-query-concepts-wrap">
+                <details className="content-disclosure results-query-concepts-disclosure">
+                  <summary className="content-disclosure-summary">
+                    <span className="content-disclosure-copy">
+                      <span className="content-disclosure-title">Query concepts</span>
+                      <span className="content-disclosure-hint">
+                        Expand to inspect how your query loads onto the top 10 corpus concepts.
+                      </span>
+                    </span>
+                    <span className="content-disclosure-status" aria-hidden="true" />
+                  </summary>
+
+                  <div className="results-query-concepts">
+                    <div className="results-query-concepts-copy">
+                      <p className="results-query-concepts-eyebrow">Query concepts</p>
+                      <h3>Query on top 10 corpus concepts</h3>
+                      <p>
+                        This radar chart uses the shared top 10 corpus-level concepts and shows how strongly your query loads on those same axes.
+                      </p>
+                    </div>
+                    <SvdRadarChart
+                      dimensions={querySvdCorpusChartDimensions}
+                      ariaLabel="Radar chart of your query across the top 10 corpus-level SVD concepts"
+                      caption="These axes are fixed to the first 10 corpus-level concepts, so this gives a corpus-frame view of the query before you compare it with individual articles."
+                      emptyCopy="No corpus-level SVD concept view is available for this query yet."
+                    />
+                    {querySvdDimensions.length > 0 && (
+                      <div className="results-query-concepts-bar-block">
+                        <div className="results-query-concepts-copy">
+                          <p className="results-query-concepts-eyebrow">Query top concepts</p>
+                          <h3>Top 10 concepts from your query</h3>
+                          <p>
+                            This bar chart keeps the query&apos;s own top 10 concepts and shows whether each concept loads positively or negatively.
+                          </p>
+                        </div>
+                        <SvdConceptBarChart dimensions={querySvdDimensions} />
+                      </div>
+                    )}
+                  </div>
+                </details>
+              </div>
+            </div>
+          )}
+
           <div className="results-paper">
             <div className="results-paper-header">
               <p className="results-paper-eyebrow">Results</p>
@@ -1468,6 +1842,69 @@ function App(): JSX.Element {
                       </div>
                     )}
 
+                    {hasSvdExplainability(article) && (
+                      <details className="content-disclosure svd-explainability-disclosure">
+                        <summary className="content-disclosure-summary">
+                          <span className="content-disclosure-copy">
+                            <span className="content-disclosure-title">Latent concepts</span>
+                            <span className="content-disclosure-hint">{getSvdExplainabilityHint(article)}</span>
+                          </span>
+                          <span className="content-disclosure-status" aria-hidden="true" />
+                        </summary>
+
+                        <div className="svd-explainability-panel">
+                          {Array.isArray(article.svd_query_chart_dimensions) && article.svd_query_chart_dimensions.length > 0 && (
+                            <div className="svd-chart-section">
+                              <div className="svd-section-copy-block">
+                                <div className="svd-section-title">Query top 10 concepts</div>
+                                <p className="svd-section-copy">
+                                  This radar reuses the query&apos;s top 10 concepts and shows how strongly this article loads on those same axes.
+                                </p>
+                              </div>
+                              <SvdRadarChart
+                                dimensions={article.svd_query_chart_dimensions}
+                                ariaLabel="Radar chart of this article measured on the query's top 10 SVD concepts"
+                                caption="These axes come from the query, not the article. Radius shows this article's loading on the same 10 concepts activated by the query."
+                                emptyCopy="No query-anchored SVD concepts are available for this article yet."
+                              />
+                            </div>
+                          )}
+
+                          {Array.isArray(article.svd_chart_dimensions) && article.svd_chart_dimensions.length > 0 && (
+                            <div className="svd-chart-section">
+                              <div className="svd-section-copy-block">
+                                <div className="svd-section-title">Shared top 10 corpus concepts</div>
+                                <p className="svd-section-copy">
+                                  This radar uses the same first 10 corpus-level SVD concepts for every result, so you can compare article shapes on a fixed corpus frame.
+                                </p>
+                              </div>
+                              <SvdRadarChart
+                                dimensions={article.svd_chart_dimensions}
+                                ariaLabel="Radar chart of this article across the shared top 10 corpus-level SVD concepts"
+                                caption="These axes stay fixed to the same first 10 corpus-level SVD concepts on every article card. Radius shows absolute loading while labels and colors preserve the sign."
+                                emptyCopy="No shared corpus-level SVD concepts are available for this article yet."
+                              />
+                            </div>
+                          )}
+
+                          {(
+                            Array.isArray(article.svd_dimensions) && article.svd_dimensions.length > 0
+                          ) && (
+                            <div className="svd-dimension-section">
+                              <div className="svd-section-copy-block">
+                                <div className="svd-section-title">Top concepts for this article</div>
+                                <p className="svd-section-copy">
+                                  These bars show the article&apos;s top 10 concepts overall. Concepts extend left for negative loadings and right for positive loadings.
+                                </p>
+                              </div>
+
+                              <SvdConceptBarChart dimensions={article.svd_dimensions ?? []} />
+                            </div>
+                          )}
+                        </div>
+                      </details>
+                    )}
+
                     {(article.thesis_sentence || (article.support_sentences && article.support_sentences.length > 0)) && (
                       <details className="content-disclosure">
                         <summary className="content-disclosure-summary">
@@ -1590,10 +2027,10 @@ function App(): JSX.Element {
                     <p className="modal-copy">
                       <strong>Stage 1: Topic relevance.</strong> We first identify articles that are
                       relevant to your topic. To do this, we compute the similarity between your
-                      input and each Guardian article using the retrieval representation selected in
-                      Settings: either TF-IDF term-document vectors or truncated-SVD latent
-                      dimensions, both compared with cosine similarity. This helps us find articles
-                      that discuss similar themes and keywords.
+                      input and each Guardian article using the retrieval representation selected
+                      with the Use SVD toggle: either base TF-IDF term-document vectors or
+                      truncated-SVD latent dimensions, both compared with cosine similarity. This
+                      helps us find articles that discuss similar themes and keywords.
                     </p>
                   </section>
                   <section className="about-section">
@@ -1631,10 +2068,10 @@ function App(): JSX.Element {
                       <strong>Stage 2: Topic relevance.</strong> After you select the best thesis
                       sentence, we identify articles that are relevant to your essay as a whole. To
                       do this, we compute the similarity between your full essay and each Guardian
-                      article using the retrieval representation selected in Settings: either TF-IDF
-                      term-document vectors or truncated-SVD latent dimensions, both compared with
-                      cosine similarity. This surfaces articles that discuss similar themes, issues,
-                      and vocabulary.
+                      article using the retrieval representation selected with the Use SVD toggle:
+                      either base TF-IDF term-document vectors or truncated-SVD latent dimensions,
+                      both compared with cosine similarity. This surfaces articles that discuss
+                      similar themes, issues, and vocabulary.
                     </p>
                   </section>
                   <section className="about-section">
@@ -1685,26 +2122,6 @@ function App(): JSX.Element {
               </button>
             </div>
             <div className="modal-settings-grid">
-              <div className="weight-card full-row">
-                <span>Retrieval model</span>
-                <div className="retrieval-model-grid" role="radiogroup" aria-label="Retrieval model">
-                  {supportedRetrievalModels.map((model) => (
-                    <button
-                      key={model}
-                      type="button"
-                      className={`retrieval-model-button ${retrievalModel === model ? 'active' : ''}`}
-                      aria-pressed={retrievalModel === model}
-                      onClick={() => setRetrievalModel(model)}
-                    >
-                      <strong>{retrievalModelCopy[model].label}</strong>
-                      <p>{retrievalModelCopy[model].caption}</p>
-                    </button>
-                  ))}
-                </div>
-                <p className="setting-help-text">
-                  Current search representation: {retrievalModelLabel}.
-                </p>
-              </div>
               <label className="weight-card full-row">
                 <span>Top K</span>
                 <input

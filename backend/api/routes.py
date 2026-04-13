@@ -12,9 +12,12 @@ from backend.runtime.runtime_debug import log_runtime_event
 from backend.services.essay_service import essay_claim_candidates, essay_search
 from backend.services.pdf_service import extract_pdf_text
 from backend.services.retrieval_service import (
+    attach_query_svd_chart_dimensions,
     DEFAULT_RETRIEVAL_MODEL,
     json_search,
     normalize_retrieval_model,
+    retrieval_query_svd_corpus_chart_dimensions,
+    retrieval_query_svd_dimensions,
     SUPPORTED_RETRIEVAL_MODELS,
     stance_search,
 )
@@ -174,13 +177,34 @@ def register_routes(app):
                     context["essay_text"],
                     retrieval_model=context["retrieval_model"],
                 )
+            if context["mode"] == "stance":
+                query_text = context["topic"]
+            else:
+                query_text = context["essay_text"]
+            query_svd_dimensions = retrieval_query_svd_dimensions(
+                query=query_text,
+                retrieval_model=context["retrieval_model"],
+            )
+            query_svd_corpus_chart_dimensions = retrieval_query_svd_corpus_chart_dimensions(
+                query=query_text,
+                retrieval_model=context["retrieval_model"],
+            )
+            results = attach_query_svd_chart_dimensions(
+                results,
+                query_dimensions=query_svd_dimensions,
+                retrieval_model=context["retrieval_model"],
+            )
             log_runtime_event(
                 "articles_search.done",
                 mode=context["mode"],
                 retrieval_model=context["retrieval_model"],
                 result_count=len(results),
             )
-            return jsonify(results)
+            return jsonify({
+                "results": results,
+                "query_svd_dimensions": query_svd_dimensions,
+                "query_svd_corpus_chart_dimensions": query_svd_corpus_chart_dimensions,
+            })
         except Exception as exc:
             app.logger.exception("API request to /api/articles failed")
             return _api_error_response(exc)

@@ -36,6 +36,7 @@ from backend.text_processing.indexing.settings import (
     MAX_TERM_DOC_MATRIX_CHUNK_BYTES,
     MAX_VECTOR_INDEX_ARTIFACT_BYTES,
 )
+from backend.text_processing.text_normalization import normalize_text_for_vectorization
 
 
 class TfidfMatrixIndex:
@@ -130,8 +131,12 @@ class TfidfMatrixIndex:
 
         normalized = articles.reset_index(drop=True).copy()
 
-        text_series = normalized[text_column].astype("string").fillna("").str.strip()
-        if (text_series == "").all():
+        text_series = normalized[text_column].astype("string").fillna("")
+        text_values = [
+            normalize_text_for_vectorization(value)
+            for value in text_series.tolist()
+        ]
+        if not any(text_values):
             raise ValueError(f"Column '{text_column}' contains no non-empty text.")
 
         id_series = cls._normalize_id_series(normalized[id_column], id_column)
@@ -139,7 +144,7 @@ class TfidfMatrixIndex:
 
         if vectorizer is None:
             vectorizer = TfidfVectorizer(**DEFAULT_TFIDF_PARAMS)
-        term_doc_matrix = vectorizer.fit_transform(text_series.tolist())
+        term_doc_matrix = vectorizer.fit_transform(text_values)
         terms = vectorizer.get_feature_names_out().tolist()
         doc_ids = id_series.tolist()
 
@@ -175,7 +180,9 @@ class TfidfMatrixIndex:
     def get_term_vector(self, term):
         if term is None:
             raise ValueError("Term must be non-empty.")
-        term_key = str(term).strip()
+        term_key = normalize_text_for_vectorization(term)
+        if not term_key:
+            raise ValueError("Term must be non-empty.")
         if getattr(self.vectorizer, "lowercase", False):
             term_key = term_key.lower()
         term_idx = self.term_to_idx.get(term_key)
@@ -197,7 +204,11 @@ class TfidfMatrixIndex:
             n_docs=self.n_docs,
             n_terms=self.n_terms,
         )
-        query_vec = self.vectorizer.transform([str(query)])
+        normalized_query = normalize_text_for_vectorization(query)
+        if not normalized_query:
+            log_runtime_event("vector_search.empty_query")
+            return []
+        query_vec = self.vectorizer.transform([normalized_query])
         log_runtime_event("vector_search.query_vector_done")
         log_runtime_event("vector_search.sparse_dot_start")
         score_matrix = query_vec @ self.term_doc_matrix.T
@@ -685,7 +696,11 @@ class TfidfPostingsIndex:
             n_docs=self.n_docs,
             n_terms=self.n_terms,
         )
-        query_vec = self.vectorizer.transform([str(query)])
+        normalized_query = normalize_text_for_vectorization(query)
+        if not normalized_query:
+            log_runtime_event("postings_search.empty_query")
+            return []
+        query_vec = self.vectorizer.transform([normalized_query])
         query_term_indices = np.asarray(query_vec.indices, dtype=np.int32)
         query_term_weights = np.asarray(query_vec.data, dtype=np.float32)
         log_runtime_event(

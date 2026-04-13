@@ -1,3 +1,13 @@
+export type SvdLatentDimension = {
+  dimension_index: number
+  dimension_label: number
+  value: number
+  magnitude: number
+  pole: 'positive' | 'negative'
+  label_terms: string[]
+  label_text: string
+}
+
 export type Article = {
   id: string | number
   title: string
@@ -20,6 +30,17 @@ export type Article = {
   stance_contradiction_prob?: number | null
   thesis_sentence?: string | null
   support_sentences?: string[] | null
+  svd_query_chart_dimensions?: SvdLatentDimension[] | null
+  svd_chart_dimensions?: SvdLatentDimension[] | null
+  svd_positive_dimensions?: SvdLatentDimension[] | null
+  svd_negative_dimensions?: SvdLatentDimension[] | null
+  svd_dimensions?: SvdLatentDimension[] | null
+}
+
+export type ArticleSearchResponse = {
+  results?: Article[] | null
+  query_svd_corpus_chart_dimensions?: SvdLatentDimension[] | null
+  query_svd_dimensions?: SvdLatentDimension[] | null
 }
 
 export type RetrievalModel = 'tfidf' | 'svd'

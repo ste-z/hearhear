@@ -42,6 +42,10 @@ from backend.text_processing.indexing.corpus import (
     _normalized_years,
     _relative_db_path_for_meta,
 )
+from backend.text_processing.text_normalization import (
+    TEXT_NORMALIZATION_VERSION,
+    normalize_text_for_vectorization,
+)
 
 
 DEFAULT_SVD_INDEX_NAME = "guardian_tfidf_svd"
@@ -255,8 +259,12 @@ class TruncatedSvdIndex:
             raise ValueError(f"Column '{id_column}' not found in articles.")
 
         normalized = articles.reset_index(drop=True).copy()
-        text_series = normalized[text_column].astype("string").fillna("").str.strip()
-        if (text_series == "").all():
+        text_series = normalized[text_column].astype("string").fillna("")
+        text_values = [
+            normalize_text_for_vectorization(value)
+            for value in text_series.tolist()
+        ]
+        if not any(text_values):
             raise ValueError(f"Column '{text_column}' contains no non-empty text.")
 
         id_series = _normalize_id_series(normalized[id_column], id_column)
@@ -266,7 +274,7 @@ class TruncatedSvdIndex:
         if vectorizer is None:
             vectorizer = TfidfVectorizer(**resolved_vectorizer_params)
 
-        term_doc_matrix = vectorizer.fit_transform(text_series.tolist())
+        term_doc_matrix = vectorizer.fit_transform(text_values)
         terms = vectorizer.get_feature_names_out().tolist()
 
         resolved_svd_params = _resolved_svd_params(
@@ -329,7 +337,7 @@ class TruncatedSvdIndex:
             articles=articles_payload,
             id_column=id_column,
             text_column=text_column,
-            svd_params=dict(reducer.get_params(deep=False)),
+            svd_params=dict(resolved_svd_params),
             requested_n_components=requested_n_components,
         )
 
@@ -347,7 +355,7 @@ class TruncatedSvdIndex:
         return self.doc_embeddings[idx]
 
     def project_query(self, query, normalize=False):
-        query_text = str(query or "").strip()
+        query_text = normalize_text_for_vectorization(query)
         if not query_text:
             return None
 
@@ -474,6 +482,86 @@ class TruncatedSvdIndex:
                 order="absolute",
             ),
         }
+
+    @staticmethod
+    def format_term_weights(term_weights, precision=3):
+        resolved_precision = max(0, int(precision))
+        return ", ".join(
+            f"{term} ({weight:.{resolved_precision}f})"
+            for term, weight in term_weights
+        )
+
+    def dimension_summary_record(
+        self,
+        dimension,
+        top_n=10,
+        format_terms=True,
+        precision=3,
+    ):
+        summary = self.dimension_summary(dimension=dimension, top_n=top_n)
+        record = {
+            "dimension_index": int(summary["dimension"]),
+            "dimension_label": int(summary["dimension"]) + 1,
+        }
+        for key in ("positive_terms", "negative_terms", "absolute_terms"):
+            values = summary[key]
+            record[key] = (
+                self.format_term_weights(values, precision=precision)
+                if format_terms
+                else values
+            )
+        return record
+
+    def dimension_summary_frame(
+        self,
+        dimensions=None,
+        top_n=10,
+        format_terms=True,
+        precision=3,
+    ):
+        if dimensions is None:
+            dimensions = range(self.n_components)
+        rows = [
+            self.dimension_summary_record(
+                dimension=dim,
+                top_n=top_n,
+                format_terms=format_terms,
+                precision=precision,
+            )
+            for dim in dimensions
+        ]
+        return pd.DataFrame(rows)
+
+    def export_dimension_summaries(
+        self,
+        output_path,
+        dimensions=None,
+        top_n=10,
+        format_terms=True,
+        precision=3,
+    ):
+        resolved_output_path = Path(output_path)
+        resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+        df = self.dimension_summary_frame(
+            dimensions=dimensions,
+            top_n=top_n,
+            format_terms=format_terms,
+            precision=precision,
+        )
+
+        suffix = resolved_output_path.suffix.lower()
+        if suffix == ".csv":
+            df.to_csv(resolved_output_path, index=False)
+        elif suffix == ".json":
+            df.to_json(resolved_output_path, orient="records", indent=2)
+        elif suffix in {".jsonl", ".ndjson"}:
+            df.to_json(resolved_output_path, orient="records", lines=True)
+        else:
+            raise ValueError(
+                "output_path must end in .csv, .json, .jsonl, or .ndjson"
+            )
+
+        return resolved_output_path, df
 
     def top_dimensions_for_query(self, query, top_n=5, normalize=False):
         vector = self.project_query(query, normalize=normalize)
@@ -814,17 +902,23 @@ def _is_existing_svd_index_fresh(
 
     if meta.get("vectorizer_params") != _resolved_vectorizer_params(expected_vectorizer_params):
         return False
+    if meta.get("text_normalization_version") != TEXT_NORMALIZATION_VERSION:
+        return False
 
     expected_svd = _resolved_svd_params(
         n_components=expected_n_components,
         svd_params=expected_svd_params,
     )
     stored_svd = dict(meta.get("svd_params") or {})
-    if stored_svd.pop("n_components", None) != int(meta.get("n_components", -1)):
+    stored_effective_n_components = stored_svd.pop("n_components", None)
+    if stored_effective_n_components is None:
+        stored_effective_n_components = meta.get("n_components", -1)
+    if int(stored_effective_n_components) != int(meta.get("n_components", -1)):
         return False
     expected_svd.pop("n_components", None)
-    if stored_svd != expected_svd:
-        return False
+    for key, expected_value in expected_svd.items():
+        if stored_svd.get(key) != expected_value:
+            return False
 
     try:
         stored_requested_n_components = int(meta.get("requested_n_components"))
@@ -963,6 +1057,7 @@ def preprocess_svd_index(
             "source_db_path": _relative_db_path_for_meta(db_path),
             "text_source": source_kind,
             "source_years": source_years,
+            "text_normalization_version": TEXT_NORMALIZATION_VERSION,
             "vectorizer_params": resolved_vectorizer_params,
         },
     )
