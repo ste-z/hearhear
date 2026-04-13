@@ -54,21 +54,7 @@ const introClaimsByTopic: Record<IntroTopic, readonly string[]> = {
 const finalIntroTopic = introTopicSequence[introTopicSequence.length - 1]
 const introClaimSequence = introClaimsByTopic[finalIntroTopic]
 const landingSeenStorageKey = 'hearhear.hasSeenLanding'
-const defaultSupportedRetrievalModels: RetrievalModel[] = ['tfidf', 'svd']
-
-const retrievalModelCopy: Record<RetrievalModel, {
-  label: string
-  caption: string
-}> = {
-  tfidf: {
-    label: 'TF-IDF term-document',
-    caption: 'Uses the original sparse term-document representation and cosine similarity.',
-  },
-  svd: {
-    label: 'Truncated SVD',
-    caption: 'Projects articles into latent dimensions and compares cosine similarity there.',
-  },
-}
+const defaultSupportedRetrievalModels: RetrievalModel[] = ['svd', 'tfidf']
 
 const isRetrievalModel = (value: unknown): value is RetrievalModel => (
   value === 'tfidf' || value === 'svd'
@@ -438,7 +424,7 @@ function App(): JSX.Element {
   const [topicWeight, setTopicWeight] = useState<number>(0.5)
   const [stanceWeight, setStanceWeight] = useState<number>(0.5)
   const [rerankTopK, setRerankTopK] = useState<number>(20)
-  const [retrievalModel, setRetrievalModel] = useState<RetrievalModel>('tfidf')
+  const [retrievalModel, setRetrievalModel] = useState<RetrievalModel>('svd')
   const [supportedRetrievalModels, setSupportedRetrievalModels] = useState<RetrievalModel[]>(
     defaultSupportedRetrievalModels,
   )
@@ -787,7 +773,10 @@ function App(): JSX.Element {
   const canSubmitEssay = Boolean(essayPreparedText && selectedEssayCandidate)
   const isEssayStepTwoAvailable = essayCandidates.length > 0
   const essayWorkflowStep = isEssayStepTwoAvailable ? essayActiveStep : 1
-  const retrievalModelLabel = retrievalModelCopy[retrievalModel].label
+  const canUseSvd = supportedRetrievalModels.includes('svd')
+  const canUseTfidf = supportedRetrievalModels.includes('tfidf')
+  const isSvdEnabled = retrievalModel === 'svd'
+  const canToggleSvd = canUseSvd && canUseTfidf
 
   const formatDate = (isoDate: string | null): string => {
     if (!isoDate) return 'Unknown date'
@@ -1478,6 +1467,24 @@ function App(): JSX.Element {
                 Search
               </button>
             )}
+            {canUseSvd && (
+              <button
+                type="button"
+                className={`retrieval-toggle-pill ${isSvdEnabled ? 'active' : ''}`}
+                aria-pressed={isSvdEnabled}
+                aria-label={isSvdEnabled ? 'Disable SVD retrieval' : 'Enable SVD retrieval'}
+                onClick={() => {
+                  if (!canToggleSvd) return
+                  setRetrievalModel(currentModel => (currentModel === 'svd' ? 'tfidf' : 'svd'))
+                }}
+                disabled={!canToggleSvd}
+              >
+                <span className="retrieval-toggle-label">Use SVD</span>
+                <span className="retrieval-toggle-switch" aria-hidden="true">
+                  <span className="retrieval-toggle-thumb" />
+                </span>
+              </button>
+            )}
             <button
               type="button"
               className="utility-pill"
@@ -1907,10 +1914,10 @@ function App(): JSX.Element {
                     <p className="modal-copy">
                       <strong>Stage 1: Topic relevance.</strong> We first identify articles that are
                       relevant to your topic. To do this, we compute the similarity between your
-                      input and each Guardian article using the retrieval representation selected in
-                      Settings: either TF-IDF term-document vectors or truncated-SVD latent
-                      dimensions, both compared with cosine similarity. This helps us find articles
-                      that discuss similar themes and keywords.
+                      input and each Guardian article using the retrieval representation selected
+                      with the Use SVD toggle: either base TF-IDF term-document vectors or
+                      truncated-SVD latent dimensions, both compared with cosine similarity. This
+                      helps us find articles that discuss similar themes and keywords.
                     </p>
                   </section>
                   <section className="about-section">
@@ -1946,10 +1953,10 @@ function App(): JSX.Element {
                       <strong>Stage 2: Topic relevance.</strong> After you select the best thesis
                       sentence, we identify articles that are relevant to your essay as a whole. To
                       do this, we compute the similarity between your full essay and each Guardian
-                      article using the retrieval representation selected in Settings: either TF-IDF
-                      term-document vectors or truncated-SVD latent dimensions, both compared with
-                      cosine similarity. This surfaces articles that discuss similar themes, issues,
-                      and vocabulary.
+                      article using the retrieval representation selected with the Use SVD toggle:
+                      either base TF-IDF term-document vectors or truncated-SVD latent dimensions,
+                      both compared with cosine similarity. This surfaces articles that discuss
+                      similar themes, issues, and vocabulary.
                     </p>
                   </section>
                   <section className="about-section">
@@ -1999,26 +2006,6 @@ function App(): JSX.Element {
               </button>
             </div>
             <div className="modal-settings-grid">
-              <div className="weight-card full-row">
-                <span>Retrieval model</span>
-                <div className="retrieval-model-grid" role="radiogroup" aria-label="Retrieval model">
-                  {supportedRetrievalModels.map((model) => (
-                    <button
-                      key={model}
-                      type="button"
-                      className={`retrieval-model-button ${retrievalModel === model ? 'active' : ''}`}
-                      aria-pressed={retrievalModel === model}
-                      onClick={() => setRetrievalModel(model)}
-                    >
-                      <strong>{retrievalModelCopy[model].label}</strong>
-                      <p>{retrievalModelCopy[model].caption}</p>
-                    </button>
-                  ))}
-                </div>
-                <p className="setting-help-text">
-                  Current search representation: {retrievalModelLabel}.
-                </p>
-              </div>
               <label className="weight-card full-row">
                 <span>Top K</span>
                 <input

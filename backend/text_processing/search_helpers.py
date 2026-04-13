@@ -6,7 +6,7 @@ from backend.runtime.runtime_debug import log_runtime_event
 from flask import current_app, has_app_context
 
 
-DEFAULT_RETRIEVAL_MODEL = "tfidf"
+DEFAULT_RETRIEVAL_MODEL = "svd"
 SUPPORTED_RETRIEVAL_MODELS = ("tfidf", "svd")
 DEFAULT_SVD_EXPLAINABILITY_TOP_N = 10
 DEFAULT_SVD_POLE_TOP_N = 5
