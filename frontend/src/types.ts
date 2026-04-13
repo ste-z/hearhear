@@ -20,6 +20,8 @@ export type Article = {
   support_sentences?: string[] | null
 }
 
+export type RetrievalModel = 'tfidf' | 'svd'
+
 export type EssayClaimCandidate = {
   sentence_id: string
   sentence: string

@@ -5,6 +5,7 @@ import {
   EssayClaimCandidate,
   EssayClaimCandidateResponse,
   EssayTextExtractionResponse,
+  RetrievalModel,
 } from './types'
 import Chat from './Chat'
 
@@ -14,6 +15,8 @@ type EssayStep = 1 | 2
 
 type ConfigResponse = {
   use_llm: boolean
+  default_retrieval_model?: string | null
+  supported_retrieval_models?: string[] | null
 }
 
 type ApiErrorPayload = {
@@ -49,6 +52,33 @@ const introClaimsByTopic: Record<IntroTopic, readonly string[]> = {
 const finalIntroTopic = introTopicSequence[introTopicSequence.length - 1]
 const introClaimSequence = introClaimsByTopic[finalIntroTopic]
 const landingSeenStorageKey = 'hearhear.hasSeenLanding'
+const defaultSupportedRetrievalModels: RetrievalModel[] = ['tfidf', 'svd']
+
+const retrievalModelCopy: Record<RetrievalModel, {
+  label: string
+  caption: string
+}> = {
+  tfidf: {
+    label: 'TF-IDF term-document',
+    caption: 'Uses the original sparse term-document representation and cosine similarity.',
+  },
+  svd: {
+    label: 'Truncated SVD',
+    caption: 'Projects articles into latent dimensions and compares cosine similarity there.',
+  },
+}
+
+const isRetrievalModel = (value: unknown): value is RetrievalModel => (
+  value === 'tfidf' || value === 'svd'
+)
+
+const normalizeRetrievalModels = (value: unknown): RetrievalModel[] => {
+  if (!Array.isArray(value)) return defaultSupportedRetrievalModels
+
+  const filtered = value.filter(isRetrievalModel)
+  const unique = Array.from(new Set(filtered))
+  return unique.length > 0 ? unique : defaultSupportedRetrievalModels
+}
 
 const hasSeenLanding = (): boolean => {
   if (typeof window === 'undefined') return false
@@ -142,6 +172,10 @@ function App(): JSX.Element {
   const [topicWeight, setTopicWeight] = useState<number>(0.5)
   const [stanceWeight, setStanceWeight] = useState<number>(0.5)
   const [rerankTopK, setRerankTopK] = useState<number>(20)
+  const [retrievalModel, setRetrievalModel] = useState<RetrievalModel>('tfidf')
+  const [supportedRetrievalModels, setSupportedRetrievalModels] = useState<RetrievalModel[]>(
+    defaultSupportedRetrievalModels,
+  )
   const [articles, setArticles] = useState<Article[]>([])
   const [isImportingPdf, setIsImportingPdf] = useState<boolean>(false)
   const [importedPdfName, setImportedPdfName] = useState<string | null>(null)
@@ -169,6 +203,17 @@ function App(): JSX.Element {
         const data = await readApiJson<ConfigResponse>(response)
         if (!isActive) return
         setUseLlm(Boolean(data.use_llm))
+        const supportedModels = normalizeRetrievalModels(data.supported_retrieval_models)
+        const preferredModel = isRetrievalModel(data.default_retrieval_model)
+          ? data.default_retrieval_model
+          : supportedModels[0]
+        const resolvedModel = supportedModels.includes(preferredModel)
+          ? preferredModel
+          : supportedModels[0]
+        setSupportedRetrievalModels(supportedModels)
+        setRetrievalModel(currentModel => (
+          supportedModels.includes(currentModel) ? currentModel : resolvedModel
+        ))
       } catch (configError) {
         console.error('Config request failed:', configError)
         if (!isActive) return
@@ -470,6 +515,7 @@ function App(): JSX.Element {
   const canSubmitEssay = Boolean(essayPreparedText && selectedEssayCandidate)
   const isEssayStepTwoAvailable = essayCandidates.length > 0
   const essayWorkflowStep = isEssayStepTwoAvailable ? essayActiveStep : 1
+  const retrievalModelLabel = retrievalModelCopy[retrievalModel].label
 
   const formatDate = (isoDate: string | null): string => {
     if (!isoDate) return 'Unknown date'
@@ -611,6 +657,7 @@ function App(): JSX.Element {
           topic_weight: topicWeight,
           stance_weight: stanceWeight,
           top_k: rerankTopK,
+          retrieval_model: retrievalModel,
         }),
       })
 
@@ -687,6 +734,7 @@ function App(): JSX.Element {
           topic_weight: topicWeight,
           stance_weight: stanceWeight,
           top_k: rerankTopK,
+          retrieval_model: retrievalModel,
         }),
       })
 
@@ -1429,9 +1477,10 @@ function App(): JSX.Element {
                     <p className="modal-copy">
                       <strong>Stage 1: Topic relevance.</strong> We first identify articles that are
                       relevant to your topic. To do this, we compute the similarity between your
-                      input and each Guardian article using TF-IDF (Term Frequency-Inverse Document
-                      Frequency) representations combined with cosine similarity. This helps us find
-                      articles that discuss similar themes and keywords.
+                      input and each Guardian article using the retrieval representation selected in
+                      Settings: either TF-IDF term-document vectors or truncated-SVD latent
+                      dimensions, both compared with cosine similarity. This helps us find articles
+                      that discuss similar themes and keywords.
                     </p>
                   </section>
                   <section className="about-section">
@@ -1467,9 +1516,10 @@ function App(): JSX.Element {
                       <strong>Stage 2: Topic relevance.</strong> After you select the best thesis
                       sentence, we identify articles that are relevant to your essay as a whole. To
                       do this, we compute the similarity between your full essay and each Guardian
-                      article using TF-IDF (Term Frequency-Inverse Document Frequency)
-                      representations combined with cosine similarity. This surfaces articles that
-                      discuss similar themes, issues, and vocabulary.
+                      article using the retrieval representation selected in Settings: either TF-IDF
+                      term-document vectors or truncated-SVD latent dimensions, both compared with
+                      cosine similarity. This surfaces articles that discuss similar themes, issues,
+                      and vocabulary.
                     </p>
                   </section>
                   <section className="about-section">
@@ -1507,7 +1557,7 @@ function App(): JSX.Element {
             <div className="modal-header">
               <div>
                 <p className="modal-eyebrow">Settings</p>
-                <h3 id="search-settings-title">Reranking settings</h3>
+                <h3 id="search-settings-title">Search settings</h3>
               </div>
               <button
                 type="button"
@@ -1519,6 +1569,26 @@ function App(): JSX.Element {
               </button>
             </div>
             <div className="modal-settings-grid">
+              <div className="weight-card full-row">
+                <span>Retrieval model</span>
+                <div className="retrieval-model-grid" role="radiogroup" aria-label="Retrieval model">
+                  {supportedRetrievalModels.map((model) => (
+                    <button
+                      key={model}
+                      type="button"
+                      className={`retrieval-model-button ${retrievalModel === model ? 'active' : ''}`}
+                      aria-pressed={retrievalModel === model}
+                      onClick={() => setRetrievalModel(model)}
+                    >
+                      <strong>{retrievalModelCopy[model].label}</strong>
+                      <p>{retrievalModelCopy[model].caption}</p>
+                    </button>
+                  ))}
+                </div>
+                <p className="setting-help-text">
+                  Current search representation: {retrievalModelLabel}.
+                </p>
+              </div>
               <label className="weight-card full-row">
                 <span>Top K</span>
                 <input
@@ -1530,7 +1600,7 @@ function App(): JSX.Element {
                   onChange={(e) => setRerankTopK(parseTopKInput(e.target.value, rerankTopK))}
                 />
                 <p className="setting-help-text">
-                  How many TF-IDF matches move into the NLI reranking stage.
+                  How many top retrieval matches move into the NLI reranking stage.
                 </p>
               </label>
               <div className="weight-card full-row weights-group-card">

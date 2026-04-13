@@ -292,19 +292,27 @@ def _seed_guardian_articles(
 
 def _warm_runtime_assets():
     try:
-        from backend.text_processing.search_helpers import build_vector_processor
+        from backend.text_processing.search_helpers import (
+            DEFAULT_RETRIEVAL_MODEL,
+            build_retrieval_processor,
+        )
 
-        log_runtime_event("startup_warm.vector_index_start")
-        vector_index = build_vector_processor(
+        log_runtime_event(
+            "startup_warm.vector_index_start",
+            retrieval_model=DEFAULT_RETRIEVAL_MODEL,
+        )
+        vector_index = build_retrieval_processor(
+            retrieval_model=DEFAULT_RETRIEVAL_MODEL,
             force_rebuild=False,
             ensure_preprocessed=False,
         )
         log_runtime_event(
             "startup_warm.vector_index_done",
+            retrieval_model=DEFAULT_RETRIEVAL_MODEL,
             n_docs=getattr(vector_index, "n_docs", None),
             n_terms=getattr(vector_index, "n_terms", None),
         )
-        print("TF-IDF search index loaded into memory.")
+        print(f"{DEFAULT_RETRIEVAL_MODEL.upper()} search index loaded into memory.")
     except Exception as exc:
         print(
             "Warning: TF-IDF warm-up failed; the first search may still cold-start. "

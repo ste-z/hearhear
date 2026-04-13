@@ -6,8 +6,19 @@ from backend.runtime.runtime_debug import log_runtime_event
 from flask import current_app, has_app_context
 
 
-_vector_index = None
-_vector_index_doc_count = -1
+DEFAULT_RETRIEVAL_MODEL = "tfidf"
+SUPPORTED_RETRIEVAL_MODELS = ("tfidf", "svd")
+
+_RETRIEVAL_MODEL_ALIASES = {
+    "tfidf": "tfidf",
+    "svd": "svd",
+    "truncated_svd": "svd",
+    "truncated-svd": "svd",
+    "lsa": "svd",
+}
+
+_vector_processors = {}
+_vector_processor_doc_counts = {}
 _vector_index_lock = Lock()
 
 
@@ -21,6 +32,66 @@ def _get_value(article, key, default=None):
     if isinstance(article, dict):
         return article.get(key, default)
     return getattr(article, key, default)
+
+
+def normalize_retrieval_model(value, default=DEFAULT_RETRIEVAL_MODEL):
+    if value is None:
+        return default
+
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return default
+
+    normalized = normalized.replace(" ", "_")
+    resolved = _RETRIEVAL_MODEL_ALIASES.get(normalized)
+    if resolved is None:
+        supported = ", ".join(SUPPORTED_RETRIEVAL_MODELS)
+        raise ValueError(
+            f"Unsupported retrieval_model {value!r}. Supported models: {supported}."
+        )
+    return resolved
+
+
+def _retrieval_model_config(retrieval_model):
+    resolved_model = normalize_retrieval_model(retrieval_model)
+
+    if resolved_model == "tfidf":
+        from backend.text_processing.text_preprocess import (
+            DEFAULT_INDEX_DIR,
+            DEFAULT_INDEX_NAME,
+            preprocess_tfidf_index,
+        )
+        from backend.text_processing.text_processor import load_search_index
+
+        return {
+            "retrieval_model": resolved_model,
+            "index_dir": DEFAULT_INDEX_DIR,
+            "index_name": DEFAULT_INDEX_NAME,
+            "preprocess": preprocess_tfidf_index,
+            "load": load_search_index,
+            "load_kwargs": {
+                "load_articles": False,
+                "allow_matrix_fallback": False,
+            },
+        }
+
+    from backend.text_processing.svd_processor import (
+        DEFAULT_INDEX_DIR,
+        DEFAULT_SVD_INDEX_NAME,
+        load_svd_index,
+        preprocess_svd_index,
+    )
+
+    return {
+        "retrieval_model": resolved_model,
+        "index_dir": DEFAULT_INDEX_DIR,
+        "index_name": DEFAULT_SVD_INDEX_NAME,
+        "preprocess": preprocess_svd_index,
+        "load": load_svd_index,
+        "load_kwargs": {
+            "load_articles": False,
+        },
+    }
 
 
 def serialize_article(article, score=None):
@@ -87,69 +158,83 @@ def build_matches(ranked_articles):
     return matches
 
 
-def build_vector_processor(force_rebuild=False, ensure_preprocessed=True):
-    global _vector_index, _vector_index_doc_count
+def build_retrieval_processor(
+    retrieval_model=DEFAULT_RETRIEVAL_MODEL,
+    force_rebuild=False,
+    ensure_preprocessed=True,
+):
+    resolved_model = normalize_retrieval_model(retrieval_model)
 
     current_doc_count = GuardianArticle.query.count()
     cache_ok = (
         not force_rebuild
-        and _vector_index is not None
-        and _vector_index_doc_count == current_doc_count
+        and _vector_processors.get(resolved_model) is not None
+        and _vector_processor_doc_counts.get(resolved_model) == current_doc_count
     )
     if cache_ok:
         log_runtime_event(
-            "vector_processor.cache_hit",
+            "retrieval_processor.cache_hit",
+            retrieval_model=resolved_model,
             doc_count=current_doc_count,
         )
-        return _vector_index
+        return _vector_processors[resolved_model]
 
     with _vector_index_lock:
         current_doc_count = GuardianArticle.query.count()
         cache_ok = (
             not force_rebuild
-            and _vector_index is not None
-            and _vector_index_doc_count == current_doc_count
+            and _vector_processors.get(resolved_model) is not None
+            and _vector_processor_doc_counts.get(resolved_model) == current_doc_count
         )
         if cache_ok:
             log_runtime_event(
-                "vector_processor.cache_hit_after_lock",
+                "retrieval_processor.cache_hit_after_lock",
+                retrieval_model=resolved_model,
                 doc_count=current_doc_count,
             )
-            return _vector_index
+            return _vector_processors[resolved_model]
 
-        from backend.text_processing.text_preprocess import (
-            DEFAULT_INDEX_DIR,
-            DEFAULT_INDEX_NAME,
-            preprocess_tfidf_index,
-        )
-        from backend.text_processing.text_processor import load_search_index
-
+        config = _retrieval_model_config(resolved_model)
         log_runtime_event(
-            "vector_processor.build_start",
+            "retrieval_processor.build_start",
+            retrieval_model=resolved_model,
+            index_name=config["index_name"],
             doc_count=current_doc_count,
             force_rebuild=bool(force_rebuild),
         )
         if ensure_preprocessed:
-            preprocess_tfidf_index(
+            config["preprocess"](
                 db_path=_resolve_db_path(),
-                index_dir=DEFAULT_INDEX_DIR,
-                index_name=DEFAULT_INDEX_NAME,
+                index_dir=config["index_dir"],
+                index_name=config["index_name"],
                 force_rebuild=force_rebuild,
             )
-        log_runtime_event("vector_processor.load_start", index_name=DEFAULT_INDEX_NAME)
-        vector_index, _meta = load_search_index(
-            index_dir=DEFAULT_INDEX_DIR,
-            index_name=DEFAULT_INDEX_NAME,
-            load_articles=False,
-            allow_matrix_fallback=False,
+        log_runtime_event(
+            "retrieval_processor.load_start",
+            retrieval_model=resolved_model,
+            index_name=config["index_name"],
+        )
+        vector_index, _meta = config["load"](
+            index_dir=config["index_dir"],
+            index_name=config["index_name"],
+            **config["load_kwargs"],
         )
 
-        _vector_index = vector_index
-        _vector_index_doc_count = current_doc_count
+        _vector_processors[resolved_model] = vector_index
+        _vector_processor_doc_counts[resolved_model] = current_doc_count
         log_runtime_event(
-            "vector_processor.load_done",
+            "retrieval_processor.load_done",
+            retrieval_model=resolved_model,
             doc_count=current_doc_count,
             n_docs=getattr(vector_index, "n_docs", None),
             n_terms=getattr(vector_index, "n_terms", None),
         )
-        return _vector_index
+        return _vector_processors[resolved_model]
+
+
+def build_vector_processor(force_rebuild=False, ensure_preprocessed=True):
+    return build_retrieval_processor(
+        retrieval_model=DEFAULT_RETRIEVAL_MODEL,
+        force_rebuild=force_rebuild,
+        ensure_preprocessed=ensure_preprocessed,
+    )

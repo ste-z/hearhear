@@ -11,7 +11,13 @@ from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from backend.runtime.runtime_debug import log_runtime_event
 from backend.services.essay_service import essay_claim_candidates, essay_search
 from backend.services.pdf_service import extract_pdf_text
-from backend.services.retrieval_service import json_search, stance_search
+from backend.services.retrieval_service import (
+    DEFAULT_RETRIEVAL_MODEL,
+    json_search,
+    normalize_retrieval_model,
+    SUPPORTED_RETRIEVAL_MODELS,
+    stance_search,
+)
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
 USE_LLM = False
@@ -53,6 +59,11 @@ def _extract_request_context():
     stance_weight = _coerce_float(payload.get("stance_weight"), 0.5)
     rerank_top_k = _coerce_int(payload.get("top_k"), 20, minimum=1, maximum=100)
     candidate_top_n = _coerce_int(payload.get("candidate_top_n"), 5, minimum=1, maximum=10)
+    retrieval_model = normalize_retrieval_model(
+        payload.get("retrieval_model")
+        or payload.get("search_backend")
+        or DEFAULT_RETRIEVAL_MODEL
+    )
     selected_thesis_sentence = str(payload.get("selected_thesis_sentence") or "").strip()
     selected_thesis_id = str(payload.get("selected_thesis_id") or "").strip() or None
 
@@ -80,6 +91,7 @@ def _extract_request_context():
         "stance_weight": stance_weight,
         "rerank_top_k": rerank_top_k,
         "candidate_top_n": candidate_top_n,
+        "retrieval_model": retrieval_model,
         "selected_thesis_sentence": selected_thesis_sentence,
         "selected_thesis_id": selected_thesis_id,
         "essay_text": essay_text,
@@ -114,7 +126,11 @@ def register_routes(app):
 
     @app.route("/api/config")
     def config():
-        return jsonify({"use_llm": USE_LLM})
+        return jsonify({
+            "use_llm": USE_LLM,
+            "default_retrieval_model": DEFAULT_RETRIEVAL_MODEL,
+            "supported_retrieval_models": list(SUPPORTED_RETRIEVAL_MODELS),
+        })
 
     @app.route("/api/articles", methods=["GET", "POST"])
     @app.route("/api/articles/search", methods=["POST"])
@@ -124,6 +140,7 @@ def register_routes(app):
             log_runtime_event(
                 "articles_search.start",
                 mode=context["mode"],
+                retrieval_model=context["retrieval_model"],
                 essay_chars=len(context["essay_text"]),
                 topic_chars=len(context["topic"]),
                 opinion_chars=len(context["opinion"]),
@@ -136,6 +153,7 @@ def register_routes(app):
                     topic_weight=context["topic_weight"],
                     stance_weight=context["stance_weight"],
                     top_n=context["rerank_top_k"],
+                    retrieval_model=context["retrieval_model"],
                 )
             elif context["mode"] == "essay":
                 results = essay_search(
@@ -145,12 +163,17 @@ def register_routes(app):
                     topic_weight=context["topic_weight"],
                     stance_weight=context["stance_weight"],
                     top_n=context["rerank_top_k"],
+                    retrieval_model=context["retrieval_model"],
                 )
             else:
-                results = json_search(context["essay_text"])
+                results = json_search(
+                    context["essay_text"],
+                    retrieval_model=context["retrieval_model"],
+                )
             log_runtime_event(
                 "articles_search.done",
                 mode=context["mode"],
+                retrieval_model=context["retrieval_model"],
                 result_count=len(results),
             )
             return jsonify(results)
