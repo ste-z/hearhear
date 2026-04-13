@@ -14,11 +14,16 @@ from backend.services.pdf_service import extract_pdf_text
 from backend.services.retrieval_service import (
     available_article_year_range,
     attach_query_svd_chart_dimensions,
+    DEFAULT_AUTO_RERANK_THRESHOLDS,
+    DEFAULT_RERANK_SELECTION_MODE,
     DEFAULT_RETRIEVAL_MODEL,
     json_search,
+    MAX_AUTO_RERANK_CANDIDATES,
     normalize_retrieval_model,
+    normalize_rerank_selection_mode,
     retrieval_query_svd_corpus_chart_dimensions,
     retrieval_query_svd_dimensions,
+    SUPPORTED_RERANK_SELECTION_MODES,
     SUPPORTED_RETRIEVAL_MODELS,
     stance_search,
 )
@@ -67,6 +72,18 @@ def _coerce_optional_int(value, label):
         raise ValueError(f"{label} must be a whole number.")
 
 
+def _coerce_optional_float(value, label):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be a number.")
+
+
 def _coerce_bool(value, default=False):
     if value is None:
         return bool(default)
@@ -102,6 +119,14 @@ def _extract_request_context():
         or payload.get("search_backend")
         or DEFAULT_RETRIEVAL_MODEL
     )
+    rerank_selection_mode = normalize_rerank_selection_mode(
+        payload.get("rerank_selection_mode"),
+        DEFAULT_RERANK_SELECTION_MODE,
+    )
+    rerank_threshold = _coerce_optional_float(
+        payload.get("rerank_threshold"),
+        "Automatic rerank threshold",
+    )
     year_start = _coerce_optional_int(payload.get("year_start"), "Start year")
     year_end = _coerce_optional_int(payload.get("year_end"), "End year")
     selected_thesis_sentence = str(payload.get("selected_thesis_sentence") or "").strip()
@@ -134,6 +159,8 @@ def _extract_request_context():
         "candidate_top_n": candidate_top_n,
         "normalize_topic_scores": normalize_topic_scores,
         "retrieval_model": retrieval_model,
+        "rerank_selection_mode": rerank_selection_mode,
+        "rerank_threshold": rerank_threshold,
         "year_start": year_start,
         "year_end": year_end,
         "selected_thesis_sentence": selected_thesis_sentence,
@@ -176,6 +203,10 @@ def register_routes(app):
             "default_retrieval_model": DEFAULT_RETRIEVAL_MODEL,
             "default_normalize_topic_scores": DEFAULT_NORMALIZE_TOPIC_SCORES,
             "supported_retrieval_models": list(SUPPORTED_RETRIEVAL_MODELS),
+            "default_rerank_selection_mode": DEFAULT_RERANK_SELECTION_MODE,
+            "supported_rerank_selection_modes": list(SUPPORTED_RERANK_SELECTION_MODES),
+            "default_auto_rerank_thresholds": dict(DEFAULT_AUTO_RERANK_THRESHOLDS),
+            "max_auto_rerank_candidates": MAX_AUTO_RERANK_CANDIDATES,
             "min_article_year": min_article_year,
             "max_article_year": max_article_year,
         })
@@ -194,9 +225,12 @@ def register_routes(app):
                 opinion_chars=len(context["opinion"]),
                 rerank_top_k=context["rerank_top_k"],
                 normalize_topic_scores=context["normalize_topic_scores"],
+                rerank_selection_mode=context["rerank_selection_mode"],
+                rerank_threshold=context["rerank_threshold"],
             )
+            empty_results_message = None
             if context["mode"] == "stance":
-                results = stance_search(
+                search_payload = stance_search(
                     topic=context["topic"],
                     opinion=context["opinion"],
                     topic_weight=context["topic_weight"],
@@ -207,9 +241,11 @@ def register_routes(app):
                     year_start=context["year_start"],
                     year_end=context["year_end"],
                     normalize_topic_scores=context["normalize_topic_scores"],
+                    rerank_selection_mode=context["rerank_selection_mode"],
+                    rerank_threshold=context["rerank_threshold"],
                 )
             elif context["mode"] == "essay":
-                results = essay_search(
+                search_payload = essay_search(
                     essay_text=context["essay_text"],
                     selected_thesis_sentence=context["selected_thesis_sentence"],
                     selected_thesis_id=context["selected_thesis_id"],
@@ -221,14 +257,21 @@ def register_routes(app):
                     year_start=context["year_start"],
                     year_end=context["year_end"],
                     normalize_topic_scores=context["normalize_topic_scores"],
+                    rerank_selection_mode=context["rerank_selection_mode"],
+                    rerank_threshold=context["rerank_threshold"],
                 )
             else:
-                results = json_search(
-                    context["essay_text"],
-                    retrieval_model=context["retrieval_model"],
-                    year_start=context["year_start"],
-                    year_end=context["year_end"],
-                )
+                search_payload = {
+                    "results": json_search(
+                        context["essay_text"],
+                        retrieval_model=context["retrieval_model"],
+                        year_start=context["year_start"],
+                        year_end=context["year_end"],
+                    ),
+                    "empty_results_message": None,
+                }
+            results = list(search_payload.get("results") or [])
+            empty_results_message = search_payload.get("empty_results_message")
             if context["mode"] == "stance":
                 query_text = context["topic"]
             else:
@@ -251,11 +294,13 @@ def register_routes(app):
                 mode=context["mode"],
                 retrieval_model=context["retrieval_model"],
                 result_count=len(results),
+                empty_results_message=empty_results_message,
             )
             return jsonify({
                 "results": results,
                 "query_svd_dimensions": query_svd_dimensions,
                 "query_svd_corpus_chart_dimensions": query_svd_corpus_chart_dimensions,
+                "empty_results_message": empty_results_message,
             })
         except Exception as exc:
             app.logger.exception("API request to /api/articles failed")
