@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import './App.css'
 import {
   Article,
@@ -423,6 +431,191 @@ function SvdConceptBarChart(
   )
 }
 
+function YearRangeSlider(
+  {
+    minYear,
+    maxYear,
+    startYear,
+    endYear,
+    disabled = false,
+    onStartYearChange,
+    onEndYearChange,
+  }: {
+    minYear: number
+    maxYear: number
+    startYear: number
+    endYear: number
+    disabled?: boolean
+    onStartYearChange: (nextYear: number) => void
+    onEndYearChange: (nextYear: number) => void
+  },
+): JSX.Element {
+  const sliderShellRef = useRef<HTMLDivElement | null>(null)
+  const [draggingThumb, setDraggingThumb] = useState<'start' | 'end' | null>(null)
+  const yearSpan = Math.max(0, maxYear - minYear)
+  const startPercent = yearSpan === 0 ? 0 : (((startYear - minYear) / yearSpan) * 100)
+  const endPercent = yearSpan === 0 ? 100 : (((endYear - minYear) / yearSpan) * 100)
+
+  const resolveYearFromClientX = (clientX: number): number => {
+    const sliderBounds = sliderShellRef.current?.getBoundingClientRect()
+    if (!sliderBounds || sliderBounds.width <= 0 || yearSpan === 0) {
+      return startYear
+    }
+    const relativeX = Math.min(sliderBounds.width, Math.max(0, clientX - sliderBounds.left))
+    const nextPercent = relativeX / sliderBounds.width
+    const nextYear = minYear + Math.round(nextPercent * yearSpan)
+    return clampYear(nextYear, minYear, maxYear)
+  }
+
+  const applyDraggedYear = (clientX: number, thumb: 'start' | 'end'): void => {
+    const nextYear = resolveYearFromClientX(clientX)
+    if (thumb === 'start') {
+      onStartYearChange(Math.min(nextYear, endYear))
+      return
+    }
+    onEndYearChange(Math.max(nextYear, startYear))
+  }
+
+  useEffect(() => {
+    if (!draggingThumb || disabled) {
+      return
+    }
+
+    const handlePointerMove = (event: PointerEvent): void => {
+      applyDraggedYear(event.clientX, draggingThumb)
+    }
+
+    const stopDragging = (): void => {
+      setDraggingThumb(null)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopDragging)
+    window.addEventListener('pointercancel', stopDragging)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopDragging)
+      window.removeEventListener('pointercancel', stopDragging)
+    }
+  }, [disabled, draggingThumb, endYear, maxYear, minYear, onEndYearChange, onStartYearChange, startYear, yearSpan])
+
+  const beginDrag = (
+    thumb: 'start' | 'end',
+    event: ReactPointerEvent<HTMLButtonElement | HTMLDivElement>,
+  ): void => {
+    if (disabled) return
+    event.preventDefault()
+    event.stopPropagation()
+    setDraggingThumb(thumb)
+    applyDraggedYear(event.clientX, thumb)
+  }
+
+  const handleTrackPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (disabled) return
+    const nextYear = resolveYearFromClientX(event.clientX)
+    const nearestThumb = Math.abs(nextYear - startYear) <= Math.abs(nextYear - endYear)
+      ? 'start'
+      : 'end'
+    beginDrag(nearestThumb, event)
+  }
+
+  const nudgeThumb = (thumb: 'start' | 'end', delta: number): void => {
+    if (thumb === 'start') {
+      onStartYearChange(clampYear(startYear + delta, minYear, endYear))
+      return
+    }
+    onEndYearChange(clampYear(endYear + delta, startYear, maxYear))
+  }
+
+  const handleThumbKeyDown = (
+    thumb: 'start' | 'end',
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+  ): void => {
+    if (disabled) return
+
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+      event.preventDefault()
+      nudgeThumb(thumb, -1)
+      return
+    }
+
+    if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      nudgeThumb(thumb, 1)
+      return
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault()
+      if (thumb === 'start') {
+        onStartYearChange(minYear)
+      } else {
+        onEndYearChange(startYear)
+      }
+      return
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault()
+      if (thumb === 'start') {
+        onStartYearChange(endYear)
+      } else {
+        onEndYearChange(maxYear)
+      }
+    }
+  }
+
+  return (
+    <div className={`year-range-slider-shell ${disabled ? 'disabled' : ''}`}>
+      <div
+        ref={sliderShellRef}
+        className="year-range-slider-track"
+        onPointerDown={handleTrackPointerDown}
+        role="presentation"
+      >
+        <span className="year-range-track" aria-hidden="true" />
+        <span
+          className="year-range-track active"
+          aria-hidden="true"
+          style={{
+            left: `${startPercent}%`,
+            width: `${Math.max(0, endPercent - startPercent)}%`,
+          }}
+        />
+        <button
+          type="button"
+          className={`year-range-handle start ${draggingThumb === 'start' ? 'dragging' : ''}`}
+          style={{ left: `calc(${startPercent}% - 10px)` }}
+          onPointerDown={(event) => beginDrag('start', event)}
+          onKeyDown={(event) => handleThumbKeyDown('start', event)}
+          disabled={disabled}
+          role="slider"
+          aria-label="Start year"
+          aria-valuemin={minYear}
+          aria-valuemax={endYear}
+          aria-valuenow={startYear}
+          aria-valuetext={String(startYear)}
+        />
+        <button
+          type="button"
+          className={`year-range-handle end ${draggingThumb === 'end' ? 'dragging' : ''}`}
+          style={{ left: `calc(${endPercent}% - 10px)` }}
+          onPointerDown={(event) => beginDrag('end', event)}
+          onKeyDown={(event) => handleThumbKeyDown('end', event)}
+          disabled={disabled}
+          role="slider"
+          aria-label="End year"
+          aria-valuemin={startYear}
+          aria-valuemax={maxYear}
+          aria-valuenow={endYear}
+          aria-valuetext={String(endYear)}
+        />
+      </div>
+    </div>
+  )
+}
+
 function App(): JSX.Element {
   const hasSeenLandingRef = useRef<boolean>(hasSeenLanding())
   const [useLlm, setUseLlm] = useState<boolean | null>(null)
@@ -448,6 +641,8 @@ function App(): JSX.Element {
   const [maxArticleYear, setMaxArticleYear] = useState<number | null>(null)
   const [yearStart, setYearStart] = useState<number | null>(null)
   const [yearEnd, setYearEnd] = useState<number | null>(null)
+  const [yearStartInput, setYearStartInput] = useState<string>('')
+  const [yearEndInput, setYearEndInput] = useState<string>('')
   const [supportedRetrievalModels, setSupportedRetrievalModels] = useState<RetrievalModel[]>(
     defaultSupportedRetrievalModels,
   )
@@ -460,6 +655,7 @@ function App(): JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [isAboutOpen, setIsAboutOpen] = useState<boolean>(false)
   const [activeAboutTab, setActiveAboutTab] = useState<InputMode>('stance')
+  const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
   const [essayCandidates, setEssayCandidates] = useState<EssayClaimCandidate[]>([])
   const [essayPreparedText, setEssayPreparedText] = useState<string>('')
@@ -470,6 +666,7 @@ function App(): JSX.Element {
   const essayOptionsRef = useRef<HTMLDivElement | null>(null)
   const resultsSectionRef = useRef<HTMLDivElement | null>(null)
   const touchStartYRef = useRef<number | null>(null)
+  const lastAppliedYearRangeRef = useRef<{ yearStart: number | null, yearEnd: number | null } | null>(null)
   const [isSearchStageVisible, setIsSearchStageVisible] = useState<boolean>(hasSeenLandingRef.current)
   const [hasSubmittedSearch, setHasSubmittedSearch] = useState<boolean>(false)
 
@@ -671,7 +868,7 @@ function App(): JSX.Element {
     setQuerySvdDimensions([])
     setError(null)
     setHasSubmittedSearch(false)
-  }, [inputMode, recencyWeight, rerankTopK, retrievalModel, stanceWeight, topicWeight, yearEnd, yearStart])
+  }, [inputMode, recencyWeight, rerankTopK, retrievalModel, stanceWeight, topicWeight])
 
   useEffect(() => {
     if (inputMode !== 'essay') {
@@ -694,6 +891,7 @@ function App(): JSX.Element {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
       setIsAboutOpen(false)
+      setIsFilterOpen(false)
       setIsSettingsOpen(false)
     }
 
@@ -856,22 +1054,6 @@ function App(): JSX.Element {
   const yearRangeSpan = hasAvailableYearBounds && minArticleYear !== null && maxArticleYear !== null
     ? maxArticleYear - minArticleYear
     : 0
-  const yearRangeStartPercent = (
-    hasAvailableYearBounds &&
-    minArticleYear !== null &&
-    resolvedYearStart !== null &&
-    yearRangeSpan > 0
-  )
-    ? (((resolvedYearStart - minArticleYear) / yearRangeSpan) * 100)
-    : 0
-  const yearRangeEndPercent = (
-    hasAvailableYearBounds &&
-    minArticleYear !== null &&
-    resolvedYearEnd !== null &&
-    yearRangeSpan > 0
-  )
-    ? (((resolvedYearEnd - minArticleYear) / yearRangeSpan) * 100)
-    : 100
   const hasYearRangeSelection = resolvedYearStart !== null && resolvedYearEnd !== null
   const isYearFilterActive = (
     hasYearRangeSelection &&
@@ -975,6 +1157,36 @@ function App(): JSX.Element {
     ))
   }
 
+  const handleYearStartInputChange = (value: string): void => {
+    setYearStartInput(value.replace(/[^\d]/g, ''))
+  }
+
+  const handleYearEndInputChange = (value: string): void => {
+    setYearEndInput(value.replace(/[^\d]/g, ''))
+  }
+
+  const commitYearStartInput = (): void => {
+    const normalizedValue = yearStartInput.trim()
+    if (normalizedValue === '') {
+      if (minArticleYear !== null) {
+        handleYearStartChange(String(minArticleYear))
+      }
+      return
+    }
+    handleYearStartChange(normalizedValue)
+  }
+
+  const commitYearEndInput = (): void => {
+    const normalizedValue = yearEndInput.trim()
+    if (normalizedValue === '') {
+      if (maxArticleYear !== null) {
+        handleYearEndChange(String(maxArticleYear))
+      }
+      return
+    }
+    handleYearEndChange(normalizedValue)
+  }
+
   const scrollToNode = (node: HTMLDivElement | null): void => {
     if (typeof window === 'undefined' || !node) return
 
@@ -1047,6 +1259,10 @@ function App(): JSX.Element {
   const handleSubmitStance = async (): Promise<void> => {
     if (!canSearchStance || loading) return
 
+    lastAppliedYearRangeRef.current = {
+      yearStart: resolvedYearStart,
+      yearEnd: resolvedYearEnd,
+    }
     setHasSubmittedSearch(true)
     if (typeof document !== 'undefined') {
       document.body.style.overflow = ''
@@ -1150,6 +1366,10 @@ function App(): JSX.Element {
   const handleSubmitEssay = async (): Promise<void> => {
     if (!canSubmitEssay || loading || !resolvedEssayThesis) return
 
+    lastAppliedYearRangeRef.current = {
+      yearStart: resolvedYearStart,
+      yearEnd: resolvedYearEnd,
+    }
     setHasSubmittedSearch(true)
     if (typeof document !== 'undefined') {
       document.body.style.overflow = ''
@@ -1196,6 +1416,47 @@ function App(): JSX.Element {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (isFilterOpen || loading || !hasSubmittedSearch) {
+      return
+    }
+
+    const lastAppliedYearRange = lastAppliedYearRangeRef.current
+    if (
+      lastAppliedYearRange &&
+      lastAppliedYearRange.yearStart === resolvedYearStart &&
+      lastAppliedYearRange.yearEnd === resolvedYearEnd
+    ) {
+      return
+    }
+
+    if (inputMode === 'stance') {
+      if (!canSearchStance) return
+      void handleSubmitStance()
+      return
+    }
+
+    if (!canSubmitEssay) return
+    void handleSubmitEssay()
+  }, [
+    canSearchStance,
+    canSubmitEssay,
+    hasSubmittedSearch,
+    inputMode,
+    isFilterOpen,
+    loading,
+    resolvedYearEnd,
+    resolvedYearStart,
+  ])
+
+  useEffect(() => {
+    setYearStartInput(resolvedYearStart === null ? '' : String(resolvedYearStart))
+  }, [resolvedYearStart])
+
+  useEffect(() => {
+    setYearEndInput(resolvedYearEnd === null ? '' : String(resolvedYearEnd))
+  }, [resolvedYearEnd])
 
   const scrollEssayOptions = (direction: 'left' | 'right'): void => {
     const container = essayOptionsRef.current
@@ -1704,9 +1965,16 @@ function App(): JSX.Element {
             <button
               type="button"
               className="utility-pill"
+              onClick={() => setIsFilterOpen(true)}
+            >
+              {`Filter (${activeYearRangeLabel})`}
+            </button>
+            <button
+              type="button"
+              className="utility-pill"
               onClick={() => setIsSettingsOpen(true)}
             >
-              {`Settings (${activeYearRangeLabel})`}
+              Settings
             </button>
           </div>
 
@@ -2217,6 +2485,98 @@ function App(): JSX.Element {
         </div>
       )}
 
+      {isFilterOpen && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setIsFilterOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="modal-card filter-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="filter-settings-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <p className="modal-eyebrow">Filter</p>
+                <h3 id="filter-settings-title">Article year range</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setIsFilterOpen(false)}
+                aria-label="Close filter popup"
+              >
+                Close
+              </button>
+            </div>
+            <div className="modal-settings-grid">
+              <div className="weight-card full-row">
+                <span>Year range</span>
+                <div className="year-range-summary-grid" aria-live="polite">
+                  <label className="year-range-value-card year-range-input-card">
+                    <span>From</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={yearStartInput}
+                      onChange={(event) => handleYearStartInputChange(event.target.value)}
+                      onBlur={commitYearStartInput}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.currentTarget.blur()
+                        }
+                      }}
+                      disabled={!hasAvailableYearBounds}
+                      aria-label="Start year value"
+                    />
+                  </label>
+                  <label className="year-range-value-card year-range-input-card">
+                    <span>To</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={yearEndInput}
+                      onChange={(event) => handleYearEndInputChange(event.target.value)}
+                      onBlur={commitYearEndInput}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.currentTarget.blur()
+                        }
+                      }}
+                      disabled={!hasAvailableYearBounds}
+                      aria-label="End year value"
+                    />
+                  </label>
+                </div>
+                {minArticleYear !== null && maxArticleYear !== null && resolvedYearStart !== null && resolvedYearEnd !== null && (
+                  <YearRangeSlider
+                    minYear={minArticleYear}
+                    maxYear={maxArticleYear}
+                    startYear={resolvedYearStart}
+                    endYear={resolvedYearEnd}
+                    disabled={!hasAvailableYearBounds || yearRangeSpan === 0}
+                    onStartYearChange={(nextYear) => handleYearStartChange(String(nextYear))}
+                    onEndYearChange={(nextYear) => handleYearEndChange(String(nextYear))}
+                  />
+                )}
+                <div className="year-range-scale" aria-hidden="true">
+                  <span>{minArticleYear ?? '—'}</span>
+                  <span>{maxArticleYear ?? '—'}</span>
+                </div>
+                <p className="setting-help-text">
+                  Only return articles published within the selected year range.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isSettingsOpen && (
         <div
           className="modal-backdrop"
@@ -2259,59 +2619,6 @@ function App(): JSX.Element {
                   How many top retrieval matches move into the NLI reranking stage.
                 </p>
               </label>
-              <div className="weight-card full-row">
-                <span>Year range</span>
-                <div className="year-range-summary-grid" aria-live="polite">
-                  <div className="year-range-value-card">
-                    <span>From</span>
-                    <strong>{resolvedYearStart ?? '—'}</strong>
-                  </div>
-                  <div className="year-range-value-card">
-                    <span>To</span>
-                    <strong>{resolvedYearEnd ?? '—'}</strong>
-                  </div>
-                </div>
-                <div className={`year-range-slider-shell ${!hasAvailableYearBounds ? 'disabled' : ''}`}>
-                  <div className="year-range-track" aria-hidden="true" />
-                  <div
-                    className="year-range-track active"
-                    aria-hidden="true"
-                    style={{
-                      left: `${yearRangeStartPercent}%`,
-                      width: `${Math.max(0, yearRangeEndPercent - yearRangeStartPercent)}%`,
-                    }}
-                  />
-                  <input
-                    className="year-range-slider start"
-                    type="range"
-                    min={minArticleYear ?? 0}
-                    max={maxArticleYear ?? 0}
-                    step="1"
-                    value={resolvedYearStart ?? minArticleYear ?? 0}
-                    onChange={(event) => handleYearStartChange(event.target.value)}
-                    disabled={!hasAvailableYearBounds || yearRangeSpan === 0}
-                    aria-label="Start year"
-                  />
-                  <input
-                    className="year-range-slider end"
-                    type="range"
-                    min={minArticleYear ?? 0}
-                    max={maxArticleYear ?? 0}
-                    step="1"
-                    value={resolvedYearEnd ?? maxArticleYear ?? 0}
-                    onChange={(event) => handleYearEndChange(event.target.value)}
-                    disabled={!hasAvailableYearBounds || yearRangeSpan === 0}
-                    aria-label="End year"
-                  />
-                </div>
-                <div className="year-range-scale" aria-hidden="true">
-                  <span>{minArticleYear ?? '—'}</span>
-                  <span>{maxArticleYear ?? '—'}</span>
-                </div>
-                <p className="setting-help-text">
-                  Only return articles published within the selected year range.
-                </p>
-              </div>
               <div className="weight-card full-row settings-toggle-card">
                 <div className="settings-toggle-row">
                   <div className="settings-toggle-copy">
