@@ -32,6 +32,7 @@ from backend.text_processing.text_processor import (
     TfidfMatrixIndex,
     TfidfPostingsIndex,
 )
+from backend.text_processing.text_normalization import TEXT_NORMALIZATION_VERSION
 
 
 DEFAULT_INDEX_NAME = "guardian_tfidf"
@@ -66,6 +67,8 @@ def _is_existing_index_fresh(index_dir, index_name, db_row_count, expected_years
 
     stored_vectorizer_params = meta.get("vectorizer_params")
     if stored_vectorizer_params != DEFAULT_TFIDF_PARAMS:
+        return False
+    if meta.get("text_normalization_version") != TEXT_NORMALIZATION_VERSION:
         return False
 
     required_paths = [
@@ -104,6 +107,8 @@ def _is_existing_index_fresh(index_dir, index_name, db_row_count, expected_years
         return False
 
     return stored_count == int(db_row_count)
+
+
 def preprocess_tfidf_index(
     db_path=DEFAULT_DB_PATH,
     index_dir=DEFAULT_INDEX_DIR,
@@ -186,6 +191,7 @@ def preprocess_tfidf_index(
             "source_db_path": _relative_db_path_for_meta(db_path),
             "text_source": source_kind,
             "source_years": source_years,
+            "text_normalization_version": TEXT_NORMALIZATION_VERSION,
             "vectorizer_params": dict(DEFAULT_TFIDF_PARAMS),
         },
         include_matrix_artifacts=False,

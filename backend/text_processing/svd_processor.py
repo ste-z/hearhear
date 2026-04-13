@@ -42,6 +42,10 @@ from backend.text_processing.indexing.corpus import (
     _normalized_years,
     _relative_db_path_for_meta,
 )
+from backend.text_processing.text_normalization import (
+    TEXT_NORMALIZATION_VERSION,
+    normalize_text_for_vectorization,
+)
 
 
 DEFAULT_SVD_INDEX_NAME = "guardian_tfidf_svd"
@@ -255,8 +259,12 @@ class TruncatedSvdIndex:
             raise ValueError(f"Column '{id_column}' not found in articles.")
 
         normalized = articles.reset_index(drop=True).copy()
-        text_series = normalized[text_column].astype("string").fillna("").str.strip()
-        if (text_series == "").all():
+        text_series = normalized[text_column].astype("string").fillna("")
+        text_values = [
+            normalize_text_for_vectorization(value)
+            for value in text_series.tolist()
+        ]
+        if not any(text_values):
             raise ValueError(f"Column '{text_column}' contains no non-empty text.")
 
         id_series = _normalize_id_series(normalized[id_column], id_column)
@@ -266,7 +274,7 @@ class TruncatedSvdIndex:
         if vectorizer is None:
             vectorizer = TfidfVectorizer(**resolved_vectorizer_params)
 
-        term_doc_matrix = vectorizer.fit_transform(text_series.tolist())
+        term_doc_matrix = vectorizer.fit_transform(text_values)
         terms = vectorizer.get_feature_names_out().tolist()
 
         resolved_svd_params = _resolved_svd_params(
@@ -347,7 +355,7 @@ class TruncatedSvdIndex:
         return self.doc_embeddings[idx]
 
     def project_query(self, query, normalize=False):
-        query_text = str(query or "").strip()
+        query_text = normalize_text_for_vectorization(query)
         if not query_text:
             return None
 
@@ -814,6 +822,8 @@ def _is_existing_svd_index_fresh(
 
     if meta.get("vectorizer_params") != _resolved_vectorizer_params(expected_vectorizer_params):
         return False
+    if meta.get("text_normalization_version") != TEXT_NORMALIZATION_VERSION:
+        return False
 
     expected_svd = _resolved_svd_params(
         n_components=expected_n_components,
@@ -963,6 +973,7 @@ def preprocess_svd_index(
             "source_db_path": _relative_db_path_for_meta(db_path),
             "text_source": source_kind,
             "source_years": source_years,
+            "text_normalization_version": TEXT_NORMALIZATION_VERSION,
             "vectorizer_params": resolved_vectorizer_params,
         },
     )
