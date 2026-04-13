@@ -24,6 +24,8 @@ DEFAULT_BATCH_SIZE = 500
 DEFAULT_CLAIM_BATCH_SIZE = 500
 DEFAULT_BUNDLED_INDEX_DIR = Path(__file__).resolve().parent.parent / "data" / "processed" / "vector_index"
 DEFAULT_BUNDLED_INDEX_NAME = "guardian_tfidf"
+DEFAULT_ANALYSIS_EXPORT_DIR = Path(__file__).resolve().parent.parent / "data" / "processed" / "analysis_exports"
+DEFAULT_SVD_DIMENSION_SUMMARY_EXPORT_TOP_TERMS = 10
 STORE_GUARDIAN_BODY_TEXT_ENV = "STORE_GUARDIAN_BODY_TEXT_IN_DB"
 
 
@@ -73,6 +75,36 @@ def _env_flag(name, default=False):
 
 def _should_store_body_text():
     return _env_flag(STORE_GUARDIAN_BODY_TEXT_ENV, default=False)
+
+
+def _export_startup_svd_dimension_summaries(processor):
+    if processor is None or not hasattr(processor, "export_dimension_summaries"):
+        return None
+
+    from backend.text_processing.svd_processor import DEFAULT_SVD_INDEX_NAME
+
+    output_path = (
+        DEFAULT_ANALYSIS_EXPORT_DIR
+        / f"{DEFAULT_SVD_INDEX_NAME}_all_dimensions_summary.csv"
+    )
+
+    log_runtime_event(
+        "startup_warm.svd_dimension_export_start",
+        output_path=str(output_path),
+        top_terms=DEFAULT_SVD_DIMENSION_SUMMARY_EXPORT_TOP_TERMS,
+    )
+    export_path, df = processor.export_dimension_summaries(
+        output_path=output_path,
+        dimensions=None,
+        top_n=DEFAULT_SVD_DIMENSION_SUMMARY_EXPORT_TOP_TERMS,
+    )
+    log_runtime_event(
+        "startup_warm.svd_dimension_export_done",
+        output_path=str(export_path),
+        row_count=len(df),
+        top_terms=DEFAULT_SVD_DIMENSION_SUMMARY_EXPORT_TOP_TERMS,
+    )
+    return export_path
 
 
 def _existing_data_needs_refresh(expected_years=None, allow_missing_body_text=False):
@@ -332,6 +364,21 @@ def _warm_runtime_assets():
                     n_docs=getattr(vector_index, "n_docs", None),
                     n_terms=getattr(vector_index, "n_terms", None),
                 )
+                if retrieval_model == "svd":
+                    try:
+                        export_path = _export_startup_svd_dimension_summaries(
+                            vector_index
+                        )
+                        if export_path is not None:
+                            print(
+                                "SVD dimension summary exported to "
+                                f"{export_path}."
+                            )
+                    except Exception as exc:
+                        print(
+                            "Warning: SVD dimension summary export failed; "
+                            f"startup will continue. Details: {exc}"
+                        )
                 print(f"{label} retrieval artifacts ensured and loaded into memory.")
             except Exception as exc:
                 print(
