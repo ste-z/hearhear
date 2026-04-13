@@ -61,7 +61,10 @@ def _retrieval_model_config(retrieval_model):
             DEFAULT_INDEX_NAME,
             preprocess_tfidf_index,
         )
-        from backend.text_processing.text_processor import load_search_index
+        from backend.text_processing.text_processor import (
+            TfidfPostingsIndex,
+            load_search_index,
+        )
 
         return {
             "retrieval_model": resolved_model,
@@ -69,6 +72,7 @@ def _retrieval_model_config(retrieval_model):
             "index_name": DEFAULT_INDEX_NAME,
             "preprocess": preprocess_tfidf_index,
             "load": load_search_index,
+            "has_artifacts": TfidfPostingsIndex.has_artifacts,
             "load_kwargs": {
                 "load_articles": False,
                 "allow_matrix_fallback": False,
@@ -78,6 +82,7 @@ def _retrieval_model_config(retrieval_model):
     from backend.text_processing.svd_processor import (
         DEFAULT_INDEX_DIR,
         DEFAULT_SVD_INDEX_NAME,
+        TruncatedSvdIndex,
         load_svd_index,
         preprocess_svd_index,
     )
@@ -88,10 +93,23 @@ def _retrieval_model_config(retrieval_model):
         "index_name": DEFAULT_SVD_INDEX_NAME,
         "preprocess": preprocess_svd_index,
         "load": load_svd_index,
+        "has_artifacts": TruncatedSvdIndex.has_artifacts,
         "load_kwargs": {
             "load_articles": False,
         },
     }
+
+
+def _artifacts_available(config):
+    checker = config.get("has_artifacts")
+    if checker is None:
+        return True
+    return bool(
+        checker(
+            index_dir=config["index_dir"],
+            index_name=config["index_name"],
+        )
+    )
 
 
 def serialize_article(article, score=None):
@@ -164,12 +182,29 @@ def build_retrieval_processor(
     ensure_preprocessed=True,
 ):
     resolved_model = normalize_retrieval_model(retrieval_model)
+    config = _retrieval_model_config(resolved_model)
 
     current_doc_count = GuardianArticle.query.count()
+    artifacts_available = (
+        _artifacts_available(config) if ensure_preprocessed else True
+    )
+    if (
+        ensure_preprocessed
+        and _vector_processors.get(resolved_model) is not None
+        and not artifacts_available
+    ):
+        log_runtime_event(
+            "retrieval_processor.cache_invalidated",
+            retrieval_model=resolved_model,
+            reason="missing_artifacts",
+        )
+        _vector_processors.pop(resolved_model, None)
+        _vector_processor_doc_counts.pop(resolved_model, None)
     cache_ok = (
         not force_rebuild
         and _vector_processors.get(resolved_model) is not None
         and _vector_processor_doc_counts.get(resolved_model) == current_doc_count
+        and artifacts_available
     )
     if cache_ok:
         log_runtime_event(
@@ -181,10 +216,26 @@ def build_retrieval_processor(
 
     with _vector_index_lock:
         current_doc_count = GuardianArticle.query.count()
+        artifacts_available = (
+            _artifacts_available(config) if ensure_preprocessed else True
+        )
+        if (
+            ensure_preprocessed
+            and _vector_processors.get(resolved_model) is not None
+            and not artifacts_available
+        ):
+            log_runtime_event(
+                "retrieval_processor.cache_invalidated_after_lock",
+                retrieval_model=resolved_model,
+                reason="missing_artifacts",
+            )
+            _vector_processors.pop(resolved_model, None)
+            _vector_processor_doc_counts.pop(resolved_model, None)
         cache_ok = (
             not force_rebuild
             and _vector_processors.get(resolved_model) is not None
             and _vector_processor_doc_counts.get(resolved_model) == current_doc_count
+            and artifacts_available
         )
         if cache_ok:
             log_runtime_event(
@@ -194,7 +245,6 @@ def build_retrieval_processor(
             )
             return _vector_processors[resolved_model]
 
-        config = _retrieval_model_config(resolved_model)
         log_runtime_event(
             "retrieval_processor.build_start",
             retrieval_model=resolved_model,
@@ -214,11 +264,31 @@ def build_retrieval_processor(
             retrieval_model=resolved_model,
             index_name=config["index_name"],
         )
-        vector_index, _meta = config["load"](
-            index_dir=config["index_dir"],
-            index_name=config["index_name"],
-            **config["load_kwargs"],
-        )
+        try:
+            vector_index, _meta = config["load"](
+                index_dir=config["index_dir"],
+                index_name=config["index_name"],
+                **config["load_kwargs"],
+            )
+        except FileNotFoundError:
+            if not ensure_preprocessed or force_rebuild:
+                raise
+            log_runtime_event(
+                "retrieval_processor.load_missing_artifacts_rebuild",
+                retrieval_model=resolved_model,
+                index_name=config["index_name"],
+            )
+            config["preprocess"](
+                db_path=_resolve_db_path(),
+                index_dir=config["index_dir"],
+                index_name=config["index_name"],
+                force_rebuild=True,
+            )
+            vector_index, _meta = config["load"](
+                index_dir=config["index_dir"],
+                index_name=config["index_name"],
+                **config["load_kwargs"],
+            )
 
         _vector_processors[resolved_model] = vector_index
         _vector_processor_doc_counts[resolved_model] = current_doc_count

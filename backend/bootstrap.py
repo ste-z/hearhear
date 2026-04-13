@@ -291,31 +291,56 @@ def _seed_guardian_articles(
 
 
 def _warm_runtime_assets():
+    retrieval_labels = {
+        "tfidf": "TF-IDF",
+        "svd": "SVD",
+    }
     try:
         from backend.text_processing.search_helpers import (
             DEFAULT_RETRIEVAL_MODEL,
+            SUPPORTED_RETRIEVAL_MODELS,
             build_retrieval_processor,
         )
 
-        log_runtime_event(
-            "startup_warm.vector_index_start",
-            retrieval_model=DEFAULT_RETRIEVAL_MODEL,
-        )
-        vector_index = build_retrieval_processor(
-            retrieval_model=DEFAULT_RETRIEVAL_MODEL,
-            force_rebuild=False,
-            ensure_preprocessed=False,
-        )
-        log_runtime_event(
-            "startup_warm.vector_index_done",
-            retrieval_model=DEFAULT_RETRIEVAL_MODEL,
-            n_docs=getattr(vector_index, "n_docs", None),
-            n_terms=getattr(vector_index, "n_terms", None),
-        )
-        print(f"{DEFAULT_RETRIEVAL_MODEL.upper()} search index loaded into memory.")
+        ordered_models = [
+            DEFAULT_RETRIEVAL_MODEL,
+            *[
+                model
+                for model in SUPPORTED_RETRIEVAL_MODELS
+                if model != DEFAULT_RETRIEVAL_MODEL
+            ],
+        ]
+
+        for retrieval_model in ordered_models:
+            label = retrieval_labels.get(
+                retrieval_model,
+                retrieval_model.replace("_", " ").upper(),
+            )
+            try:
+                log_runtime_event(
+                    "startup_warm.vector_index_start",
+                    retrieval_model=retrieval_model,
+                )
+                vector_index = build_retrieval_processor(
+                    retrieval_model=retrieval_model,
+                    force_rebuild=False,
+                    ensure_preprocessed=True,
+                )
+                log_runtime_event(
+                    "startup_warm.vector_index_done",
+                    retrieval_model=retrieval_model,
+                    n_docs=getattr(vector_index, "n_docs", None),
+                    n_terms=getattr(vector_index, "n_terms", None),
+                )
+                print(f"{label} retrieval artifacts ensured and loaded into memory.")
+            except Exception as exc:
+                print(
+                    f"Warning: {label} warm-up failed; startup will continue. "
+                    f"Details: {exc}"
+                )
     except Exception as exc:
         print(
-            "Warning: TF-IDF warm-up failed; the first search may still cold-start. "
+            "Warning: retrieval warm-up initialization failed; startup will continue. "
             f"Details: {exc}"
         )
 
@@ -348,7 +373,7 @@ def initialize_offline_data_pipeline(
     Ensure all offline assets are ready:
       1) SQLite guardian_articles table
       2) SQLite guardian_article_claims table
-      3) TF-IDF vector index artifacts
+      3) Retrieval index artifacts
     """
     with app.app_context():
         db.create_all()
