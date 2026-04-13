@@ -12,6 +12,7 @@ import Chat from './Chat'
 type InputMode = 'stance' | 'essay'
 type IntroStage = 0 | 1 | 2
 type EssayStep = 1 | 2
+type EssayThesisMode = 'candidate' | 'custom'
 
 type ConfigResponse = {
   use_llm: boolean
@@ -187,6 +188,8 @@ function App(): JSX.Element {
   const [essayCandidates, setEssayCandidates] = useState<EssayClaimCandidate[]>([])
   const [essayPreparedText, setEssayPreparedText] = useState<string>('')
   const [selectedEssayCandidateId, setSelectedEssayCandidateId] = useState<string | null>(null)
+  const [essayCustomThesis, setEssayCustomThesis] = useState<string>('')
+  const [essayThesisMode, setEssayThesisMode] = useState<EssayThesisMode>('candidate')
   const [essayActiveStep, setEssayActiveStep] = useState<EssayStep>(1)
   const essayOptionsRef = useRef<HTMLDivElement | null>(null)
   const resultsSectionRef = useRef<HTMLDivElement | null>(null)
@@ -370,6 +373,8 @@ function App(): JSX.Element {
     setEssayCandidates([])
     setEssayPreparedText('')
     setSelectedEssayCandidateId(null)
+    setEssayCustomThesis('')
+    setEssayThesisMode('candidate')
     setEssayActiveStep(1)
     setArticles([])
     setError(null)
@@ -506,14 +511,22 @@ function App(): JSX.Element {
   const trimmedEssayText = searchTerm.trim()
   const trimmedTopic = topic.trim()
   const trimmedOpinion = opinion.trim()
+  const trimmedCustomEssayThesis = essayCustomThesis.trim()
   const canSearchStance = inputMode === 'stance' && trimmedTopic !== '' && trimmedOpinion !== ''
   const canAnalyzeEssay = inputMode === 'essay' && trimmedEssayText !== ''
   const selectedEssayCandidate = useMemo(
     () => essayCandidates.find(candidate => candidate.sentence_id === selectedEssayCandidateId) ?? null,
     [essayCandidates, selectedEssayCandidateId],
   )
-  const canSubmitEssay = Boolean(essayPreparedText && selectedEssayCandidate)
-  const isEssayStepTwoAvailable = essayCandidates.length > 0
+  const resolvedEssayThesis = essayThesisMode === 'custom'
+    ? trimmedCustomEssayThesis
+    : (selectedEssayCandidate?.sentence.trim() ?? '')
+  const resolvedEssayThesisId = essayThesisMode === 'candidate'
+    ? selectedEssayCandidate?.sentence_id ?? null
+    : null
+  const canSubmitEssay = Boolean(essayPreparedText && resolvedEssayThesis)
+  const isEssayStepTwoAvailable = essayPreparedText.trim() !== ''
+  const isUsingCustomEssayThesis = essayThesisMode === 'custom'
   const essayWorkflowStep = isEssayStepTwoAvailable ? essayActiveStep : 1
   const retrievalModelLabel = retrievalModelCopy[retrievalModel].label
 
@@ -589,6 +602,11 @@ function App(): JSX.Element {
   const handleEssaySearch = (value: string): void => {
     setInputMode('essay')
     setImportedPdfName(null)
+    setEssayCandidates([])
+    setEssayPreparedText('')
+    setSelectedEssayCandidateId(null)
+    setEssayCustomThesis('')
+    setEssayThesisMode('candidate')
     setSearchTerm(value)
     setEssayActiveStep(1)
     activateSearchStage(true)
@@ -605,7 +623,10 @@ function App(): JSX.Element {
     setHasSubmittedSearch(false)
     setEssayCandidates([])
     setSelectedEssayCandidateId(null)
+    setEssayCustomThesis('')
+    setEssayThesisMode('candidate')
     setEssayPreparedText('')
+    setEssayActiveStep(1)
 
     try {
       const formData = new FormData()
@@ -690,18 +711,30 @@ function App(): JSX.Element {
         body: formData,
       })
       const data = await readApiJson<EssayClaimCandidateResponse>(response)
+      const nextEssayText = data.essay_text || trimmedEssayText
+      const nextCandidates = data.candidates || []
+      const nextSelectedCandidateId = (
+        nextCandidates.find(candidate => candidate.sentence_id === selectedEssayCandidateId)?.sentence_id
+        ?? nextCandidates[0]?.sentence_id
+        ?? null
+      )
+      const shouldKeepCustomSelection = (
+        essayThesisMode === 'custom' &&
+        trimmedCustomEssayThesis !== ''
+      )
 
-      setEssayPreparedText(data.essay_text || trimmedEssayText)
-      setEssayCandidates(data.candidates || [])
-      setSelectedEssayCandidateId(data.candidates?.[0]?.sentence_id || null)
-      setEssayActiveStep((data.candidates && data.candidates.length > 0) ? 2 : 1)
-      if (!data.candidates || data.candidates.length === 0) {
-        setError('No thesis were found. Try a longer essay or cleaner PDF text.')
-      }
+      setEssayPreparedText(nextEssayText)
+      setEssayCandidates(nextCandidates)
+      setSelectedEssayCandidateId(nextSelectedCandidateId)
+      setEssayThesisMode(
+        shouldKeepCustomSelection ? 'custom' : (nextCandidates.length > 0 ? 'candidate' : 'custom'),
+      )
+      setEssayActiveStep(2)
     } catch (fetchError) {
       console.error('Essay analysis failed:', fetchError)
       setEssayCandidates([])
       setSelectedEssayCandidateId(null)
+      setEssayThesisMode('candidate')
       setEssayPreparedText('')
       setEssayActiveStep(1)
       setError(fetchError instanceof Error ? fetchError.message : 'Essay analysis failed.')
@@ -711,7 +744,7 @@ function App(): JSX.Element {
   }
 
   const handleSubmitEssay = async (): Promise<void> => {
-    if (!canSubmitEssay || loading || !selectedEssayCandidate) return
+    if (!canSubmitEssay || loading || !resolvedEssayThesis) return
 
     setHasSubmittedSearch(true)
     if (typeof document !== 'undefined') {
@@ -729,8 +762,8 @@ function App(): JSX.Element {
         body: JSON.stringify({
           mode: 'essay',
           q: essayPreparedText,
-          selected_thesis_id: selectedEssayCandidate.sentence_id,
-          selected_thesis_sentence: selectedEssayCandidate.sentence,
+          selected_thesis_id: resolvedEssayThesisId,
+          selected_thesis_sentence: resolvedEssayThesis,
           topic_weight: topicWeight,
           stance_weight: stanceWeight,
           top_k: rerankTopK,
@@ -841,7 +874,7 @@ function App(): JSX.Element {
     if (!hasSubmittedSearch) {
       return inputMode === 'stance'
         ? 'Submit a topic and stance above to open a page of supporting, opposing, and neutral perspectives.'
-        : 'Paste an essay, choose its thesis, and your ranked Guardian matches will appear here.'
+        : 'Paste an essay, choose or write its thesis, and your ranked Guardian matches will appear here.'
     }
 
     if (articles.length === 0) {
@@ -952,7 +985,7 @@ function App(): JSX.Element {
                         <span className="essay-progress-title">Choose the thesis</span>
                         <span className="essay-progress-note">
                           {isEssayStepTwoAvailable
-                            ? 'Pick the sentence that anchors the search.'
+                            ? 'Pick a sentence or write your own thesis.'
                             : 'Extract thesis options to unlock this step.'}
                         </span>
                       </div>
@@ -1081,47 +1114,95 @@ function App(): JSX.Element {
 
                   <div className="essay-option-strip">
                     <div className="essay-option-strip-header">
-                      <p className="essay-option-strip-title">Thesis options</p>
+                      <div>
+                        <p className="essay-option-strip-title">Thesis options</p>
+                        <p className="essay-option-strip-note">
+                          {essayCandidates.length > 0
+                            ? 'Select a suggestion or enter your own thesis.'
+                            : 'Type your own thesis to continue.'}
+                        </p>
+                      </div>
                       <div className="essay-option-strip-controls">
-                        <div className="essay-option-arrow-group">
-                          <button
-                            type="button"
-                            className="essay-option-arrow"
-                            onClick={() => scrollEssayOptions('left')}
-                            aria-label="Scroll thesis options left"
-                          >
-                            {'<'}
-                          </button>
-                          <button
-                            type="button"
-                            className="essay-option-arrow"
-                            onClick={() => scrollEssayOptions('right')}
-                            aria-label="Scroll thesis options right"
-                          >
-                            {'>'}
-                          </button>
-                        </div>
+                        {essayCandidates.length > 1 && (
+                          <div className="essay-option-arrow-group">
+                            <button
+                              type="button"
+                              className="essay-option-arrow"
+                              onClick={() => scrollEssayOptions('left')}
+                              aria-label="Scroll thesis options left"
+                            >
+                              {'<'}
+                            </button>
+                            <button
+                              type="button"
+                              className="essay-option-arrow"
+                              onClick={() => scrollEssayOptions('right')}
+                              aria-label="Scroll thesis options right"
+                            >
+                              {'>'}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <div className="essay-candidate-grid" ref={essayOptionsRef}>
-                      {essayCandidates.map((candidate, index) => {
-                        const isSelected = candidate.sentence_id === selectedEssayCandidateId
-                        return (
-                          <button
-                            key={candidate.sentence_id}
-                            type="button"
-                            className={`candidate-card ${isSelected ? 'selected' : ''}`}
-                            onClick={() => setSelectedEssayCandidateId(candidate.sentence_id)}
-                            style={{ animationDelay: `${index * 70}ms` }}
-                          >
-                            <div className="candidate-card-header">
-                              <span className="candidate-rank">Option {index + 1}</span>
-                              {isSelected && <span className="candidate-selected-badge">Selected</span>}
-                            </div>
-                            <p className="candidate-sentence">{candidate.sentence}</p>
-                          </button>
-                        )
-                      })}
+                    {essayCandidates.length > 0 ? (
+                      <div className="essay-candidate-grid" ref={essayOptionsRef}>
+                        {essayCandidates.map((candidate, index) => {
+                          const isSelected = (
+                            essayThesisMode === 'candidate' &&
+                            candidate.sentence_id === selectedEssayCandidateId
+                          )
+                          return (
+                            <button
+                              key={candidate.sentence_id}
+                              type="button"
+                              className={`candidate-card ${isSelected ? 'selected' : ''}`}
+                              onClick={() => {
+                                setEssayThesisMode('candidate')
+                                setSelectedEssayCandidateId(candidate.sentence_id)
+                              }}
+                              style={{ animationDelay: `${index * 70}ms` }}
+                            >
+                              <div className="candidate-card-header">
+                                <span className="candidate-rank">Option {index + 1}</span>
+                                {isSelected && <span className="candidate-selected-badge">Selected</span>}
+                              </div>
+                              <p className="candidate-sentence">{candidate.sentence}</p>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <p className="essay-option-empty">
+                        We couldn&apos;t identify a clear thesis sentence from the draft, but you can
+                        still enter the statement you want us to use.
+                      </p>
+                    )}
+
+                    <div
+                      className={`essay-custom-thesis-card ${isUsingCustomEssayThesis ? 'selected' : ''}`}
+                      onClick={() => setEssayThesisMode('custom')}
+                    >
+                      <div className="candidate-card-header">
+                        <span className="candidate-rank">Your thesis</span>
+                        {isUsingCustomEssayThesis && (
+                          <span className="candidate-selected-badge">Selected</span>
+                        )}
+                      </div>
+                      <label className="essay-custom-thesis-field">
+                        <span className="sr-only">Enter your thesis statement</span>
+                        <textarea
+                          value={essayCustomThesis}
+                          onChange={(event) => {
+                            setEssayCustomThesis(event.target.value)
+                            setEssayThesisMode('custom')
+                          }}
+                          onFocus={() => setEssayThesisMode('custom')}
+                          rows={3}
+                          placeholder="Type the sentence you consider to be your thesis statement..."
+                          aria-label="Custom thesis statement"
+                        />
+                      </label>
                     </div>
                   </div>
 
@@ -1129,7 +1210,7 @@ function App(): JSX.Element {
                     <div>
                       <p className="essay-submit-eyebrow">Selected thesis</p>
                       <p className="essay-submit-copy">
-                        {selectedEssayCandidate?.sentence || 'Choose a sentence above to continue.'}
+                        {resolvedEssayThesis || 'Choose a sentence above or type your own thesis below.'}
                       </p>
                     </div>
                     <button
@@ -1507,7 +1588,8 @@ function App(): JSX.Element {
                       DeBERTa Natural Language Inference (NLI) model to compare each sentence against
                       the hypothesis, &ldquo;This sentence is the author&apos;s main claim.&rdquo; This gives
                       each sentence a claimness score, and we present the top options so you can
-                      choose the sentence that best represents your essay&apos;s central thesis.
+                      choose the sentence that best represents your essay&apos;s central thesis, or
+                      enter your own thesis wording when you want to override the suggestions.
                     </p>
                   </section>
                   <section className="about-section">

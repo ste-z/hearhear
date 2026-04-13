@@ -757,6 +757,66 @@
   overflow: hidden;
 }
 
+.essay-option-empty {
+  margin: 0;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: #5f6368;
+}
+
+.essay-custom-thesis-card {
+  border: 1px solid #dfe6f4;
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 20px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  box-shadow: 0 10px 24px rgba(32, 33, 36, 0.06);
+}
+
+.essay-custom-thesis-card:hover {
+  transform: translateY(-2px);
+  border-color: #9bc0ff;
+  box-shadow: 0 16px 28px rgba(32, 33, 36, 0.1);
+}
+
+.essay-custom-thesis-card.selected {
+  border-color: #1a73e8;
+  background: linear-gradient(180deg, #f7fbff, #edf4ff);
+  box-shadow: 0 16px 30px rgba(26, 115, 232, 0.14);
+}
+
+.essay-custom-thesis-field {
+  display: flex;
+  min-height: 6.5rem;
+  padding-bottom: 0.28rem;
+  border-bottom: 1px solid rgba(32, 33, 36, 0.16);
+  transition: border-color 0.2s ease;
+}
+
+.essay-custom-thesis-field:focus-within {
+  border-bottom-color: #1a73e8;
+}
+
+.essay-custom-thesis-field textarea {
+  width: 100%;
+  min-height: 6rem;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #202124;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.essay-custom-thesis-field textarea::placeholder {
+  color: rgba(95, 99, 104, 0.55);
+}
+
 .essay-submit-panel {
   display: flex;
   align-items: center;
@@ -1695,31 +1755,35 @@
   gap: 6px;
   padding: 12px 14px;
   border-radius: 16px;
-  border: 1px solid rgba(32, 33, 36, 0.1);
-  background: rgba(255, 255, 255, 0.9);
-  color: #3c4043;
+  border: 1px solid var(--editorial-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--editorial-muted);
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  box-shadow: none;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
 
 .retrieval-model-button:hover {
-  border-color: rgba(32, 33, 36, 0.2);
-  box-shadow: 0 10px 24px rgba(32, 33, 36, 0.08);
+  border-color: var(--editorial-border-strong);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+  color: var(--editorial-text);
   transform: translateY(-1px);
 }
 
 .retrieval-model-button.active {
-  border-color: rgba(24, 90, 188, 0.34);
-  background: rgba(24, 90, 188, 0.08);
-  box-shadow: 0 12px 28px rgba(24, 90, 188, 0.12);
+  border-color: rgba(219, 192, 160, 0.32);
+  background: rgba(219, 192, 160, 0.16);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26);
+  color: var(--editorial-accent-strong);
 }
 
 .retrieval-model-button strong {
   font-family: 'Open Sans', sans-serif;
   font-size: 0.9rem;
   font-weight: 700;
-  color: #202124;
+  color: var(--editorial-text);
 }
 
 .retrieval-model-button p {
@@ -1727,7 +1791,14 @@
   font-family: 'Montserrat', sans-serif;
   font-size: 0.9rem;
   line-height: 1.45;
-  color: #5f6368;
+  color: var(--editorial-muted);
+}
+
+.retrieval-model-button:hover strong,
+.retrieval-model-button:hover p,
+.retrieval-model-button.active strong,
+.retrieval-model-button.active p {
+  color: inherit;
 }
 
 .weight-pair-grid {
@@ -1816,6 +1887,8 @@
 .essay-upload-copy,
 .essay-action-help,
 .essay-option-strip-note,
+.essay-option-empty,
+.essay-custom-thesis-hint,
 .candidate-rank,
 .essay-submit-eyebrow,
 .essay-submit-copy,
@@ -1852,6 +1925,8 @@
 .claim-missing,
 .sentence-block p,
 .claim-band p,
+.essay-option-empty,
+.essay-custom-thesis-hint,
 .candidate-sentence,
 .message p {
   font-family: 'Courier Prime', 'Courier New', monospace;
@@ -1863,6 +1938,7 @@
 .weight-card,
 .essay-option-strip,
 .candidate-card,
+.essay-custom-thesis-card,
 .essay-submit-panel,
 .article-item,
 .modal-card,
@@ -1884,6 +1960,7 @@
 .field-card,
 .weight-card,
 .essay-option-strip,
+.essay-custom-thesis-card,
 .essay-submit-panel,
 .article-item,
 .modal-card {
@@ -1951,6 +2028,7 @@
 .field-card input,
 .field-card textarea,
 .weight-card input,
+.essay-custom-thesis-field textarea,
 .paired-weight-field input,
 .chat-bar .input-row input {
   background: rgba(255, 255, 255, 0.04);
@@ -1964,6 +2042,7 @@
 
 .stance-prompt-line input::placeholder,
 .stance-prompt-line textarea::placeholder,
+.essay-custom-thesis-field textarea::placeholder,
 .chat-bar .input-row input::placeholder {
   color: rgba(246, 241, 232, 0.38);
 }
@@ -1997,6 +2076,7 @@
 }
 
 .candidate-card.selected,
+.essay-custom-thesis-card.selected,
 .essay-option-arrow:hover,
 .pdf-upload-button:hover,
 .clear-pdf-button:hover {
@@ -2744,12 +2824,20 @@
   box-shadow: var(--editorial-shadow);
 }
 
-.landing-essay-panel .candidate-card:hover {
+.landing-essay-panel .essay-custom-thesis-card {
+  border-color: var(--editorial-border);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: var(--editorial-shadow);
+}
+
+.landing-essay-panel .candidate-card:hover,
+.landing-essay-panel .essay-custom-thesis-card:hover {
   border-color: rgba(219, 192, 160, 0.32);
   box-shadow: 0 18px 30px rgba(0, 0, 0, 0.24);
 }
 
-.landing-essay-panel .candidate-card.selected {
+.landing-essay-panel .candidate-card.selected,
+.landing-essay-panel .essay-custom-thesis-card.selected {
   border-color: rgba(219, 192, 160, 0.38);
   background: linear-gradient(180deg, rgba(219, 192, 160, 0.16), rgba(255, 255, 255, 0.05));
   box-shadow: 0 18px 30px rgba(0, 0, 0, 0.28);
@@ -2763,9 +2851,19 @@
   color: var(--editorial-accent-strong);
 }
 
+.landing-essay-panel .essay-option-empty,
+.landing-essay-panel .essay-custom-thesis-hint,
 .landing-essay-panel .essay-submit-copy {
   max-width: 48ch;
   color: var(--editorial-text);
+}
+
+.landing-essay-panel .essay-custom-thesis-field {
+  border-bottom-color: var(--editorial-border-strong);
+}
+
+.landing-essay-panel .essay-custom-thesis-field:focus-within {
+  border-bottom-color: rgba(219, 192, 160, 0.38);
 }
 
 .landing-stance-actions {
