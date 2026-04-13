@@ -3,11 +3,14 @@ from sqlalchemy import or_
 from backend.db.models import GuardianArticle
 from backend.runtime.runtime_debug import log_runtime_event
 from backend.text_processing.search_helpers import (
+    attach_query_svd_chart_dimensions as _attach_query_svd_chart_dimensions,
     DEFAULT_RETRIEVAL_MODEL,
     SUPPORTED_RETRIEVAL_MODELS as _SUPPORTED_RETRIEVAL_MODELS,
     build_matches,
     build_retrieval_processor,
     normalize_retrieval_model,
+    query_svd_corpus_chart_dimensions,
+    query_svd_dimensions,
     serialize_article,
 )
 
@@ -76,7 +79,11 @@ def retrieval_search(query, top_n=100, retrieval_model=DEFAULT_RETRIEVAL_MODEL):
         retrieval_model=resolved_model,
         result_count=len(ranked),
     )
-    return build_matches(ranked)
+    return build_matches(
+        ranked,
+        retrieval_model=resolved_model,
+        processor=processor,
+    )
 
 
 def tfidf_cos_search(query, top_n=100):
@@ -85,6 +92,75 @@ def tfidf_cos_search(query, top_n=100):
 
 def svd_search(query, top_n=100):
     return retrieval_search(query, top_n=top_n, retrieval_model="svd")
+
+
+def retrieval_query_svd_dimensions(query, retrieval_model=DEFAULT_RETRIEVAL_MODEL):
+    resolved_model = normalize_retrieval_model(retrieval_model)
+    if resolved_model != "svd":
+        return []
+
+    resolved_query = str(query or "").strip()
+    if len(resolved_query) < 3:
+        return []
+
+    try:
+        processor = build_retrieval_processor(retrieval_model=resolved_model)
+    except RuntimeError:
+        return []
+
+    return query_svd_dimensions(
+        resolved_query,
+        retrieval_model=resolved_model,
+        processor=processor,
+    )
+
+
+def retrieval_query_svd_corpus_chart_dimensions(
+    query,
+    retrieval_model=DEFAULT_RETRIEVAL_MODEL,
+):
+    resolved_model = normalize_retrieval_model(retrieval_model)
+    if resolved_model != "svd":
+        return []
+
+    resolved_query = str(query or "").strip()
+    if len(resolved_query) < 3:
+        return []
+
+    try:
+        processor = build_retrieval_processor(retrieval_model=resolved_model)
+    except RuntimeError:
+        return []
+
+    return query_svd_corpus_chart_dimensions(
+        resolved_query,
+        retrieval_model=resolved_model,
+        processor=processor,
+    )
+
+
+def attach_query_svd_chart_dimensions(
+    article_matches,
+    query_dimensions,
+    retrieval_model=DEFAULT_RETRIEVAL_MODEL,
+):
+    resolved_model = normalize_retrieval_model(retrieval_model)
+    if resolved_model != "svd":
+        return article_matches
+    if not article_matches or not query_dimensions:
+        return article_matches
+
+    try:
+        processor = build_retrieval_processor(retrieval_model=resolved_model)
+    except RuntimeError:
+        return article_matches
+
+    return _attach_query_svd_chart_dimensions(
+        article_matches,
+        query_dimensions=query_dimensions,
+        retrieval_model=resolved_model,
+        processor=processor,
+    )
 
 
 def json_search(query, retrieval_model=DEFAULT_RETRIEVAL_MODEL, top_n=100):
