@@ -38,6 +38,8 @@ def essay_search(
     recency_weight=0.2,
     top_n=20,
     retrieval_model=DEFAULT_RETRIEVAL_MODEL,
+    year_start=None,
+    year_end=None,
     normalize_topic_scores=False,
 ):
     resolved_essay = str(essay_text or "").strip()
@@ -50,6 +52,8 @@ def essay_search(
         resolved_essay,
         top_n=top_n,
         retrieval_model=resolved_model,
+        year_start=year_start,
+        year_end=year_end,
     )
     if not topic_matches:
         log_runtime_event(

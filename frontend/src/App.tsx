@@ -21,6 +21,8 @@ type ConfigResponse = {
   default_retrieval_model?: string | null
   default_normalize_topic_scores?: boolean | null
   supported_retrieval_models?: string[] | null
+  min_article_year?: number | null
+  max_article_year?: number | null
 }
 
 type ApiErrorPayload = {
@@ -69,6 +71,19 @@ const normalizeRetrievalModels = (value: unknown): RetrievalModel[] => {
   const unique = Array.from(new Set(filtered))
   return unique.length > 0 ? unique : defaultSupportedRetrievalModels
 }
+
+const normalizeConfigYear = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isInteger(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    if (Number.isInteger(parsed)) return parsed
+  }
+  return null
+}
+
+const clampYear = (value: number, minYear: number, maxYear: number): number => (
+  Math.min(maxYear, Math.max(minYear, Math.round(value)))
+)
 
 const hasSeenLanding = (): boolean => {
   if (typeof window === 'undefined') return false
@@ -429,6 +444,10 @@ function App(): JSX.Element {
   const [rerankTopK, setRerankTopK] = useState<number>(20)
   const [normalizeTopicScores, setNormalizeTopicScores] = useState<boolean>(false)
   const [retrievalModel, setRetrievalModel] = useState<RetrievalModel>('svd')
+  const [minArticleYear, setMinArticleYear] = useState<number | null>(null)
+  const [maxArticleYear, setMaxArticleYear] = useState<number | null>(null)
+  const [yearStart, setYearStart] = useState<number | null>(null)
+  const [yearEnd, setYearEnd] = useState<number | null>(null)
   const [supportedRetrievalModels, setSupportedRetrievalModels] = useState<RetrievalModel[]>(
     defaultSupportedRetrievalModels,
   )
@@ -470,10 +489,30 @@ function App(): JSX.Element {
         const resolvedModel = supportedModels.includes(preferredModel)
           ? preferredModel
           : supportedModels[0]
+        const nextMinArticleYear = normalizeConfigYear(data.min_article_year)
+        const nextMaxArticleYear = normalizeConfigYear(data.max_article_year)
         setSupportedRetrievalModels(supportedModels)
         setRetrievalModel(currentModel => (
           supportedModels.includes(currentModel) ? currentModel : resolvedModel
         ))
+        if (
+          nextMinArticleYear !== null &&
+          nextMaxArticleYear !== null &&
+          nextMinArticleYear <= nextMaxArticleYear
+        ) {
+          setMinArticleYear(nextMinArticleYear)
+          setMaxArticleYear(nextMaxArticleYear)
+          setYearStart(currentYear => (
+            currentYear === null
+              ? nextMinArticleYear
+              : clampYear(currentYear, nextMinArticleYear, nextMaxArticleYear)
+          ))
+          setYearEnd(currentYear => (
+            currentYear === null
+              ? nextMaxArticleYear
+              : clampYear(currentYear, nextMinArticleYear, nextMaxArticleYear)
+          ))
+        }
         setNormalizeTopicScores(Boolean(data.default_normalize_topic_scores))
       } catch (configError) {
         console.error('Config request failed:', configError)
@@ -625,6 +664,14 @@ function App(): JSX.Element {
     setError(null)
     setHasSubmittedSearch(false)
   }, [inputMode, opinion, recencyWeight, rerankTopK, stanceWeight, topic, topicWeight])
+
+  useEffect(() => {
+    setArticles([])
+    setQuerySvdCorpusChartDimensions([])
+    setQuerySvdDimensions([])
+    setError(null)
+    setHasSubmittedSearch(false)
+  }, [inputMode, recencyWeight, rerankTopK, retrievalModel, stanceWeight, topicWeight, yearEnd, yearStart])
 
   useEffect(() => {
     if (inputMode !== 'essay') {
@@ -794,6 +841,54 @@ function App(): JSX.Element {
   const canUseTfidf = supportedRetrievalModels.includes('tfidf')
   const isSvdEnabled = retrievalModel === 'svd'
   const canToggleSvd = canUseSvd && canUseTfidf
+  const availableYears = useMemo(() => {
+    if (minArticleYear === null || maxArticleYear === null || minArticleYear > maxArticleYear) {
+      return []
+    }
+    return Array.from(
+      { length: (maxArticleYear - minArticleYear) + 1 },
+      (_value, index) => minArticleYear + index,
+    )
+  }, [maxArticleYear, minArticleYear])
+  const hasAvailableYearBounds = availableYears.length > 0
+  const resolvedYearStart = yearStart ?? minArticleYear
+  const resolvedYearEnd = yearEnd ?? maxArticleYear
+  const yearRangeSpan = hasAvailableYearBounds && minArticleYear !== null && maxArticleYear !== null
+    ? maxArticleYear - minArticleYear
+    : 0
+  const yearRangeStartPercent = (
+    hasAvailableYearBounds &&
+    minArticleYear !== null &&
+    resolvedYearStart !== null &&
+    yearRangeSpan > 0
+  )
+    ? (((resolvedYearStart - minArticleYear) / yearRangeSpan) * 100)
+    : 0
+  const yearRangeEndPercent = (
+    hasAvailableYearBounds &&
+    minArticleYear !== null &&
+    resolvedYearEnd !== null &&
+    yearRangeSpan > 0
+  )
+    ? (((resolvedYearEnd - minArticleYear) / yearRangeSpan) * 100)
+    : 100
+  const hasYearRangeSelection = resolvedYearStart !== null && resolvedYearEnd !== null
+  const isYearFilterActive = (
+    hasYearRangeSelection &&
+    minArticleYear !== null &&
+    maxArticleYear !== null &&
+    (resolvedYearStart !== minArticleYear || resolvedYearEnd !== maxArticleYear)
+  )
+  const activeYearRangeLabel = !hasYearRangeSelection
+    ? 'All years'
+    : (resolvedYearStart === resolvedYearEnd
+      ? `${resolvedYearStart}`
+      : `${resolvedYearStart}-${resolvedYearEnd}`)
+  const yearRangeSummary = !isYearFilterActive || !hasYearRangeSelection
+    ? ''
+    : (resolvedYearStart === resolvedYearEnd
+      ? ` from ${resolvedYearStart}`
+      : ` from ${resolvedYearStart} to ${resolvedYearEnd}`)
 
   const formatDate = (isoDate: string | null): string => {
     if (!isoDate) return 'Unknown date'
@@ -850,6 +945,34 @@ function App(): JSX.Element {
     const parsed = Number(value)
     if (Number.isNaN(parsed)) return fallback
     return Math.min(100, Math.max(1, Math.round(parsed)))
+  }
+
+  const handleYearStartChange = (value: string): void => {
+    const nextStart = Number(value)
+    if (Number.isNaN(nextStart)) return
+    const boundedStart = (
+      minArticleYear !== null && maxArticleYear !== null
+        ? clampYear(nextStart, minArticleYear, maxArticleYear)
+        : Math.round(nextStart)
+    )
+    setYearStart(boundedStart)
+    setYearEnd(currentEnd => (
+      currentEnd === null || currentEnd < boundedStart ? boundedStart : currentEnd
+    ))
+  }
+
+  const handleYearEndChange = (value: string): void => {
+    const nextEnd = Number(value)
+    if (Number.isNaN(nextEnd)) return
+    const boundedEnd = (
+      minArticleYear !== null && maxArticleYear !== null
+        ? clampYear(nextEnd, minArticleYear, maxArticleYear)
+        : Math.round(nextEnd)
+    )
+    setYearEnd(boundedEnd)
+    setYearStart(currentStart => (
+      currentStart === null || currentStart > boundedEnd ? boundedEnd : currentStart
+    ))
   }
 
   const scrollToNode = (node: HTMLDivElement | null): void => {
@@ -949,6 +1072,8 @@ function App(): JSX.Element {
           top_k: rerankTopK,
           normalize_topic_scores: normalizeTopicScores,
           retrieval_model: retrievalModel,
+          year_start: resolvedYearStart,
+          year_end: resolvedYearEnd,
         }),
       })
 
@@ -1051,6 +1176,8 @@ function App(): JSX.Element {
           top_k: rerankTopK,
           normalize_topic_scores: normalizeTopicScores,
           retrieval_model: retrievalModel,
+          year_start: resolvedYearStart,
+          year_end: resolvedYearEnd,
         }),
       })
 
@@ -1178,7 +1305,7 @@ function App(): JSX.Element {
 
   const resultsDescription = useMemo(() => {
     if (loading) {
-      return 'Ranking Guardian opinion pieces with your current search settings.'
+      return `Ranking Guardian opinion pieces${yearRangeSummary} with your current search settings.`
     }
 
     if (error) {
@@ -1192,11 +1319,17 @@ function App(): JSX.Element {
     }
 
     if (articles.length === 0) {
-      return 'No matching articles came back this time. Try broadening the topic or sharpening the claim.'
+      return (
+        `No matching articles came back${yearRangeSummary} this time. `
+        + 'Try broadening the topic, sharpening the claim, or widening the year range.'
+      )
     }
 
-    return `${articles.length} Guardian opinion ${articles.length === 1 ? 'piece' : 'pieces'} ranked with your current search settings.`
-  }, [articles.length, error, hasSubmittedSearch, inputMode, loading])
+    return (
+      `${articles.length} Guardian opinion ${articles.length === 1 ? 'piece' : 'pieces'}`
+      + `${yearRangeSummary} ranked with your current search settings.`
+    )
+  }, [articles.length, error, hasSubmittedSearch, inputMode, loading, yearRangeSummary])
 
   return (
     <div className="experience-shell">
@@ -1573,7 +1706,7 @@ function App(): JSX.Element {
               className="utility-pill"
               onClick={() => setIsSettingsOpen(true)}
             >
-              Settings
+              {`Settings (${activeYearRangeLabel})`}
             </button>
           </div>
 
@@ -1953,7 +2086,7 @@ function App(): JSX.Element {
             {!loading && !error && articles.length === 0 && (
               <div className="results-empty-card searched">
                 <p>
-                  No matching articles were returned. Try broadening the topic or making the stance more explicit.
+                  {`No matching articles were returned${yearRangeSummary}. Try broadening the topic, making the stance more explicit, or widening the year range.`}
                 </p>
               </div>
             )}
@@ -2126,6 +2259,59 @@ function App(): JSX.Element {
                   How many top retrieval matches move into the NLI reranking stage.
                 </p>
               </label>
+              <div className="weight-card full-row">
+                <span>Year range</span>
+                <div className="year-range-summary-grid" aria-live="polite">
+                  <div className="year-range-value-card">
+                    <span>From</span>
+                    <strong>{resolvedYearStart ?? '—'}</strong>
+                  </div>
+                  <div className="year-range-value-card">
+                    <span>To</span>
+                    <strong>{resolvedYearEnd ?? '—'}</strong>
+                  </div>
+                </div>
+                <div className={`year-range-slider-shell ${!hasAvailableYearBounds ? 'disabled' : ''}`}>
+                  <div className="year-range-track" aria-hidden="true" />
+                  <div
+                    className="year-range-track active"
+                    aria-hidden="true"
+                    style={{
+                      left: `${yearRangeStartPercent}%`,
+                      width: `${Math.max(0, yearRangeEndPercent - yearRangeStartPercent)}%`,
+                    }}
+                  />
+                  <input
+                    className="year-range-slider start"
+                    type="range"
+                    min={minArticleYear ?? 0}
+                    max={maxArticleYear ?? 0}
+                    step="1"
+                    value={resolvedYearStart ?? minArticleYear ?? 0}
+                    onChange={(event) => handleYearStartChange(event.target.value)}
+                    disabled={!hasAvailableYearBounds || yearRangeSpan === 0}
+                    aria-label="Start year"
+                  />
+                  <input
+                    className="year-range-slider end"
+                    type="range"
+                    min={minArticleYear ?? 0}
+                    max={maxArticleYear ?? 0}
+                    step="1"
+                    value={resolvedYearEnd ?? maxArticleYear ?? 0}
+                    onChange={(event) => handleYearEndChange(event.target.value)}
+                    disabled={!hasAvailableYearBounds || yearRangeSpan === 0}
+                    aria-label="End year"
+                  />
+                </div>
+                <div className="year-range-scale" aria-hidden="true">
+                  <span>{minArticleYear ?? '—'}</span>
+                  <span>{maxArticleYear ?? '—'}</span>
+                </div>
+                <p className="setting-help-text">
+                  Only return articles published within the selected year range.
+                </p>
+              </div>
               <div className="weight-card full-row settings-toggle-card">
                 <div className="settings-toggle-row">
                   <div className="settings-toggle-copy">

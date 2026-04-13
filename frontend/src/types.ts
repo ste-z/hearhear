@@ -14,6 +14,7 @@ export type Article = {
   url: string
   summary: string
   date: string | null
+  year?: number | null
   author_display?: string | null
   author_raw?: string | null
   score?: number | null
