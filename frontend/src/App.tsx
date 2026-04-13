@@ -1096,24 +1096,6 @@ function App(): JSX.Element {
     article.stance_contradiction_prob != null
   )
 
-  const formatArticleLabel = (label?: string | null): string => {
-    const normalized = label?.toLowerCase() ?? ''
-
-    if (normalized.includes('support') || normalized.includes('entail')) return 'Supports you'
-    if (normalized.includes('contradict')) return 'Pushes back'
-    if (normalized.includes('neutral')) return 'Mixed / unclear'
-    return 'Related'
-  }
-
-  const getArticleTone = (label?: string | null): string => {
-    const normalized = label?.toLowerCase() ?? ''
-
-    if (normalized.includes('support') || normalized.includes('entail')) return 'support'
-    if (normalized.includes('contradict')) return 'contradict'
-    if (normalized.includes('neutral')) return 'neutral'
-    return 'default'
-  }
-
   const getMatchSummary = (article: Article): string => {
     const hasWeightedRecency = (article.recency_weight ?? recencyWeight) > 0
 
@@ -1679,36 +1661,31 @@ function App(): JSX.Element {
 
                   return (
                     <article key={article.id} className="article-item">
-                    <div className="article-topline">
-                      <span className={`article-kicker ${getArticleTone(article.stance_label)}`}>
-                        {formatArticleLabel(article.stance_label)}
-                      </span>
                       <p className="article-meta">
                         {article.author_display || article.author_raw || 'Unknown author'} | {formatDate(article.date)}
                       </p>
-                    </div>
 
-                    <h3 className="article-title">
-                      <a href={article.url} target="_blank" rel="noreferrer">{article.title}</a>
-                    </h3>
+                      <h3 className="article-title">
+                        <a href={article.url} target="_blank" rel="noreferrer">{article.title}</a>
+                      </h3>
 
-                    <p className="article-summary">{article.summary}</p>
+                      <p className="article-summary">{article.summary}</p>
 
-                    {article.central_claim_summary && (
-                      <div className="claim-band">
-                        <span className="claim-band-label">Author&apos;s claim</span>
-                        <p>{article.central_claim_summary}</p>
-                      </div>
-                    )}
-
-                    {showScoreGrid(article) && (
-                      <div className="match-panel">
-                        <div className="match-panel-header">
-                          <div className="match-panel-eyebrow">Why it ranked here</div>
-                          <div className="match-panel-summary">{getMatchSummary(article)}</div>
+                      {article.central_claim_summary && (
+                        <div className="claim-band">
+                          <span className="claim-band-label">Author&apos;s claim</span>
+                          <p>{article.central_claim_summary}</p>
                         </div>
+                      )}
 
-                        <div className="match-score-stack">
+                      {showScoreGrid(article) && (
+                        <div className="match-panel">
+                          <div className="match-panel-header">
+                            <div className="match-panel-eyebrow">Why it ranked here</div>
+                            <div className="match-panel-summary">{getMatchSummary(article)}</div>
+                          </div>
+
+                          <div className="match-score-stack">
                           <div className="match-metric-card overall">
                             <div className="match-metric-header">
                               <div className="match-metric-heading">
