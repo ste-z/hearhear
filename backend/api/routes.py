@@ -12,6 +12,7 @@ from backend.runtime.runtime_debug import log_runtime_event
 from backend.services.essay_service import essay_claim_candidates, essay_search
 from backend.services.pdf_service import extract_pdf_text
 from backend.services.retrieval_service import (
+    available_article_year_range,
     attach_query_svd_chart_dimensions,
     DEFAULT_RETRIEVAL_MODEL,
     json_search,
@@ -53,6 +54,18 @@ def _coerce_int(value, default, minimum=1, maximum=100):
     return max(int(minimum), min(int(maximum), resolved))
 
 
+def _coerce_optional_int(value, label):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be a whole number.")
+
+
 def _extract_request_context():
     payload = _request_payload()
     mode = str(payload.get("mode") or "essay").strip().lower()
@@ -68,6 +81,8 @@ def _extract_request_context():
         or payload.get("search_backend")
         or DEFAULT_RETRIEVAL_MODEL
     )
+    year_start = _coerce_optional_int(payload.get("year_start"), "Start year")
+    year_end = _coerce_optional_int(payload.get("year_end"), "End year")
     selected_thesis_sentence = str(payload.get("selected_thesis_sentence") or "").strip()
     selected_thesis_id = str(payload.get("selected_thesis_id") or "").strip() or None
 
@@ -97,6 +112,8 @@ def _extract_request_context():
         "rerank_top_k": rerank_top_k,
         "candidate_top_n": candidate_top_n,
         "retrieval_model": retrieval_model,
+        "year_start": year_start,
+        "year_end": year_end,
         "selected_thesis_sentence": selected_thesis_sentence,
         "selected_thesis_id": selected_thesis_id,
         "essay_text": essay_text,
@@ -131,10 +148,13 @@ def register_routes(app):
 
     @app.route("/api/config")
     def config():
+        min_article_year, max_article_year = available_article_year_range()
         return jsonify({
             "use_llm": USE_LLM,
             "default_retrieval_model": DEFAULT_RETRIEVAL_MODEL,
             "supported_retrieval_models": list(SUPPORTED_RETRIEVAL_MODELS),
+            "min_article_year": min_article_year,
+            "max_article_year": max_article_year,
         })
 
     @app.route("/api/articles", methods=["GET", "POST"])
@@ -160,6 +180,8 @@ def register_routes(app):
                     recency_weight=context["recency_weight"],
                     top_n=context["rerank_top_k"],
                     retrieval_model=context["retrieval_model"],
+                    year_start=context["year_start"],
+                    year_end=context["year_end"],
                 )
             elif context["mode"] == "essay":
                 results = essay_search(
@@ -171,11 +193,15 @@ def register_routes(app):
                     recency_weight=context["recency_weight"],
                     top_n=context["rerank_top_k"],
                     retrieval_model=context["retrieval_model"],
+                    year_start=context["year_start"],
+                    year_end=context["year_end"],
                 )
             else:
                 results = json_search(
                     context["essay_text"],
                     retrieval_model=context["retrieval_model"],
+                    year_start=context["year_start"],
+                    year_end=context["year_end"],
                 )
             if context["mode"] == "stance":
                 query_text = context["topic"]
