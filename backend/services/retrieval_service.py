@@ -196,6 +196,7 @@ def stance_search(
     recency_weight=0.2,
     top_n=20,
     retrieval_model=DEFAULT_RETRIEVAL_MODEL,
+    normalize_topic_scores=False,
 ):
     from backend.stance_processing.stance_rerank import rerank_article_matches
 
@@ -223,6 +224,7 @@ def stance_search(
         topic_chars=len(topic_text),
         opinion_chars=len(opinion_text),
         top_n=int(top_n),
+        normalize_topic_scores=bool(normalize_topic_scores),
     )
     return rerank_article_matches(
         article_matches=topic_matches,
@@ -232,4 +234,5 @@ def stance_search(
         stance_weight=stance_weight,
         recency_weight=recency_weight,
         top_n=top_n,
+        normalize_topic_scores=normalize_topic_scores,
     )

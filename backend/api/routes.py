@@ -21,6 +21,7 @@ from backend.services.retrieval_service import (
     SUPPORTED_RETRIEVAL_MODELS,
     stance_search,
 )
+from backend.stance_processing.stance_rerank import DEFAULT_NORMALIZE_TOPIC_SCORES
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
 USE_LLM = False
@@ -53,6 +54,22 @@ def _coerce_int(value, default, minimum=1, maximum=100):
     return max(int(minimum), min(int(maximum), resolved))
 
 
+def _coerce_bool(value, default=False):
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
 def _extract_request_context():
     payload = _request_payload()
     mode = str(payload.get("mode") or "essay").strip().lower()
@@ -63,6 +80,10 @@ def _extract_request_context():
     recency_weight = _coerce_float(payload.get("recency_weight"), 0.2)
     rerank_top_k = _coerce_int(payload.get("top_k"), 20, minimum=1, maximum=100)
     candidate_top_n = _coerce_int(payload.get("candidate_top_n"), 5, minimum=1, maximum=10)
+    normalize_topic_scores = _coerce_bool(
+        payload.get("normalize_topic_scores"),
+        DEFAULT_NORMALIZE_TOPIC_SCORES,
+    )
     retrieval_model = normalize_retrieval_model(
         payload.get("retrieval_model")
         or payload.get("search_backend")
@@ -96,6 +117,7 @@ def _extract_request_context():
         "recency_weight": recency_weight,
         "rerank_top_k": rerank_top_k,
         "candidate_top_n": candidate_top_n,
+        "normalize_topic_scores": normalize_topic_scores,
         "retrieval_model": retrieval_model,
         "selected_thesis_sentence": selected_thesis_sentence,
         "selected_thesis_id": selected_thesis_id,
@@ -134,6 +156,7 @@ def register_routes(app):
         return jsonify({
             "use_llm": USE_LLM,
             "default_retrieval_model": DEFAULT_RETRIEVAL_MODEL,
+            "default_normalize_topic_scores": DEFAULT_NORMALIZE_TOPIC_SCORES,
             "supported_retrieval_models": list(SUPPORTED_RETRIEVAL_MODELS),
         })
 
@@ -150,6 +173,7 @@ def register_routes(app):
                 topic_chars=len(context["topic"]),
                 opinion_chars=len(context["opinion"]),
                 rerank_top_k=context["rerank_top_k"],
+                normalize_topic_scores=context["normalize_topic_scores"],
             )
             if context["mode"] == "stance":
                 results = stance_search(
@@ -160,6 +184,7 @@ def register_routes(app):
                     recency_weight=context["recency_weight"],
                     top_n=context["rerank_top_k"],
                     retrieval_model=context["retrieval_model"],
+                    normalize_topic_scores=context["normalize_topic_scores"],
                 )
             elif context["mode"] == "essay":
                 results = essay_search(
@@ -171,6 +196,7 @@ def register_routes(app):
                     recency_weight=context["recency_weight"],
                     top_n=context["rerank_top_k"],
                     retrieval_model=context["retrieval_model"],
+                    normalize_topic_scores=context["normalize_topic_scores"],
                 )
             else:
                 results = json_search(

@@ -38,6 +38,7 @@ def essay_search(
     recency_weight=0.2,
     top_n=20,
     retrieval_model=DEFAULT_RETRIEVAL_MODEL,
+    normalize_topic_scores=False,
 ):
     resolved_essay = str(essay_text or "").strip()
     resolved_thesis = str(selected_thesis_sentence or "").strip()
@@ -71,6 +72,7 @@ def essay_search(
         essay_chars=len(resolved_essay),
         thesis_chars=len(resolved_thesis),
         top_n=int(top_n),
+        normalize_topic_scores=bool(normalize_topic_scores),
     )
     reranked = rerank_article_matches_by_statement(
         article_matches=topic_matches,
@@ -79,6 +81,7 @@ def essay_search(
         stance_weight=stance_weight,
         recency_weight=recency_weight,
         top_n=top_n,
+        normalize_topic_scores=normalize_topic_scores,
     )
     for match in reranked:
         match["selected_thesis_sentence"] = resolved_thesis

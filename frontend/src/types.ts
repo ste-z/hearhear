@@ -20,8 +20,11 @@ export type Article = {
   keywords?: string[] | null
   central_claim_summary?: string | null
   combined_score?: number | null
+  topic_score?: number | null
   stance_score_normalized?: number | null
   topic_score_normalized?: number | null
+  topic_score_display?: number | null
+  topic_score_is_normalized?: boolean | null
   recency_score_normalized?: number | null
   recency_weight?: number | null
   stance_label?: string | null

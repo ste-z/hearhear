@@ -15,6 +15,7 @@ DEFAULT_RECENCY_WEIGHT = 0.2
 DEFAULT_RERANK_TOP_N = 20
 MAX_RERANK_TOP_N = 100
 RECENCY_HALF_LIFE_DAYS = 365.0 * 3.0
+DEFAULT_NORMALIZE_TOPIC_SCORES = False
 
 
 def build_stance_statement(topic, opinion):
@@ -160,6 +161,7 @@ def rerank_article_matches_by_statement(
     stance_weight=DEFAULT_STANCE_WEIGHT,
     recency_weight=DEFAULT_RECENCY_WEIGHT,
     top_n=DEFAULT_RERANK_TOP_N,
+    normalize_topic_scores=DEFAULT_NORMALIZE_TOPIC_SCORES,
 ):
     resolved_top_n = _resolve_top_n(top_n)
     matches = [dict(match) for match in list(article_matches)[:resolved_top_n]]
@@ -171,6 +173,7 @@ def rerank_article_matches_by_statement(
         match_count=len(matches),
         statement_chars=len(str(statement or "").strip()),
         top_n=resolved_top_n,
+        normalize_topic_scores=bool(normalize_topic_scores),
     )
     topic_weight, stance_weight, recency_weight = _resolve_weight_triplet(
         topic_weight,
@@ -208,6 +211,9 @@ def rerank_article_matches_by_statement(
     reranked = []
     for idx, match in enumerate(matches):
         topic_score, topic_score_normalized = topic_scores[idx]
+        topic_score_display = (
+            topic_score_normalized if normalize_topic_scores else topic_score
+        )
         recency_score_normalized = _recency_score(
             match.get("date"),
             reference_time=reference_time,
@@ -236,6 +242,8 @@ def rerank_article_matches_by_statement(
         match["topic_statement"] = query_statement
         match["topic_score"] = topic_score
         match["topic_score_normalized"] = topic_score_normalized
+        match["topic_score_display"] = topic_score_display
+        match["topic_score_is_normalized"] = bool(normalize_topic_scores)
         match["recency_score_normalized"] = recency_score_normalized
         match["stance_entailment_prob"] = entailment_prob
         match["stance_neutral_prob"] = neutral_prob
@@ -244,7 +252,7 @@ def rerank_article_matches_by_statement(
         match["stance_score_normalized"] = stance_score_normalized
         match["stance_label"] = stance_label
         match["combined_score"] = _combined_score(
-            topic_score=topic_score_normalized,
+            topic_score=topic_score_display,
             stance_score=stance_score_normalized,
             recency_score=recency_score_normalized,
             topic_weight=topic_weight,
@@ -260,7 +268,7 @@ def rerank_article_matches_by_statement(
         key=lambda match: (
             _safe_float(match.get("combined_score")),
             _safe_float(match.get("stance_score_normalized"), -1.0),
-            _safe_float(match.get("topic_score_normalized")),
+            _safe_float(match.get("topic_score_display")),
             _safe_float(match.get("recency_score_normalized"), -1.0),
         ),
         reverse=True,
@@ -281,6 +289,7 @@ def rerank_article_matches(
     stance_weight=DEFAULT_STANCE_WEIGHT,
     recency_weight=DEFAULT_RECENCY_WEIGHT,
     top_n=DEFAULT_RERANK_TOP_N,
+    normalize_topic_scores=DEFAULT_NORMALIZE_TOPIC_SCORES,
 ):
     return rerank_article_matches_by_statement(
         article_matches=article_matches,
@@ -289,4 +298,5 @@ def rerank_article_matches(
         stance_weight=stance_weight,
         recency_weight=recency_weight,
         top_n=top_n,
+        normalize_topic_scores=normalize_topic_scores,
     )

@@ -19,6 +19,7 @@ type EssayThesisMode = 'candidate' | 'custom'
 type ConfigResponse = {
   use_llm: boolean
   default_retrieval_model?: string | null
+  default_normalize_topic_scores?: boolean | null
   supported_retrieval_models?: string[] | null
 }
 
@@ -426,6 +427,7 @@ function App(): JSX.Element {
   const [stanceWeight, setStanceWeight] = useState<number>(0.4)
   const [recencyWeight, setRecencyWeight] = useState<number>(0.2)
   const [rerankTopK, setRerankTopK] = useState<number>(20)
+  const [normalizeTopicScores, setNormalizeTopicScores] = useState<boolean>(false)
   const [retrievalModel, setRetrievalModel] = useState<RetrievalModel>('svd')
   const [supportedRetrievalModels, setSupportedRetrievalModels] = useState<RetrievalModel[]>(
     defaultSupportedRetrievalModels,
@@ -472,6 +474,7 @@ function App(): JSX.Element {
         setRetrievalModel(currentModel => (
           supportedModels.includes(currentModel) ? currentModel : resolvedModel
         ))
+        setNormalizeTopicScores(Boolean(data.default_normalize_topic_scores))
       } catch (configError) {
         console.error('Config request failed:', configError)
         if (!isActive) return
@@ -944,6 +947,7 @@ function App(): JSX.Element {
           stance_weight: stanceWeight,
           recency_weight: recencyWeight,
           top_k: rerankTopK,
+          normalize_topic_scores: normalizeTopicScores,
           retrieval_model: retrievalModel,
         }),
       })
@@ -1045,6 +1049,7 @@ function App(): JSX.Element {
           stance_weight: stanceWeight,
           recency_weight: recencyWeight,
           top_k: rerankTopK,
+          normalize_topic_scores: normalizeTopicScores,
           retrieval_model: retrievalModel,
         }),
       })
@@ -1082,8 +1087,16 @@ function App(): JSX.Element {
   const showScoreGrid = (article: Article): boolean => (
     article.combined_score != null ||
     article.stance_score_normalized != null ||
+    article.topic_score_display != null ||
+    article.topic_score != null ||
     article.topic_score_normalized != null ||
     article.recency_score_normalized != null
+  )
+  const getTopicMatchScore = (article: Article): number | null => (
+    article.topic_score_display
+    ?? article.topic_score
+    ?? article.topic_score_normalized
+    ?? null
   )
   const hasSvdExplainability = (article: Article): boolean => (
     (Array.isArray(article.svd_query_chart_dimensions) && article.svd_query_chart_dimensions.length > 0) ||
@@ -1739,15 +1752,15 @@ function App(): JSX.Element {
                                   {renderMetricInfo(
                                     'Topic match',
                                     `${articleTooltipBase}-topic-help`,
-                                    'How closely the article matches your subject in the first text pass.',
+                                    'How closely the article matches your subject in the first text pass. This can use either raw retrieval similarity or within-result normalization from Settings.',
                                   )}
                                 </div>
-                                <div className="match-metric-value">{formatPercent(article.topic_score_normalized)}</div>
+                                <div className="match-metric-value">{formatPercent(getTopicMatchScore(article))}</div>
                               </div>
                               <div className="match-meter" aria-hidden="true">
                                 <span
                                   className="match-meter-fill topic"
-                                  style={{ width: getMeterWidth(article.topic_score_normalized) }}
+                                  style={{ width: getMeterWidth(getTopicMatchScore(article)) }}
                                 />
                               </div>
                             </div>
@@ -2136,6 +2149,29 @@ function App(): JSX.Element {
                   How many top retrieval matches move into the NLI reranking stage.
                 </p>
               </label>
+              <div className="weight-card full-row settings-toggle-card">
+                <div className="settings-toggle-row">
+                  <div className="settings-toggle-copy">
+                    <span>Normalize topic relevance</span>
+                    <p className="setting-help-text">
+                      When on, the strongest retrieved article becomes 100% topic match within the current result set. When off, the app uses the raw retrieval similarity instead.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className={`settings-switch-button ${normalizeTopicScores ? 'active' : ''}`}
+                    aria-pressed={normalizeTopicScores}
+                    onClick={() => setNormalizeTopicScores(current => !current)}
+                  >
+                    <span className="settings-switch-label">
+                      {normalizeTopicScores ? 'Normalized' : 'Raw'}
+                    </span>
+                    <span className="retrieval-toggle-switch" aria-hidden="true">
+                      <span className="retrieval-toggle-thumb" />
+                    </span>
+                  </button>
+                </div>
+              </div>
               <div className="weight-card full-row weights-group-card">
                 <span>Weights</span>
                 <div className="weight-pair-grid">

@@ -2158,6 +2158,76 @@
   color: #5f6368;
 }
 
+.settings-toggle-card {
+  gap: 14px;
+}
+
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.settings-toggle-copy {
+  display: flex;
+  flex: 1 1 280px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-switch-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(32, 33, 36, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 999px;
+  padding: 10px 14px 10px 16px;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #4b5563;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.settings-switch-button:hover {
+  border-color: rgba(32, 33, 36, 0.2);
+  background: rgba(248, 250, 252, 0.98);
+  color: #202124;
+}
+
+.settings-switch-button.active {
+  border-color: rgba(24, 90, 188, 0.28);
+  background: rgba(24, 90, 188, 0.08);
+  color: #1a4fb8;
+  box-shadow: 0 10px 24px rgba(24, 90, 188, 0.12);
+}
+
+.settings-switch-label {
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.weight-card .settings-switch-button .settings-switch-label {
+  color: inherit;
+}
+
+.settings-switch-button.active .retrieval-toggle-switch {
+  background: rgba(26, 115, 232, 0.5);
+}
+
+.settings-switch-button.active .retrieval-toggle-thumb {
+  transform: translateX(18px);
+}
+
 .weights-group-card {
   gap: 14px;
 }
@@ -2429,6 +2499,34 @@
 .retrieval-toggle-pill {
   border-color: var(--editorial-border);
   background: transparent;
+}
+
+.settings-switch-button {
+  border-color: var(--editorial-border);
+  background: var(--editorial-panel);
+  color: var(--editorial-text);
+  box-shadow: var(--editorial-shadow);
+}
+
+.settings-switch-button:hover {
+  border-color: var(--editorial-border-strong);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--editorial-text);
+}
+
+.settings-switch-button.active {
+  border-color: rgba(219, 192, 160, 0.32);
+  background: rgba(219, 192, 160, 0.16);
+  color: var(--editorial-accent-strong);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26);
+}
+
+.settings-switch-button .retrieval-toggle-switch {
+  background: var(--editorial-border-strong);
+}
+
+.settings-switch-button.active .retrieval-toggle-switch {
+  background: rgba(219, 192, 160, 0.44);
 }
 
 .stance-prefix,
