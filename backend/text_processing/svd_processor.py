@@ -337,7 +337,7 @@ class TruncatedSvdIndex:
             articles=articles_payload,
             id_column=id_column,
             text_column=text_column,
-            svd_params=dict(reducer.get_params(deep=False)),
+            svd_params=dict(resolved_svd_params),
             requested_n_components=requested_n_components,
         )
 
@@ -482,6 +482,86 @@ class TruncatedSvdIndex:
                 order="absolute",
             ),
         }
+
+    @staticmethod
+    def format_term_weights(term_weights, precision=3):
+        resolved_precision = max(0, int(precision))
+        return ", ".join(
+            f"{term} ({weight:.{resolved_precision}f})"
+            for term, weight in term_weights
+        )
+
+    def dimension_summary_record(
+        self,
+        dimension,
+        top_n=10,
+        format_terms=True,
+        precision=3,
+    ):
+        summary = self.dimension_summary(dimension=dimension, top_n=top_n)
+        record = {
+            "dimension_index": int(summary["dimension"]),
+            "dimension_label": int(summary["dimension"]) + 1,
+        }
+        for key in ("positive_terms", "negative_terms", "absolute_terms"):
+            values = summary[key]
+            record[key] = (
+                self.format_term_weights(values, precision=precision)
+                if format_terms
+                else values
+            )
+        return record
+
+    def dimension_summary_frame(
+        self,
+        dimensions=None,
+        top_n=10,
+        format_terms=True,
+        precision=3,
+    ):
+        if dimensions is None:
+            dimensions = range(self.n_components)
+        rows = [
+            self.dimension_summary_record(
+                dimension=dim,
+                top_n=top_n,
+                format_terms=format_terms,
+                precision=precision,
+            )
+            for dim in dimensions
+        ]
+        return pd.DataFrame(rows)
+
+    def export_dimension_summaries(
+        self,
+        output_path,
+        dimensions=None,
+        top_n=10,
+        format_terms=True,
+        precision=3,
+    ):
+        resolved_output_path = Path(output_path)
+        resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+        df = self.dimension_summary_frame(
+            dimensions=dimensions,
+            top_n=top_n,
+            format_terms=format_terms,
+            precision=precision,
+        )
+
+        suffix = resolved_output_path.suffix.lower()
+        if suffix == ".csv":
+            df.to_csv(resolved_output_path, index=False)
+        elif suffix == ".json":
+            df.to_json(resolved_output_path, orient="records", indent=2)
+        elif suffix in {".jsonl", ".ndjson"}:
+            df.to_json(resolved_output_path, orient="records", lines=True)
+        else:
+            raise ValueError(
+                "output_path must end in .csv, .json, .jsonl, or .ndjson"
+            )
+
+        return resolved_output_path, df
 
     def top_dimensions_for_query(self, query, top_n=5, normalize=False):
         vector = self.project_query(query, normalize=normalize)
@@ -830,11 +910,15 @@ def _is_existing_svd_index_fresh(
         svd_params=expected_svd_params,
     )
     stored_svd = dict(meta.get("svd_params") or {})
-    if stored_svd.pop("n_components", None) != int(meta.get("n_components", -1)):
+    stored_effective_n_components = stored_svd.pop("n_components", None)
+    if stored_effective_n_components is None:
+        stored_effective_n_components = meta.get("n_components", -1)
+    if int(stored_effective_n_components) != int(meta.get("n_components", -1)):
         return False
     expected_svd.pop("n_components", None)
-    if stored_svd != expected_svd:
-        return False
+    for key, expected_value in expected_svd.items():
+        if stored_svd.get(key) != expected_value:
+            return False
 
     try:
         stored_requested_n_components = int(meta.get("requested_n_components"))
