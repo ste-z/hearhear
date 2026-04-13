@@ -12,6 +12,8 @@ export type Article = {
   combined_score?: number | null
   stance_score_normalized?: number | null
   topic_score_normalized?: number | null
+  recency_score_normalized?: number | null
+  recency_weight?: number | null
   stance_label?: string | null
   stance_entailment_prob?: number | null
   stance_neutral_prob?: number | null

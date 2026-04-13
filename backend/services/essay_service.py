@@ -33,8 +33,9 @@ def essay_search(
     essay_text,
     selected_thesis_sentence,
     selected_thesis_id=None,
-    topic_weight=0.5,
-    stance_weight=0.5,
+    topic_weight=0.4,
+    stance_weight=0.4,
+    recency_weight=0.2,
     top_n=20,
     retrieval_model=DEFAULT_RETRIEVAL_MODEL,
 ):
@@ -76,6 +77,7 @@ def essay_search(
         statement=resolved_thesis,
         topic_weight=topic_weight,
         stance_weight=stance_weight,
+        recency_weight=recency_weight,
         top_n=top_n,
     )
     for match in reranked:

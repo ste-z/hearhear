@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from backend.claims.claim_store import get_claim_records
 from backend.runtime.runtime_debug import log_runtime_event
 from backend.stance_processing.nli_processor import (
@@ -7,10 +9,12 @@ from backend.stance_processing.nli_processor import (
 )
 
 
-DEFAULT_TOPIC_WEIGHT = 0.5
-DEFAULT_STANCE_WEIGHT = 0.5
+DEFAULT_TOPIC_WEIGHT = 0.4
+DEFAULT_STANCE_WEIGHT = 0.4
+DEFAULT_RECENCY_WEIGHT = 0.2
 DEFAULT_RERANK_TOP_N = 20
 MAX_RERANK_TOP_N = 100
+RECENCY_HALF_LIFE_DAYS = 365.0 * 3.0
 
 
 def build_stance_statement(topic, opinion):
@@ -32,12 +36,13 @@ def _safe_float(value, default=0.0):
         return float(default)
 
 
-def _resolve_weight_pair(topic_weight, stance_weight):
+def _resolve_weight_triplet(topic_weight, stance_weight, recency_weight):
     resolved_topic = max(0.0, _safe_float(topic_weight, DEFAULT_TOPIC_WEIGHT))
     resolved_stance = max(0.0, _safe_float(stance_weight, DEFAULT_STANCE_WEIGHT))
-    if resolved_topic == 0.0 and resolved_stance == 0.0:
-        return DEFAULT_TOPIC_WEIGHT, DEFAULT_STANCE_WEIGHT
-    return resolved_topic, resolved_stance
+    resolved_recency = max(0.0, _safe_float(recency_weight, DEFAULT_RECENCY_WEIGHT))
+    if resolved_topic == 0.0 and resolved_stance == 0.0 and resolved_recency == 0.0:
+        return DEFAULT_TOPIC_WEIGHT, DEFAULT_STANCE_WEIGHT, DEFAULT_RECENCY_WEIGHT
+    return resolved_topic, resolved_stance, resolved_recency
 
 
 def _resolve_top_n(top_n):
@@ -56,6 +61,38 @@ def _normalize_topic_scores(matches):
         normalized_score = topic_score / max_score if max_score > 0 else 0.0
         normalized.append((topic_score, normalized_score))
     return normalized
+
+
+def _coerce_datetime(value):
+    if isinstance(value, datetime):
+        resolved = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        try:
+            resolved = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    else:
+        return None
+
+    if resolved.tzinfo is None:
+        return resolved.replace(tzinfo=timezone.utc)
+    return resolved.astimezone(timezone.utc)
+
+
+def _recency_score(date_value, reference_time=None):
+    published_at = _coerce_datetime(date_value)
+    if published_at is None:
+        return None
+
+    reference = reference_time or datetime.now(timezone.utc)
+    age_seconds = max(0.0, (reference - published_at).total_seconds())
+    age_days = age_seconds / 86400.0
+    return 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
 
 
 def _claim_payload(claim_record):
@@ -87,15 +124,32 @@ def _claim_payload(claim_record):
     }
 
 
-def _combined_score(topic_score, stance_score, topic_weight, stance_weight):
+def _combined_score(
+    topic_score,
+    stance_score,
+    recency_score,
+    topic_weight,
+    stance_weight,
+    recency_weight,
+):
     effective_topic_weight = float(topic_weight)
     effective_stance_weight = float(stance_weight if stance_score is not None else 0.0)
-    if effective_topic_weight == 0.0 and effective_stance_weight == 0.0:
+    effective_recency_weight = float(recency_weight if recency_score is not None else 0.0)
+    if (
+        effective_topic_weight == 0.0
+        and effective_stance_weight == 0.0
+        and effective_recency_weight == 0.0
+    ):
         return float(topic_score)
-    total_weight = effective_topic_weight + effective_stance_weight
+    total_weight = (
+        effective_topic_weight
+        + effective_stance_weight
+        + effective_recency_weight
+    )
     return (
         (float(topic_score) * effective_topic_weight)
         + (float(stance_score or 0.0) * effective_stance_weight)
+        + (float(recency_score or 0.0) * effective_recency_weight)
     ) / total_weight
 
 
@@ -104,6 +158,7 @@ def rerank_article_matches_by_statement(
     statement,
     topic_weight=DEFAULT_TOPIC_WEIGHT,
     stance_weight=DEFAULT_STANCE_WEIGHT,
+    recency_weight=DEFAULT_RECENCY_WEIGHT,
     top_n=DEFAULT_RERANK_TOP_N,
 ):
     resolved_top_n = _resolve_top_n(top_n)
@@ -117,7 +172,11 @@ def rerank_article_matches_by_statement(
         statement_chars=len(str(statement or "").strip()),
         top_n=resolved_top_n,
     )
-    topic_weight, stance_weight = _resolve_weight_pair(topic_weight, stance_weight)
+    topic_weight, stance_weight, recency_weight = _resolve_weight_triplet(
+        topic_weight,
+        stance_weight,
+        recency_weight,
+    )
     query_statement = str(statement or "").strip()
     if not query_statement:
         log_runtime_event("stance_rerank.no_statement")
@@ -144,10 +203,15 @@ def rerank_article_matches_by_statement(
     log_runtime_event("stance_rerank.nli_done", nli_row_count=len(nli_rows))
     nli_by_match_idx = dict(zip(indexed_claims, nli_rows))
     topic_scores = _normalize_topic_scores(matches)
+    reference_time = datetime.now(timezone.utc)
 
     reranked = []
     for idx, match in enumerate(matches):
         topic_score, topic_score_normalized = topic_scores[idx]
+        recency_score_normalized = _recency_score(
+            match.get("date"),
+            reference_time=reference_time,
+        )
         nli_row = nli_by_match_idx.get(idx)
         if nli_row is None:
             stance_score = None
@@ -172,6 +236,7 @@ def rerank_article_matches_by_statement(
         match["topic_statement"] = query_statement
         match["topic_score"] = topic_score
         match["topic_score_normalized"] = topic_score_normalized
+        match["recency_score_normalized"] = recency_score_normalized
         match["stance_entailment_prob"] = entailment_prob
         match["stance_neutral_prob"] = neutral_prob
         match["stance_contradiction_prob"] = contradiction_prob
@@ -181,11 +246,14 @@ def rerank_article_matches_by_statement(
         match["combined_score"] = _combined_score(
             topic_score=topic_score_normalized,
             stance_score=stance_score_normalized,
+            recency_score=recency_score_normalized,
             topic_weight=topic_weight,
             stance_weight=stance_weight,
+            recency_weight=recency_weight,
         )
         match["topic_weight"] = topic_weight
         match["stance_weight"] = stance_weight
+        match["recency_weight"] = recency_weight
         reranked.append(match)
 
     reranked.sort(
@@ -193,6 +261,7 @@ def rerank_article_matches_by_statement(
             _safe_float(match.get("combined_score")),
             _safe_float(match.get("stance_score_normalized"), -1.0),
             _safe_float(match.get("topic_score_normalized")),
+            _safe_float(match.get("recency_score_normalized"), -1.0),
         ),
         reverse=True,
     )
@@ -210,6 +279,7 @@ def rerank_article_matches(
     opinion,
     topic_weight=DEFAULT_TOPIC_WEIGHT,
     stance_weight=DEFAULT_STANCE_WEIGHT,
+    recency_weight=DEFAULT_RECENCY_WEIGHT,
     top_n=DEFAULT_RERANK_TOP_N,
 ):
     return rerank_article_matches_by_statement(
@@ -217,5 +287,6 @@ def rerank_article_matches(
         statement=build_stance_statement(topic, opinion),
         topic_weight=topic_weight,
         stance_weight=stance_weight,
+        recency_weight=recency_weight,
         top_n=top_n,
     )
