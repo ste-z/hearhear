@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from backend.claim_store import (
+from backend.claims.claim_store import (
     PACKAGED_CLAIM_RESULTS_DIR,
     RAW_BATCH_CLAIM_RESULTS_DIR,
 )

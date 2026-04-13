@@ -1,10 +1,9 @@
 from pathlib import Path
 from threading import Lock
 
-from backend.runtime_debug import log_runtime_event
+from backend.db.models import GuardianArticle
+from backend.runtime.runtime_debug import log_runtime_event
 from flask import current_app, has_app_context
-
-from models import GuardianArticle
 
 
 _vector_index = None
@@ -15,7 +14,7 @@ _vector_index_lock = Lock()
 def _resolve_db_path():
     if has_app_context():
         return Path(current_app.instance_path) / "data.db"
-    return Path(__file__).resolve().parent.parent / "instance" / "data.db"
+    return Path(__file__).resolve().parent.parent.parent / "instance" / "data.db"
 
 
 def _get_value(article, key, default=None):
@@ -118,12 +117,12 @@ def build_vector_processor(force_rebuild=False, ensure_preprocessed=True):
             )
             return _vector_index
 
-        from backend.text_preprocess import (
+        from backend.text_processing.text_preprocess import (
             DEFAULT_INDEX_DIR,
             DEFAULT_INDEX_NAME,
             preprocess_tfidf_index,
         )
-        from backend.text_processor import load_search_index
+        from backend.text_processing.text_processor import load_search_index
 
         log_runtime_event(
             "vector_processor.build_start",

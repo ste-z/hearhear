@@ -1,10 +1,10 @@
-from backend.claim_store import get_claim_records
-from backend.nli_processor import (
+from backend.claims.claim_store import get_claim_records
+from backend.runtime.runtime_debug import log_runtime_event
+from backend.stance_processing.nli_processor import (
     normalize_stance_score,
     score_nli_pairs,
     stance_label_from_probs,
 )
-from backend.runtime_debug import log_runtime_event
 
 
 DEFAULT_TOPIC_WEIGHT = 0.5

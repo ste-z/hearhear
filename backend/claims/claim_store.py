@@ -3,15 +3,15 @@ import json
 import re
 from pathlib import Path
 
-from backend.runtime_debug import log_runtime_event
+from backend.runtime.runtime_debug import log_runtime_event
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 RAW_BATCH_CLAIM_RESULTS_DIR = (
-    PROJECT_ROOT / "backend" / "data" / "processed" / "openai_claim_batches"
+    PROJECT_ROOT / "data" / "processed" / "openai_claim_batches"
 )
 PACKAGED_CLAIM_RESULTS_DIR = (
-    PROJECT_ROOT / "backend" / "data" / "processed" / "claim_coding_clean"
+    PROJECT_ROOT / "data" / "processed" / "claim_coding_clean"
 )
 
 
@@ -174,7 +174,7 @@ def get_claim_records(article_refs):
         requested_count=len(requested_ids),
     )
 
-    from models import GuardianArticleClaim, db
+    from backend.db.models import GuardianArticleClaim, db
 
     rows = (
         db.session.query(

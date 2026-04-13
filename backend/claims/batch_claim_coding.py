@@ -11,17 +11,17 @@ import pandas as pd
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from backend.data_import import load_and_clean_guardian_years
-from backend.sentence_splitter import (
+from backend.imports.data_import import load_and_clean_guardian_years
+from backend.text_processing.sentence_splitter import (
     normalize_whitespace,
     sentence_lookup,
     sentence_table_from_text,
 )
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_RAW_DATA_DIR = PROJECT_ROOT / "backend" / "data" / "raw" / "guardian_by_year"
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "backend" / "data" / "processed" / "openai_claim_batches"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+DEFAULT_RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw" / "guardian_by_year"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "processed" / "openai_claim_batches"
 DEFAULT_MODEL = "gpt-5-nano"
 DEFAULT_MODEL_SNAPSHOT = "gpt-5-nano-2025-08-07"
 DEFAULT_REASONING_EFFORT = "minimal"

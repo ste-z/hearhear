@@ -6,7 +6,7 @@
     "install-all": "pip install -r requirements.txt && cd frontend && npm install",
     "dev": "cd frontend && npm run dev",
     "build": "cd frontend && npm run build",
-    "start": "python src/app.py"
+    "start": "python -m backend.app"
   },
   "keywords": [
     "flask",

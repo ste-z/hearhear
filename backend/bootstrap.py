@@ -4,21 +4,25 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import and_, func
 
-from backend.claim_store import (
+from backend.claims.claim_store import (
     PACKAGED_CLAIM_RESULTS_DIR,
     expected_claim_record_count,
     iter_claim_records,
 )
-from backend.data_import import load_and_clean_guardian_years
-from backend.runtime_debug import log_runtime_event
-from models import GuardianArticle, GuardianArticleClaim, db
+from backend.imports.data_import import load_and_clean_guardian_years
+from backend.db.models import GuardianArticle, GuardianArticleClaim, db
+from backend.runtime.runtime_debug import log_runtime_event
+from backend.text_processing.indexing.corpus import (
+    _filter_articles_to_years,
+    _normalized_years,
+)
 
 
 DEFAULT_YEARS = set(range(2015, 2026))
 DEFAULT_MIN_BODY_TEXT_CHARS = 1000
 DEFAULT_BATCH_SIZE = 500
 DEFAULT_CLAIM_BATCH_SIZE = 500
-DEFAULT_BUNDLED_INDEX_DIR = Path(__file__).resolve().parent.parent / "backend" / "data" / "processed" / "vector_index"
+DEFAULT_BUNDLED_INDEX_DIR = Path(__file__).resolve().parent.parent / "data" / "processed" / "vector_index"
 DEFAULT_BUNDLED_INDEX_NAME = "guardian_tfidf"
 STORE_GUARDIAN_BODY_TEXT_ENV = "STORE_GUARDIAN_BODY_TEXT_IN_DB"
 
@@ -60,27 +64,6 @@ def _clean_datetime(value):
     return value
 
 
-def _normalized_years(years):
-    return {int(year) for year in set(years or [])}
-
-
-def _filter_articles_to_years(articles, years=None):
-    if articles is None:
-        return pd.DataFrame()
-    if not isinstance(articles, pd.DataFrame):
-        raise TypeError("articles must be a pandas DataFrame.")
-    if articles.empty:
-        return articles.reset_index(drop=True).copy()
-
-    expected_years = _normalized_years(years)
-    if not expected_years or "year" not in articles.columns:
-        return articles.reset_index(drop=True).copy()
-
-    normalized = articles.reset_index(drop=True).copy()
-    article_years = pd.to_numeric(normalized["year"], errors="coerce").astype("Int64")
-    return normalized.loc[article_years.isin(expected_years)].reset_index(drop=True).copy()
-
-
 def _env_flag(name, default=False):
     value = os.getenv(name)
     if value is None:
@@ -93,7 +76,7 @@ def _should_store_body_text():
 
 
 def _existing_data_needs_refresh(expected_years=None, allow_missing_body_text=False):
-    expected_year_set = _normalized_years(expected_years)
+    expected_year_set = set(_normalized_years(expected_years) or [])
 
     missing_author_exists = db.session.query(GuardianArticle.id).filter(
         and_(
@@ -292,7 +275,7 @@ def _seed_guardian_articles(
         )
         return "bundled_vector_index"
 
-    data_folder = project_root / "backend" / "data" / "raw" / "guardian_by_year"
+    data_folder = project_root / "data" / "raw" / "guardian_by_year"
     df = load_and_clean_guardian_years(
         years=years,
         folder=data_folder,
@@ -309,7 +292,7 @@ def _seed_guardian_articles(
 
 def _warm_runtime_assets():
     try:
-        from search_helpers import build_vector_processor
+        from backend.text_processing.search_helpers import build_vector_processor
 
         log_runtime_event("startup_warm.vector_index_start")
         vector_index = build_vector_processor(
@@ -329,7 +312,7 @@ def _warm_runtime_assets():
         )
 
     try:
-        from backend.nli_processor import load_nli_bundle
+        from backend.stance_processing.nli_processor import load_nli_bundle
 
         log_runtime_event("startup_warm.nli_start")
         bundle = load_nli_bundle()
@@ -402,7 +385,7 @@ def initialize_offline_data_pipeline(
             _seed_guardian_claims()
 
         try:
-            from backend.text_preprocess import (
+            from backend.text_processing.text_preprocess import (
                 DEFAULT_INDEX_DIR,
                 DEFAULT_INDEX_NAME,
                 preprocess_tfidf_index,

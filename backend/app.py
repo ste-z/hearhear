@@ -1,6 +1,5 @@
 import logging
 import os
-import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -8,20 +7,15 @@ from flask import Flask
 
 from flask_cors import CORS
 
-# src/ directory and project root (one level up)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 INSTANCE_DIR = PROJECT_ROOT / "instance"
 DB_PATH = INSTANCE_DIR / "data.db"
 
-# Allow importing backend modules before importing src modules that depend on them.
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 load_dotenv()
 
-from models import db
-from routes import register_routes
-from bootstrap import initialize_offline_data_pipeline
+from backend.api.routes import register_routes
+from backend.bootstrap import initialize_offline_data_pipeline
+from backend.db.models import db
 
 INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
 

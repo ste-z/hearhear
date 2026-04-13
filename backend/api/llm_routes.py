@@ -44,7 +44,7 @@ def llm_search_decision(client, user_message):
 
 
 def register_chat_route(app, json_search):
-    """Register the /api/chat SSE endpoint. Called from routes.py."""
+    """Register the /api/chat SSE endpoint. Called from backend/api/routes.py."""
 
     @app.route("/api/chat", methods=["POST"])
     def chat():

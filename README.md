@@ -39,7 +39,7 @@ venv\Scripts\activate
 pip install -r requirements.txt
 
 # 3. Start Flask backend (in one terminal)
-python src/app.py
+python -m backend.app
 
 # 4. In a NEW terminal, install and start React
 cd frontend
@@ -57,7 +57,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # 3. Start Flask backend (in one terminal)
-python src/app.py
+python -m backend.app
 
 # 4. In a NEW terminal, install and start React
 cd frontend
@@ -71,25 +71,38 @@ Then open `http://localhost:5173` in your browser!
 
 ```
 4300-Flask-React-Template/
-├── src/
+├── backend/
 │   ├── app.py          # Flask app entry point
-│   ├── models.py       # SQLAlchemy database models
-│   ├── routes.py       # Search API routes (+ USE_LLM toggle)
-│   ├── llm_routes.py   # LLM chat route (only used when USE_LLM = True)
-│   └── init.json       # Seed data
+│   ├── bootstrap.py    # DB + artifact initialization
+│   ├── api/
+│   │   ├── routes.py
+│   │   └── llm_routes.py
+│   ├── claims/
+│   ├── imports/
+│   ├── db/
+│   │   └── models.py
+│   ├── runtime/
+│   ├── services/
+│   ├── stance_processing/
+│   └── text_processing/
+├── data/
+│   ├── raw/            # Raw source corpora
+│   ├── processed/      # Vector indexes, packaged claim data, etc.
+│   └── template/
+│       └── init.json   # Optional sample seed data retained from the template
 ├── frontend/
-│   └── src/
-│       ├── App.tsx     # Search UI (always shown)
-│       ├── Chat.tsx    # AI chat component (rendered when USE_LLM = True)
-│       ├── App.css
-│       └── types.ts
+│   ├── src/
+│   │   ├── App.tsx     # Search UI (always shown)
+│   │   ├── Chat.tsx    # AI chat component (rendered when USE_LLM = True)
+│   │   ├── App.css
+│   │   └── types.ts
 ├── requirements.txt
 ├── Dockerfile
 └── .env                # API_KEY goes here (not committed)
 ```
 
 ### Backend (Flask)
-- **Entry point**: `src/app.py`
+- **Entry point**: `backend/app.py`
 - **Database**: SQLite with SQLAlchemy ORM
 - **API Routes**: prefixed with `/api` (e.g., `GET /api/episodes`, `POST /api/chat`)
 - **Config endpoint**: `GET /api/config` — tells the frontend whether `USE_LLM` is on
@@ -151,7 +164,7 @@ Run Flask and React separately with hot-reloading.
 python3 -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-python src/app.py
+python -m backend.app
 ```
 Flask API runs on `http://localhost:5001`.
 
@@ -168,13 +181,13 @@ Open `http://localhost:5173`. The Vite dev server proxies `/api` requests to Fla
 Build React and serve everything through Flask:
 ```bash
 cd frontend && npm install && npm run build && cd ..
-python src/app.py
+python -m backend.app
 ```
 Open `http://localhost:5001`.
 
 ### Modifying the Data
 
-Edit `src/init.json` to replace the dummy episode data with your own. You can add additional data files as needed.
+Optional sample seed data from the original template now lives at `data/template/init.json`. Most of this project's live artifacts and corpora live under `data/raw` and `data/processed`.
 
 ## Troubleshooting Deployment Issues
 
@@ -188,7 +201,7 @@ Edit `src/init.json` to replace the dummy episode data with your own. You can ad
 - Common causes:
   - Missing packages in `requirements.txt`
   - React build errors (check `frontend/package.json`)
-  - Malformed `src/init.json`
+  - Malformed data files under `data/`
 
 ### Login/Authentication Issues
 - If you get a 401 error, try logging out and back in with your Cornell email

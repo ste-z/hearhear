@@ -1,7 +1,7 @@
 import os
 from functools import lru_cache
 
-from backend.runtime_debug import log_runtime_event
+from backend.runtime.runtime_debug import log_runtime_event
 
 
 MODEL_NAME = "cross-encoder/nli-deberta-v3-small"

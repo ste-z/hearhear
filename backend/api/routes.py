@@ -1,216 +1,22 @@
 """
 Routes: React app serving and Guardian article search API.
 
-To enable AI chat, set USE_LLM = True below. See llm_routes.py for AI code.
+To enable AI chat, set USE_LLM = True below. See backend/api/llm_routes.py for AI code.
 """
 import os
+
 from flask import send_from_directory, request, jsonify
-from sqlalchemy import or_
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
-from backend.runtime_debug import log_runtime_event
-from models import GuardianArticle
-from search_helpers import build_matches, build_vector_processor, serialize_article
-from io import BytesIO
-from pypdf import PdfReader
+
+from backend.runtime.runtime_debug import log_runtime_event
+from backend.services.essay_service import essay_claim_candidates, essay_search
+from backend.services.pdf_service import extract_pdf_text
+from backend.services.retrieval_service import json_search, stance_search
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
 USE_LLM = False
 # USE_LLM = True
 # ─────────────────────────────────────────────────────────────────────────────
-
-def keyword_search(query):
-    if not query or not query.strip():
-        return []
-
-    query = query.strip()
-    if len(query) < 3:
-        return []
-    results = (
-        GuardianArticle.query.filter(
-            or_(
-                GuardianArticle.title.ilike(f"%{query}%"),
-                GuardianArticle.summary.ilike(f"%{query}%"),
-            )
-        )
-        .order_by(GuardianArticle.date.desc())
-        .limit(100)
-        .all()
-    )
-
-    return [serialize_article(article) for article in results]
-
-def tfidf_cos_search(query, top_n=100):
-    if not query or not query.strip():
-        return []
-    query = query.strip()
-    if len(query) < 3:
-        return []
-
-    log_runtime_event(
-        "tfidf_cos_search.start",
-        query_chars=len(query),
-        top_n=int(top_n),
-    )
-    try:
-        processor = build_vector_processor()
-    except RuntimeError as exc:
-        log_runtime_event(
-            "tfidf_cos_search.keyword_fallback",
-            reason=str(exc),
-        )
-        return keyword_search(query)
-    if processor is None:
-        log_runtime_event("tfidf_cos_search.no_processor")
-        return []
-
-    ranked = processor.search(query, top_n=top_n)
-    log_runtime_event("tfidf_cos_search.done", result_count=len(ranked))
-    return build_matches(ranked)
-
-def json_search(query):
-    """
-    Primary search used by /api/articles and optional LLM retrieval.
-    Defaults to TF-IDF cosine search, falls back to keyword SQL search.
-    """
-    try:
-        log_runtime_event("json_search.try_tfidf", query_chars=len(str(query or "").strip()))
-        return tfidf_cos_search(query)
-    except Exception:
-        log_runtime_event("json_search.fallback_keyword")
-        return keyword_search(query)
-
-
-def stance_search(topic, opinion, topic_weight=0.5, stance_weight=0.5, top_n=20):
-    from backend.stance_rerank import rerank_article_matches
-
-    topic_text = str(topic or "").strip()
-    opinion_text = str(opinion or "").strip()
-    if len(topic_text) < 2 or len(opinion_text) < 2:
-        return []
-
-    topic_matches = tfidf_cos_search(topic_text, top_n=top_n)
-    if not topic_matches:
-        log_runtime_event("stance_search.no_topic_matches")
-        return []
-
-    log_runtime_event(
-        "stance_search.rerank_start",
-        topic_chars=len(topic_text),
-        opinion_chars=len(opinion_text),
-        top_n=int(top_n),
-    )
-    return rerank_article_matches(
-        article_matches=topic_matches,
-        topic=topic_text,
-        opinion=opinion_text,
-        topic_weight=topic_weight,
-        stance_weight=stance_weight,
-        top_n=top_n,
-    )
-
-
-def essay_claim_candidates(essay_text, top_n=5):
-    from backend.nli_processor import score_claim_sentences
-    from backend.sentence_splitter import sentence_rows_from_text
-
-    resolved_text = str(essay_text or "").strip()
-    if len(resolved_text) < 3:
-        return {
-            "essay_text": resolved_text,
-            "sentence_count": 0,
-            "candidates": [],
-        }
-
-    sentence_rows = sentence_rows_from_text(resolved_text, prefix="essay_s")
-    candidates = score_claim_sentences(sentence_rows, top_n=top_n)
-    return {
-        "essay_text": resolved_text,
-        "sentence_count": len(sentence_rows),
-        "candidates": candidates,
-    }
-
-
-def essay_search(
-    essay_text,
-    selected_thesis_sentence,
-    selected_thesis_id=None,
-    topic_weight=0.5,
-    stance_weight=0.5,
-    top_n=20,
-):
-    from backend.stance_rerank import rerank_article_matches_by_statement
-
-    resolved_essay = str(essay_text or "").strip()
-    resolved_thesis = str(selected_thesis_sentence or "").strip()
-    if len(resolved_essay) < 3:
-        return []
-
-    topic_matches = tfidf_cos_search(resolved_essay, top_n=top_n)
-    if not topic_matches:
-        log_runtime_event("essay_search.no_topic_matches")
-        return []
-    if not resolved_thesis:
-        log_runtime_event("essay_search.return_topic_matches", result_count=len(topic_matches))
-        return topic_matches
-
-    log_runtime_event(
-        "essay_search.rerank_start",
-        essay_chars=len(resolved_essay),
-        thesis_chars=len(resolved_thesis),
-        top_n=int(top_n),
-    )
-    reranked = rerank_article_matches_by_statement(
-        article_matches=topic_matches,
-        statement=resolved_thesis,
-        topic_weight=topic_weight,
-        stance_weight=stance_weight,
-        top_n=top_n,
-    )
-    for match in reranked:
-        match["selected_thesis_sentence"] = resolved_thesis
-        match["selected_thesis_id"] = selected_thesis_id
-        match["essay_query_text"] = resolved_essay
-    return reranked
-
-def _extract_pdf_text(uploaded_file, max_pages=20, max_chars=20000):
-    """
-    Extract text from an uploaded PDF file.
-    Limits pages/chars so very large PDFs do not overwhelm search.
-    """
-    if uploaded_file is None:
-        return ""
-
-    filename = (uploaded_file.filename or "").lower()
-    content_type = (uploaded_file.mimetype or "").lower()
-
-    if not filename.endswith(".pdf") and content_type != "application/pdf":
-        return ""
-
-    try:
-        file_bytes = uploaded_file.read()
-        if not file_bytes:
-            return ""
-
-        reader = PdfReader(BytesIO(file_bytes))
-        chunks = []
-
-        for page in reader.pages[:max_pages]:
-            page_text = page.extract_text() or ""
-            page_text = page_text.strip()
-            if page_text:
-                chunks.append(page_text)
-            if sum(len(c) for c in chunks) >= max_chars:
-                break
-
-        text = "\n\n".join(chunks).strip()
-        return text[:max_chars]
-    except Exception:
-        return ""
-    finally:
-        try:
-            uploaded_file.stream.seek(0)
-        except Exception:
-            pass
 
 
 def _request_payload():
@@ -261,7 +67,7 @@ def _extract_request_context():
 
     pdf_text = ""
     if request.method == "POST" and not request.is_json:
-        pdf_text = _extract_pdf_text(request.files.get("pdf"))
+        pdf_text = extract_pdf_text(request.files.get("pdf"))
 
     parts = [typed_text, pdf_text.strip()]
     essay_text = "\n\n".join(part for part in parts if part).strip()
@@ -374,7 +180,7 @@ def register_routes(app):
     @app.route("/api/essay/extract-text", methods=["POST"])
     def essay_extract_text_route():
         try:
-            essay_text = _extract_pdf_text(request.files.get("pdf"))
+            essay_text = extract_pdf_text(request.files.get("pdf"))
             if not essay_text:
                 raise ValueError(
                     "We couldn't read text from that PDF. Try another file or paste the essay manually."
@@ -385,5 +191,5 @@ def register_routes(app):
             return _api_error_response(exc)
 
     if USE_LLM:
-        from llm_routes import register_chat_route
+        from backend.api.llm_routes import register_chat_route
         register_chat_route(app, json_search)
