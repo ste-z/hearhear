@@ -115,8 +115,9 @@ def json_search(query, retrieval_model=DEFAULT_RETRIEVAL_MODEL, top_n=100):
 def stance_search(
     topic,
     opinion,
-    topic_weight=0.5,
-    stance_weight=0.5,
+    topic_weight=0.4,
+    stance_weight=0.4,
+    recency_weight=0.2,
     top_n=20,
     retrieval_model=DEFAULT_RETRIEVAL_MODEL,
 ):
@@ -153,5 +154,6 @@ def stance_search(
         opinion=opinion_text,
         topic_weight=topic_weight,
         stance_weight=stance_weight,
+        recency_weight=recency_weight,
         top_n=top_n,
     )

@@ -170,8 +170,9 @@ function App(): JSX.Element {
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [topic, setTopic] = useState<string>('')
   const [opinion, setOpinion] = useState<string>('')
-  const [topicWeight, setTopicWeight] = useState<number>(0.5)
-  const [stanceWeight, setStanceWeight] = useState<number>(0.5)
+  const [topicWeight, setTopicWeight] = useState<number>(0.4)
+  const [stanceWeight, setStanceWeight] = useState<number>(0.4)
+  const [recencyWeight, setRecencyWeight] = useState<number>(0.2)
   const [rerankTopK, setRerankTopK] = useState<number>(20)
   const [retrievalModel, setRetrievalModel] = useState<RetrievalModel>('tfidf')
   const [supportedRetrievalModels, setSupportedRetrievalModels] = useState<RetrievalModel[]>(
@@ -364,7 +365,7 @@ function App(): JSX.Element {
     setArticles([])
     setError(null)
     setHasSubmittedSearch(false)
-  }, [inputMode, opinion, rerankTopK, stanceWeight, topic, topicWeight])
+  }, [inputMode, opinion, recencyWeight, rerankTopK, stanceWeight, topic, topicWeight])
 
   useEffect(() => {
     if (inputMode !== 'essay') {
@@ -677,6 +678,7 @@ function App(): JSX.Element {
           opinion: trimmedOpinion,
           topic_weight: topicWeight,
           stance_weight: stanceWeight,
+          recency_weight: recencyWeight,
           top_k: rerankTopK,
           retrieval_model: retrievalModel,
         }),
@@ -766,6 +768,7 @@ function App(): JSX.Element {
           selected_thesis_sentence: resolvedEssayThesis,
           topic_weight: topicWeight,
           stance_weight: stanceWeight,
+          recency_weight: recencyWeight,
           top_k: rerankTopK,
           retrieval_model: retrievalModel,
         }),
@@ -799,7 +802,8 @@ function App(): JSX.Element {
   const showScoreGrid = (article: Article): boolean => (
     article.combined_score != null ||
     article.stance_score_normalized != null ||
-    article.topic_score_normalized != null
+    article.topic_score_normalized != null ||
+    article.recency_score_normalized != null
   )
   const hasStanceSignals = (article: Article): boolean => (
     article.stance_entailment_prob != null ||
@@ -826,22 +830,29 @@ function App(): JSX.Element {
   }
 
   const getMatchSummary = (article: Article): string => {
+    const hasWeightedRecency = (article.recency_weight ?? recencyWeight) > 0
+
     if (article.stance_score_normalized === undefined || article.stance_score_normalized === null) {
-      return 'This article ranked mainly on subject overlap because no clear claim comparison was available yet.'
+      return hasWeightedRecency
+        ? 'This article ranked mainly on subject overlap and publish-date recency because no clear claim comparison was available yet.'
+        : 'This article ranked mainly on subject overlap because no clear claim comparison was available yet.'
     }
 
     const normalized = article.stance_label?.toLowerCase() ?? ''
+    const recencyNote = hasWeightedRecency
+      ? ' Its final rank also reflects how recently it was published.'
+      : ''
 
     if (normalized.includes('support') || normalized.includes('entail')) {
-      return 'This article stays on your topic and likely supports your position.'
+      return `This article stays on your topic and likely supports your position.${recencyNote}`
     }
     if (normalized.includes('contradict')) {
-      return 'This article stays on your topic but likely argues against your position.'
+      return `This article stays on your topic but likely argues against your position.${recencyNote}`
     }
     if (normalized.includes('neutral')) {
-      return 'This article stays on your topic, but its position looks mixed or unclear.'
+      return `This article stays on your topic, but its position looks mixed or unclear.${recencyNote}`
     }
-    return 'This article is on your topic and was compared against your statement.'
+    return `This article is on your topic and was compared against your statement.${recencyNote}`
   }
 
   const getOverviewHint = (article: Article): string => {
@@ -862,9 +873,7 @@ function App(): JSX.Element {
 
   const resultsDescription = useMemo(() => {
     if (loading) {
-      return inputMode === 'stance'
-        ? 'Reading across Guardian opinion pieces for topical fit and stance alignment.'
-        : 'Ranking Guardian opinion pieces against the thesis you selected.'
+      return 'Ranking Guardian opinion pieces with your current search settings.'
     }
 
     if (error) {
@@ -881,9 +890,7 @@ function App(): JSX.Element {
       return 'No matching articles came back this time. Try broadening the topic or sharpening the claim.'
     }
 
-    return inputMode === 'stance'
-      ? `${articles.length} Guardian opinion ${articles.length === 1 ? 'piece' : 'pieces'} ranked by topic and stance alignment.`
-      : `${articles.length} Guardian opinion ${articles.length === 1 ? 'piece' : 'pieces'} ranked against your selected thesis.`
+    return `${articles.length} Guardian opinion ${articles.length === 1 ? 'piece' : 'pieces'} ranked with your current search settings.`
   }, [articles.length, error, hasSubmittedSearch, inputMode, loading])
 
   return (
@@ -1294,6 +1301,7 @@ function App(): JSX.Element {
               <div id="answer-box">
                 {articles.map((article) => {
                   const articleTooltipBase = String(article.id).replace(/[^a-zA-Z0-9_-]/g, '-')
+                  const articleRecencyWeight = article.recency_weight ?? recencyWeight
 
                   return (
                     <article key={article.id} className="article-item">
@@ -1334,7 +1342,9 @@ function App(): JSX.Element {
                                 {renderMetricInfo(
                                   'Overall match',
                                   `${articleTooltipBase}-overall-help`,
-                                  'Final ranking after combining topic match and agreement.',
+                                  articleRecencyWeight > 0
+                                    ? 'Final ranking after combining topic match, agreement, and recency.'
+                                    : 'Final ranking after combining topic match and agreement.',
                                 )}
                               </div>
                               <div className="match-metric-value">{formatPercent(article.combined_score)}</div>
@@ -1367,6 +1377,28 @@ function App(): JSX.Element {
                                 />
                               </div>
                             </div>
+
+                            {articleRecencyWeight > 0 && (
+                              <div className="match-metric-card source">
+                                <div className="match-metric-header">
+                                  <div className="match-metric-heading">
+                                    <div className="match-metric-label">Recency</div>
+                                    {renderMetricInfo(
+                                      'Recency',
+                                      `${articleTooltipBase}-recency-help`,
+                                      'How strongly the article benefits from being more recently published.',
+                                    )}
+                                  </div>
+                                  <div className="match-metric-value">{formatPercent(article.recency_score_normalized)}</div>
+                                </div>
+                                <div className="match-meter" aria-hidden="true">
+                                  <span
+                                    className="match-meter-fill recency"
+                                    style={{ width: getMeterWidth(article.recency_score_normalized) }}
+                                  />
+                                </div>
+                              </div>
+                            )}
 
                             <div className="agreement-branch" tabIndex={0}>
                               <div className="match-metric-card source agreement">
@@ -1573,8 +1605,9 @@ function App(): JSX.Element {
                       Inference (NLI) model, DeBERTa (Decoding-enhanced BERT with disentangled
                       attention), to compare your claim with each article&apos;s central argument
                       (extracted using an LLM). The model estimates whether each article supports,
-                      contradicts, or is neutral toward your stance, and we rank the results
-                      accordingly.
+                      contradicts, or is neutral toward your stance. If you raise the recency
+                      weight in Settings, newer publication dates also contribute to the final
+                      ranking.
                     </p>
                   </section>
                 </>
@@ -1612,8 +1645,9 @@ function App(): JSX.Element {
                       them based on how they relate to your selected thesis. We use a DeBERTa NLI
                       model to compare your chosen thesis sentence with each article&apos;s central
                       argument, which was extracted beforehand using an LLM. The model estimates
-                      whether each article supports, contradicts, or is neutral toward your thesis,
-                      and we rank the results accordingly.
+                      whether each article supports, contradicts, or is neutral toward your thesis.
+                      If you raise the recency weight in Settings, newer publication dates also
+                      contribute to the final ranking.
                     </p>
                   </section>
                 </>
@@ -1708,6 +1742,16 @@ function App(): JSX.Element {
                       onChange={(e) => setStanceWeight(parseWeightInput(e.target.value, stanceWeight))}
                     />
                   </label>
+                  <label className="paired-weight-field">
+                    <span>Recency weight</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.05"
+                      value={recencyWeight}
+                      onChange={(e) => setRecencyWeight(parseWeightInput(e.target.value, recencyWeight))}
+                    />
+                  </label>
                 </div>
                 <div className="parameter-help-list">
                   <p className="parameter-help-item">
@@ -1715,6 +1759,9 @@ function App(): JSX.Element {
                   </p>
                   <p className="parameter-help-item">
                     <strong>Stance / thesis weight:</strong> how much the final score prioritizes whether the selected claim aligns with an article&apos;s central claim.
+                  </p>
+                  <p className="parameter-help-item">
+                    <strong>Recency weight:</strong> how much the final score rewards newer publication dates.
                   </p>
                 </div>
               </div>

@@ -55,8 +55,9 @@ def _extract_request_context():
     mode = str(payload.get("mode") or "essay").strip().lower()
     topic = str(payload.get("topic") or "").strip()
     opinion = str(payload.get("opinion") or "").strip()
-    topic_weight = _coerce_float(payload.get("topic_weight"), 0.5)
-    stance_weight = _coerce_float(payload.get("stance_weight"), 0.5)
+    topic_weight = _coerce_float(payload.get("topic_weight"), 0.4)
+    stance_weight = _coerce_float(payload.get("stance_weight"), 0.4)
+    recency_weight = _coerce_float(payload.get("recency_weight"), 0.2)
     rerank_top_k = _coerce_int(payload.get("top_k"), 20, minimum=1, maximum=100)
     candidate_top_n = _coerce_int(payload.get("candidate_top_n"), 5, minimum=1, maximum=10)
     retrieval_model = normalize_retrieval_model(
@@ -89,6 +90,7 @@ def _extract_request_context():
         "opinion": opinion,
         "topic_weight": topic_weight,
         "stance_weight": stance_weight,
+        "recency_weight": recency_weight,
         "rerank_top_k": rerank_top_k,
         "candidate_top_n": candidate_top_n,
         "retrieval_model": retrieval_model,
@@ -152,6 +154,7 @@ def register_routes(app):
                     opinion=context["opinion"],
                     topic_weight=context["topic_weight"],
                     stance_weight=context["stance_weight"],
+                    recency_weight=context["recency_weight"],
                     top_n=context["rerank_top_k"],
                     retrieval_model=context["retrieval_model"],
                 )
@@ -162,6 +165,7 @@ def register_routes(app):
                     selected_thesis_id=context["selected_thesis_id"],
                     topic_weight=context["topic_weight"],
                     stance_weight=context["stance_weight"],
+                    recency_weight=context["recency_weight"],
                     top_n=context["rerank_top_k"],
                     retrieval_model=context["retrieval_model"],
                 )

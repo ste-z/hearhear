@@ -1019,21 +1019,14 @@
 .match-input-grid {
   display: grid;
   position: relative;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   align-items: start;
   padding-top: 8px;
 }
 
 .match-input-grid::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 50%;
-  width: 1px;
-  height: 8px;
-  transform: translateX(-50%);
-  background: rgba(121, 95, 67, 0.18);
+  display: none;
 }
 
 .match-metric-card {
@@ -1193,6 +1186,10 @@
 }
 
 .match-meter-fill.stance {
+  background: linear-gradient(90deg, #8a5c00, #f4b400);
+}
+
+.match-meter-fill.recency {
   background: linear-gradient(90deg, #8a5c00, #f4b400);
 }
 
@@ -1803,7 +1800,7 @@
 
 .weight-pair-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -3440,6 +3437,10 @@
 
 .results-paper-section .match-meter-fill.stance,
 .results-paper-section .stance-read-fill.support {
+  background: linear-gradient(90deg, #8a5c00, #f4b400);
+}
+
+.results-paper-section .match-meter-fill.recency {
   background: linear-gradient(90deg, #8a5c00, #f4b400);
 }
 
