@@ -1,6 +1,9 @@
 import logging
 import os
-import resource
+try:
+    import resource
+except ImportError:
+    resource = None
 from datetime import datetime, timezone
 
 
@@ -10,7 +13,10 @@ def _logger():
 
 def _rss_mb():
     try:
-        rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        if resource:
+            rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        else:
+            return None
     except Exception:
         return None
 
