@@ -704,6 +704,347 @@ function YearRangeSlider(
   )
 }
 
+type RankingWeightBoundary = 'topic-recency' | 'recency-agreement'
+
+const clampUnit = (value: number): number => (
+  Math.min(1, Math.max(0, value))
+)
+
+const formatWeightShare = (value: number): string => `${Math.round(clampUnit(value) * 100)}%`
+
+const parseWeightPercentInput = (value: string, fallback: number): number => {
+  if (value.trim() === '') return fallback
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.round(Math.min(100, Math.max(0, parsed)))
+}
+
+const rebalanceWeightShares = (
+  target: 'topic' | 'recency' | 'agreement',
+  nextTargetShare: number,
+  currentShares: {
+    topic: number
+    recency: number
+    agreement: number
+  },
+): {
+  topic: number
+  recency: number
+  agreement: number
+} => {
+  const nextTarget = clampUnit(nextTargetShare)
+  const remainder = 1 - nextTarget
+  const otherKeys = (['topic', 'recency', 'agreement'] as const).filter(key => key !== target)
+  const otherTotal = otherKeys.reduce((sum, key) => sum + currentShares[key], 0)
+  const firstOther = otherKeys[0]
+  const secondOther = otherKeys[1]
+  const nextShares = {
+    topic: currentShares.topic,
+    recency: currentShares.recency,
+    agreement: currentShares.agreement,
+  }
+
+  nextShares[target] = nextTarget
+  if (otherTotal > 0) {
+    nextShares[firstOther] = remainder * (currentShares[firstOther] / otherTotal)
+    nextShares[secondOther] = remainder * (currentShares[secondOther] / otherTotal)
+  } else {
+    nextShares[firstOther] = remainder / 2
+    nextShares[secondOther] = remainder / 2
+  }
+
+  const roundedTopic = Number(nextShares.topic.toFixed(3))
+  const roundedRecency = Number(nextShares.recency.toFixed(3))
+  const roundedAgreement = Number(Math.max(0, 1 - roundedTopic - roundedRecency).toFixed(3))
+  return {
+    topic: roundedTopic,
+    recency: roundedRecency,
+    agreement: roundedAgreement,
+  }
+}
+
+function RankingWeightSlider(
+  {
+    topicWeight,
+    recencyWeight,
+    agreementWeight,
+    onChange,
+  }: {
+    topicWeight: number
+    recencyWeight: number
+    agreementWeight: number
+    onChange: (nextWeights: {
+      topicWeight: number
+      recencyWeight: number
+      agreementWeight: number
+    }) => void
+  },
+): JSX.Element {
+  const sliderRef = useRef<HTMLDivElement | null>(null)
+  const [draggingBoundary, setDraggingBoundary] = useState<RankingWeightBoundary | null>(null)
+  const safeTopicWeight = Math.max(0, Number.isFinite(topicWeight) ? topicWeight : 0)
+  const safeRecencyWeight = Math.max(0, Number.isFinite(recencyWeight) ? recencyWeight : 0)
+  const safeAgreementWeight = Math.max(0, Number.isFinite(agreementWeight) ? agreementWeight : 0)
+  const totalWeight = safeTopicWeight + safeRecencyWeight + safeAgreementWeight
+  const topicShare = totalWeight > 0 ? safeTopicWeight / totalWeight : 0.4
+  const recencyShare = totalWeight > 0 ? safeRecencyWeight / totalWeight : 0.2
+  const agreementShare = totalWeight > 0 ? safeAgreementWeight / totalWeight : 0.4
+  const firstBoundary = clampUnit(topicShare)
+  const secondBoundary = clampUnit(topicShare + recencyShare)
+
+  const publishShares = (
+    nextTopicShare: number,
+    nextRecencyShare: number,
+    nextAgreementShare: number,
+  ): void => {
+    const rounded = (value: number): number => Number(clampUnit(value).toFixed(3))
+    onChange({
+      topicWeight: rounded(nextTopicShare),
+      recencyWeight: rounded(nextRecencyShare),
+      agreementWeight: rounded(nextAgreementShare),
+    })
+  }
+
+  const handleDirectShareChange = (
+    target: 'topic' | 'recency' | 'agreement',
+    rawValue: string,
+  ): void => {
+    const fallbackPercent = Math.round(
+      (target === 'topic'
+        ? topicShare
+        : target === 'recency'
+          ? recencyShare
+          : agreementShare) * 100,
+    )
+    const nextPercent = parseWeightPercentInput(rawValue, fallbackPercent)
+    const nextShares = rebalanceWeightShares(target, nextPercent / 100, {
+      topic: topicShare,
+      recency: recencyShare,
+      agreement: agreementShare,
+    })
+    publishShares(nextShares.topic, nextShares.recency, nextShares.agreement)
+  }
+
+  const resolveShareFromClientX = (clientX: number): number => {
+    const bounds = sliderRef.current?.getBoundingClientRect()
+    if (!bounds || bounds.width <= 0) {
+      return firstBoundary
+    }
+    const relativeX = Math.min(bounds.width, Math.max(0, clientX - bounds.left))
+    return clampUnit(relativeX / bounds.width)
+  }
+
+  const applyBoundaryShare = (
+    rawShare: number,
+    boundary: RankingWeightBoundary,
+  ): void => {
+    if (boundary === 'topic-recency') {
+      const nextFirstBoundary = Math.min(secondBoundary, clampUnit(rawShare))
+      publishShares(
+        nextFirstBoundary,
+        secondBoundary - nextFirstBoundary,
+        1 - secondBoundary,
+      )
+      return
+    }
+
+    const nextSecondBoundary = Math.max(firstBoundary, clampUnit(rawShare))
+    publishShares(
+      firstBoundary,
+      nextSecondBoundary - firstBoundary,
+      1 - nextSecondBoundary,
+    )
+  }
+
+  useEffect(() => {
+    if (!draggingBoundary) {
+      return
+    }
+
+    const handlePointerMove = (event: PointerEvent): void => {
+      applyBoundaryShare(resolveShareFromClientX(event.clientX), draggingBoundary)
+    }
+
+    const stopDragging = (): void => {
+      setDraggingBoundary(null)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopDragging)
+    window.addEventListener('pointercancel', stopDragging)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopDragging)
+      window.removeEventListener('pointercancel', stopDragging)
+    }
+  }, [draggingBoundary, firstBoundary, secondBoundary])
+
+  const beginDrag = (
+    boundary: RankingWeightBoundary,
+    event: ReactPointerEvent<HTMLButtonElement | HTMLDivElement>,
+  ): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    setDraggingBoundary(boundary)
+    applyBoundaryShare(resolveShareFromClientX(event.clientX), boundary)
+  }
+
+  const handleTrackPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const share = resolveShareFromClientX(event.clientX)
+    const nearestBoundary = Math.abs(share - firstBoundary) <= Math.abs(share - secondBoundary)
+      ? 'topic-recency'
+      : 'recency-agreement'
+    beginDrag(nearestBoundary, event)
+  }
+
+  const nudgeBoundary = (boundary: RankingWeightBoundary, delta: number): void => {
+    if (boundary === 'topic-recency') {
+      applyBoundaryShare(firstBoundary + delta, boundary)
+      return
+    }
+    applyBoundaryShare(secondBoundary + delta, boundary)
+  }
+
+  const handleBoundaryKeyDown = (
+    boundary: RankingWeightBoundary,
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+  ): void => {
+    const step = event.shiftKey ? 0.1 : 0.05
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+      event.preventDefault()
+      nudgeBoundary(boundary, -step)
+      return
+    }
+
+    if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      nudgeBoundary(boundary, step)
+      return
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault()
+      applyBoundaryShare(boundary === 'topic-recency' ? 0 : firstBoundary, boundary)
+      return
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault()
+      applyBoundaryShare(boundary === 'topic-recency' ? secondBoundary : 1, boundary)
+    }
+  }
+
+  return (
+    <div className="ranking-weight-slider">
+      <div
+        ref={sliderRef}
+        className="ranking-weight-track"
+        onPointerDown={handleTrackPointerDown}
+        role="presentation"
+      >
+        <span
+          className="ranking-weight-segment topic"
+          style={{ left: 0, width: `${firstBoundary * 100}%` }}
+          aria-hidden="true"
+        />
+        <span
+          className="ranking-weight-segment recency"
+          style={{
+            left: `${firstBoundary * 100}%`,
+            width: `${Math.max(0, secondBoundary - firstBoundary) * 100}%`,
+          }}
+          aria-hidden="true"
+        />
+        <span
+          className="ranking-weight-segment agreement"
+          style={{
+            left: `${secondBoundary * 100}%`,
+            width: `${Math.max(0, 1 - secondBoundary) * 100}%`,
+          }}
+          aria-hidden="true"
+        />
+        <button
+          type="button"
+          className={`ranking-weight-handle topic-recency ${draggingBoundary === 'topic-recency' ? 'dragging' : ''}`}
+          style={{ left: `calc(${firstBoundary * 100}% - 11px)` }}
+          onPointerDown={(event) => beginDrag('topic-recency', event)}
+          onKeyDown={(event) => handleBoundaryKeyDown('topic-recency', event)}
+          role="slider"
+          aria-label="Boundary between topic and recency weight"
+          aria-valuemin={0}
+          aria-valuemax={Math.round(secondBoundary * 100)}
+          aria-valuenow={Math.round(firstBoundary * 100)}
+          aria-valuetext={`Topic ${formatWeightShare(topicShare)}, recency ${formatWeightShare(recencyShare)}`}
+        />
+        <button
+          type="button"
+          className={`ranking-weight-handle recency-agreement ${draggingBoundary === 'recency-agreement' ? 'dragging' : ''}`}
+          style={{ left: `calc(${secondBoundary * 100}% - 11px)` }}
+          onPointerDown={(event) => beginDrag('recency-agreement', event)}
+          onKeyDown={(event) => handleBoundaryKeyDown('recency-agreement', event)}
+          role="slider"
+          aria-label="Boundary between recency and agreement weight"
+          aria-valuemin={Math.round(firstBoundary * 100)}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(secondBoundary * 100)}
+          aria-valuetext={`Recency ${formatWeightShare(recencyShare)}, agreement ${formatWeightShare(agreementShare)}`}
+        />
+      </div>
+      <div className="ranking-weight-legend">
+        <div className="ranking-weight-legend-item topic">
+          <span className="ranking-weight-swatch" aria-hidden="true" />
+          <label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value={Math.round(topicShare * 100)}
+              onChange={(event) => handleDirectShareChange('topic', event.target.value)}
+              aria-label="Topic weight percentage"
+            />
+            <span>%</span>
+          </label>
+          <span>Topic</span>
+        </div>
+        <div className="ranking-weight-legend-item recency">
+          <span className="ranking-weight-swatch" aria-hidden="true" />
+          <label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value={Math.round(recencyShare * 100)}
+              onChange={(event) => handleDirectShareChange('recency', event.target.value)}
+              aria-label="Recency weight percentage"
+            />
+            <span>%</span>
+          </label>
+          <span>Recency</span>
+        </div>
+        <div className="ranking-weight-legend-item agreement">
+          <span className="ranking-weight-swatch" aria-hidden="true" />
+          <label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value={Math.round(agreementShare * 100)}
+              onChange={(event) => handleDirectShareChange('agreement', event.target.value)}
+              aria-label="Agreement weight percentage"
+            />
+            <span>%</span>
+          </label>
+          <span>Agreement</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function App(): JSX.Element {
   const hasSeenLandingRef = useRef<boolean>(hasSeenLanding())
   const [useLlm, setUseLlm] = useState<boolean | null>(null)
@@ -1284,13 +1625,6 @@ function App(): JSX.Element {
       </span>
     </span>
   )
-
-  const parseWeightInput = (value: string, fallback: number): number => {
-    if (value.trim() === '') return fallback
-    const parsed = Number(value)
-    if (Number.isNaN(parsed) || parsed < 0) return fallback
-    return parsed
-  }
 
   const parseTopKInput = (value: string, fallback: number): number => {
     if (value.trim() === '') return fallback
@@ -3148,44 +3482,22 @@ function App(): JSX.Element {
                 <div className="modal-settings-grid">
                   <div className="weight-card full-row weights-group-card">
                     <span>Final ranking weights</span>
-                    <div className="weight-pair-grid">
-                      <label className="paired-weight-field">
-                        <span>Topic / essay weight</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.05"
-                          value={topicWeight}
-                          onChange={(e) => setTopicWeight(parseWeightInput(e.target.value, topicWeight))}
-                        />
-                      </label>
-                      <label className="paired-weight-field">
-                        <span>Stance / thesis weight</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.05"
-                          value={stanceWeight}
-                          onChange={(e) => setStanceWeight(parseWeightInput(e.target.value, stanceWeight))}
-                        />
-                      </label>
-                      <label className="paired-weight-field">
-                        <span>Recency weight</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.05"
-                          value={recencyWeight}
-                          onChange={(e) => setRecencyWeight(parseWeightInput(e.target.value, recencyWeight))}
-                        />
-                      </label>
-                    </div>
+                    <RankingWeightSlider
+                      topicWeight={topicWeight}
+                      recencyWeight={recencyWeight}
+                      agreementWeight={stanceWeight}
+                      onChange={(nextWeights) => {
+                        setTopicWeight(nextWeights.topicWeight)
+                        setRecencyWeight(nextWeights.recencyWeight)
+                        setStanceWeight(nextWeights.agreementWeight)
+                      }}
+                    />
                     <div className="parameter-help-list">
                       <p className="parameter-help-item">
-                        <strong>Topic / essay weight:</strong> how much the final score prioritizes whole-text topical similarity.
+                        <strong>Topic weight:</strong> how much the final score prioritizes whole-text topical similarity.
                       </p>
                       <p className="parameter-help-item">
-                        <strong>Stance / thesis weight:</strong> how much the final score prioritizes whether the selected claim aligns with an article&apos;s central claim.
+                        <strong>Agreement weight:</strong> how much the final score prioritizes whether the article aligns with your thesis.
                       </p>
                       <p className="parameter-help-item">
                         <strong>Recency weight:</strong> how much the final score rewards newer publication dates.
