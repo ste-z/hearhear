@@ -2424,10 +2424,6 @@
   gap: 12px;
 }
 
-.chunking-mode-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
 .retrieval-model-button {
   display: flex;
   flex-direction: column;
@@ -3152,7 +3148,6 @@
   }
 
   .weight-pair-grid,
-  .chunking-mode-grid,
   .year-range-summary-grid {
     grid-template-columns: 1fr;
   }

@@ -3,8 +3,8 @@ import math
 from backend.text_processing.sentence_splitter import sentence_rows_from_text
 
 
-DEFAULT_SEMANTIC_BREAK_SIMILARITY_THRESHOLD = 0.25
-DEFAULT_SEMANTIC_MAX_CHARS = 2500
+DEFAULT_SEMANTIC_BREAK_SIMILARITY_THRESHOLD = 0.2
+DEFAULT_SEMANTIC_MAX_CHARS = 15000
 
 
 def _clean_text(value):

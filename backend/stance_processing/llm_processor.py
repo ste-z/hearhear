@@ -1,6 +1,9 @@
+import csv
 import json
 import os
 import re
+import sys
+from pathlib import Path
 
 from backend.runtime.runtime_debug import log_runtime_event
 from backend.text_processing.paragraph_splitter import paragraph_rows_from_text
@@ -11,13 +14,15 @@ from backend.text_processing.semantic_chunker import (
 
 
 DEFAULT_LLM_BATCH_SIZE = 20
-DEFAULT_MAX_ARTICLE_CHARS = 10000
+DEFAULT_MAX_ARTICLE_CHARS = 50000
 DEFAULT_LLM_PARAGRAPH_BATCH_SIZE = 100
 DEFAULT_MAX_PARAGRAPHS_PER_ARTICLE = 40
 DEFAULT_MAX_PARAGRAPH_CHARS = 2500
-DEFAULT_RELEVANT_PARAGRAPH_COUNT = 20
+DEFAULT_RELEVANT_PARAGRAPH_COUNT = 5
 DEFAULT_CHUNKING_MODE = "paragraph"
 SPARK_API_KEY_ENV_NAMES = ("SPARK_API_KEY", "API_KEY")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_GUARDIAN_RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw" / "guardian_by_year"
 
 LLM_ARTICLE_AGREEMENT_SYSTEM_PROMPT = """
 You evaluate how much retrieved news opinion articles agree with a user's thesis.
@@ -147,6 +152,30 @@ def _article_value(article, key, default=None):
     return getattr(article, key, default)
 
 
+def _raw_text(value):
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _article_year(article):
+    raw_year = _article_value(article, "year")
+    try:
+        return int(raw_year)
+    except (TypeError, ValueError):
+        pass
+
+    date_value = _article_value(article, "date")
+    date_text = _clean_text(date_value)
+    match = re.search(r"\b(19|20)\d{2}\b", date_text)
+    if not match:
+        return None
+    try:
+        return int(match.group(0))
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize_chunking_mode(value):
     text = str(value or DEFAULT_CHUNKING_MODE).strip().lower().replace("-", "_").replace(" ", "_")
     if text in {"semantic", "semantic_chunking", "semantic_chunks"}:
@@ -154,33 +183,139 @@ def _normalize_chunking_mode(value):
     return "paragraph"
 
 
+def _set_large_csv_field_limit():
+    limit = sys.maxsize
+    while True:
+        try:
+            csv.field_size_limit(limit)
+            return
+        except OverflowError:
+            limit = int(limit / 10)
+        except Exception:
+            return
+
+
+def _raw_article_paths_for_years(years, raw_data_dir=DEFAULT_GUARDIAN_RAW_DATA_DIR):
+    raw_dir = Path(raw_data_dir)
+    if years:
+        return [
+            raw_dir / f"guardian_opinion_{year}.csv"
+            for year in sorted({int(year) for year in years if year is not None})
+        ]
+    return sorted(raw_dir.glob("guardian_opinion_*.csv"))
+
+
+def _article_body_text_lookup_from_raw(article_ids, year_by_article_id=None):
+    pending_ids = {
+        _clean_text(article_id)
+        for article_id in article_ids
+        if _clean_text(article_id)
+    }
+    if not pending_ids:
+        return {}
+
+    year_lookup = dict(year_by_article_id or {})
+    candidate_years = {
+        year_lookup.get(article_id)
+        for article_id in pending_ids
+        if year_lookup.get(article_id) is not None
+    }
+    candidate_paths = _raw_article_paths_for_years(candidate_years)
+    if not candidate_paths:
+        candidate_paths = _raw_article_paths_for_years(None)
+
+    found = {}
+    scanned_paths = set()
+
+    def scan_paths(paths):
+        _set_large_csv_field_limit()
+        for path in paths:
+            if not pending_ids:
+                break
+            if not path.exists() or path in scanned_paths:
+                continue
+            scanned_paths.add(path)
+            try:
+                with path.open("r", encoding="utf-8", newline="") as handle:
+                    reader = csv.DictReader(handle)
+                    for row in reader:
+                        article_id = _clean_text(row.get("id"))
+                        if article_id not in pending_ids:
+                            continue
+                        body_text = _raw_text(row.get("body_text"))
+                        if body_text:
+                            found[article_id] = body_text
+                        pending_ids.discard(article_id)
+                        if not pending_ids:
+                            break
+            except Exception:
+                continue
+
+    scan_paths(candidate_paths)
+    if pending_ids and candidate_years:
+        scan_paths(_raw_article_paths_for_years(None))
+
+    if found:
+        log_runtime_event(
+            "llm_chunking.raw_body_lookup_done",
+            requested_count=len(article_ids),
+            found_count=len(found),
+            scanned_file_count=len(scanned_paths),
+        )
+    return found
+
+
 def _article_body_text_lookup(articles):
     article_ids = []
+    year_by_article_id = {}
     for index, article in enumerate(articles):
         article_id = _article_id(article, index)
         if article_id and article_id not in article_ids:
             article_ids.append(article_id)
+        article_year = _article_year(article)
+        if article_id and article_year is not None:
+            year_by_article_id[article_id] = article_year
 
     if not article_ids:
         return {}
 
+    body_lookup = {}
     try:
         from backend.db.models import GuardianArticle
     except Exception:
-        return {}
+        GuardianArticle = None
 
-    try:
-        rows = (
-            GuardianArticle.query.with_entities(
-                GuardianArticle.id,
-                GuardianArticle.body_text,
+    if GuardianArticle is not None:
+        try:
+            rows = (
+                GuardianArticle.query.with_entities(
+                    GuardianArticle.id,
+                    GuardianArticle.body_text,
+                )
+                .filter(GuardianArticle.id.in_(article_ids))
+                .all()
             )
-            .filter(GuardianArticle.id.in_(article_ids))
-            .all()
+            for row in rows:
+                body_text = _raw_text(row.body_text)
+                if body_text:
+                    body_lookup[row.id] = body_text
+        except Exception:
+            body_lookup = {}
+
+    missing_ids = [
+        article_id
+        for article_id in article_ids
+        if not _raw_text(body_lookup.get(article_id))
+    ]
+    if missing_ids:
+        body_lookup.update(
+            _article_body_text_lookup_from_raw(
+                missing_ids,
+                year_by_article_id=year_by_article_id,
+            )
         )
-    except Exception:
-        return {}
-    return {row.id: row.body_text for row in rows}
+
+    return body_lookup
 
 
 def _article_prompt_payload(article, index, max_article_chars=DEFAULT_MAX_ARTICLE_CHARS):

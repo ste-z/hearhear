@@ -27,6 +27,7 @@ type EssayThesisMode = 'candidate' | 'custom'
 type RerankSelectionMode = 'manual' | 'automatic'
 type StanceMethod = 'nli' | 'llm'
 type ChunkingMode = 'none' | 'paragraph' | 'semantic'
+type FrontendChunkingMode = Exclude<ChunkingMode, 'paragraph'>
 
 type ConfigResponse = {
   use_llm: boolean
@@ -84,22 +85,8 @@ const defaultSupportedRetrievalModels: RetrievalModel[] = ['svd', 'tfidf']
 const defaultRerankSelectionMode: RerankSelectionMode = 'automatic'
 const defaultStanceMethod: StanceMethod = 'nli'
 const defaultSupportedStanceMethods: StanceMethod[] = ['nli', 'llm']
-const defaultChunkingMode: ChunkingMode = 'none'
-const defaultSupportedChunkingModes: ChunkingMode[] = ['none', 'paragraph', 'semantic']
-const chunkingModeDetails: Record<ChunkingMode, { label: string, description: string }> = {
-  none: {
-    label: 'No chunking',
-    description: 'Score each article as a whole.',
-  },
-  paragraph: {
-    label: 'Paragraph chunking',
-    description: 'Score paragraph chunks with Spark.',
-  },
-  semantic: {
-    label: 'Semantic chunking',
-    description: 'Split where adjacent SVD sentence vectors shift.',
-  },
-}
+const defaultChunkingMode: FrontendChunkingMode = 'none'
+const defaultSupportedChunkingModes: FrontendChunkingMode[] = ['none', 'semantic']
 const defaultAutoRerankThresholds: Record<RetrievalModel, number> = {
   tfidf: 0.3,
   svd: 0.6,
@@ -126,8 +113,8 @@ const isStanceMethod = (value: unknown): value is StanceMethod => (
   value === 'nli' || value === 'llm'
 )
 
-const isChunkingMode = (value: unknown): value is ChunkingMode => (
-  value === 'none' || value === 'paragraph' || value === 'semantic'
+const isFrontendChunkingMode = (value: unknown): value is FrontendChunkingMode => (
+  value === 'none' || value === 'semantic'
 )
 
 const normalizeStanceMethods = (value: unknown): StanceMethod[] => {
@@ -138,10 +125,10 @@ const normalizeStanceMethods = (value: unknown): StanceMethod[] => {
   return unique.length > 0 ? unique : defaultSupportedStanceMethods
 }
 
-const normalizeChunkingModes = (value: unknown): ChunkingMode[] => {
+const normalizeChunkingModes = (value: unknown): FrontendChunkingMode[] => {
   if (!Array.isArray(value)) return defaultSupportedChunkingModes
 
-  const filtered = value.filter(isChunkingMode)
+  const filtered = value.filter(isFrontendChunkingMode)
   const unique = Array.from(new Set(filtered))
   return unique.length > 0 ? unique : defaultSupportedChunkingModes
 }
@@ -738,11 +725,11 @@ function App(): JSX.Element {
   const [rerankTopK, setRerankTopK] = useState<number>(20)
   const [rerankSelectionMode, setRerankSelectionMode] = useState<RerankSelectionMode>(defaultRerankSelectionMode)
   const [stanceMethod, setStanceMethod] = useState<StanceMethod>(defaultStanceMethod)
-  const [chunkingMode, setChunkingMode] = useState<ChunkingMode>(defaultChunkingMode)
+  const [chunkingMode, setChunkingMode] = useState<FrontendChunkingMode>(defaultChunkingMode)
   const [supportedStanceMethods, setSupportedStanceMethods] = useState<StanceMethod[]>(
     defaultSupportedStanceMethods,
   )
-  const [supportedChunkingModes, setSupportedChunkingModes] = useState<ChunkingMode[]>(
+  const [supportedChunkingModes, setSupportedChunkingModes] = useState<FrontendChunkingMode[]>(
     defaultSupportedChunkingModes,
   )
   const [llmAgreementAvailable, setLlmAgreementAvailable] = useState<boolean>(false)
@@ -813,9 +800,9 @@ function App(): JSX.Element {
         const resolvedStanceMethod = supportedAgreementMethods.includes(preferredStanceMethod)
           ? preferredStanceMethod
           : supportedAgreementMethods[0]
-        const preferredChunkingMode = isChunkingMode(data.default_chunking_mode)
+        const preferredChunkingMode = isFrontendChunkingMode(data.default_chunking_mode)
           ? data.default_chunking_mode
-          : (data.default_use_chunking ? 'paragraph' : defaultChunkingMode)
+          : (data.default_use_chunking ? 'semantic' : defaultChunkingMode)
         const resolvedChunkingMode = supportedChunkingOptions.includes(preferredChunkingMode)
           ? preferredChunkingMode
           : (supportedChunkingOptions.includes(defaultChunkingMode)
@@ -1218,7 +1205,7 @@ function App(): JSX.Element {
   const canUseTfidf = supportedRetrievalModels.includes('tfidf')
   const canUseNliAgreement = supportedStanceMethods.includes('nli')
   const canUseLlmAgreement = supportedStanceMethods.includes('llm') && llmAgreementAvailable
-  const canUseChunking = canUseLlmAgreement
+  const canUseChunking = canUseLlmAgreement && supportedChunkingModes.includes('semantic')
   const isSvdEnabled = retrievalModel === 'svd'
   const canToggleSvd = canUseSvd && canUseTfidf
   const currentAutoRerankThreshold = autoRerankThresholds[retrievalModel]
@@ -3033,7 +3020,7 @@ function App(): JSX.Element {
                 <p className="setting-help-text">
                   {stanceMethod === 'llm'
                     ? (useChunking
-                      ? `The final agreement meter averages Spark scores across ${chunkingMode === 'semantic' ? 'semantic chunks' : 'paragraphs'} the LLM marks relevant.`
+                      ? 'The final agreement meter averages Spark scores across semantic chunks the LLM marks relevant.'
                       : 'The final agreement meter comes from Spark scoring the retrieved articles against your thesis.')
                     : 'The final agreement meter comes from local NLI over extracted article claims.'}
                   {!llmAgreementAvailable && supportedStanceMethods.includes('llm')
@@ -3041,41 +3028,41 @@ function App(): JSX.Element {
                     : ''}
                 </p>
               </div>
-              <div className="weight-card full-row settings-selection-card">
-                <span>Chunking</span>
-                <div className="retrieval-model-grid chunking-mode-grid">
-                  {defaultSupportedChunkingModes
-                    .filter(mode => supportedChunkingModes.includes(mode))
-                    .map((mode) => {
-                      const isDisabled = mode !== 'none' && !canUseChunking
-                      return (
-                        <button
-                          key={mode}
-                          type="button"
-                          className={`retrieval-model-button ${chunkingMode === mode ? 'active' : ''}`}
-                          onClick={() => {
-                            if (isDisabled) return
-                            setChunkingMode(mode)
-                            if (mode !== 'none') {
-                              setStanceMethod('llm')
-                            }
-                          }}
-                          disabled={isDisabled}
-                        >
-                          <strong>{chunkingModeDetails[mode].label}</strong>
-                          <p>{chunkingModeDetails[mode].description}</p>
-                        </button>
-                      )
-                    })}
+              <div className="weight-card full-row settings-toggle-card">
+                <div className="settings-toggle-row">
+                  <div className="settings-toggle-copy">
+                    <span>Semantic chunking</span>
+                    <p className="setting-help-text">
+                      When on, Spark scores semantic chunks, averages the related chunk scores, and hides articles with no related chunks.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className={`settings-switch-button ${useChunking ? 'active' : ''}`}
+                    aria-pressed={useChunking}
+                    onClick={() => {
+                      if (!canUseChunking) return
+                      setChunkingMode(currentMode => {
+                        const nextMode = currentMode === 'semantic' ? 'none' : 'semantic'
+                        if (nextMode === 'semantic') {
+                          setStanceMethod('llm')
+                        }
+                        return nextMode
+                      })
+                    }}
+                    disabled={!canUseChunking}
+                  >
+                    <span className="settings-switch-label">
+                      {useChunking ? 'Semantic' : 'Article-level'}
+                    </span>
+                    <span className="retrieval-toggle-switch" aria-hidden="true">
+                      <span className="retrieval-toggle-thumb" />
+                    </span>
+                  </button>
                 </div>
-                <p className="setting-help-text">
-                  {useChunking
-                    ? 'Chunked reranking uses Spark and hides articles with no related chunks.'
-                    : 'Article-level scoring keeps the selected agreement scorer.'}
-                  {!llmAgreementAvailable && supportedChunkingModes.some(mode => mode !== 'none')
-                    ? ' Add SPARK_API_KEY or API_KEY to enable chunking.'
-                    : ''}
-                </p>
+                {!llmAgreementAvailable && supportedChunkingModes.includes('semantic') && (
+                  <p className="setting-help-text">Add SPARK_API_KEY or API_KEY to enable semantic chunking.</p>
+                )}
               </div>
               <div className="weight-card full-row settings-toggle-card">
                 <div className="settings-toggle-row">

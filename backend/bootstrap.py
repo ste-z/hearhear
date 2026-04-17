@@ -298,7 +298,7 @@ def _seed_guardian_articles(
         bundled_articles = _load_bundled_guardian_articles(years=years)
     else:
         bundled_articles = _filter_articles_to_years(bundled_articles, years=years)
-    if not bundled_articles.empty:
+    if not store_body_text and not bundled_articles.empty:
         print("Seeding Guardian articles from bundled vector index metadata.")
         _persist_guardian_articles(
             bundled_articles,
@@ -427,13 +427,12 @@ def initialize_offline_data_pipeline(
 
         store_body_text = _should_store_body_text()
         bundled_articles = _load_bundled_guardian_articles(years=years)
-        bundled_articles_available = not bundled_articles.empty
         existing_count = GuardianArticle.query.count()
         should_seed = existing_count == 0
 
         if existing_count > 0 and _existing_data_needs_refresh(
             expected_years=years,
-            allow_missing_body_text=(not store_body_text) or bundled_articles_available,
+            allow_missing_body_text=not store_body_text,
         ):
             print("Existing Guardian rows do not match the configured source data. Rebuilding dataset.")
             GuardianArticle.query.delete()
