@@ -2203,14 +2203,14 @@ function App(): JSX.Element {
                 type="button"
                 className={`retrieval-toggle-pill ${isSvdEnabled ? 'active' : ''}`}
                 aria-pressed={isSvdEnabled}
-                aria-label={isSvdEnabled ? 'Disable SVD retrieval' : 'Enable SVD retrieval'}
+                aria-label={isSvdEnabled ? 'Switch to lexical topic relevance' : 'Switch to semantic topic relevance'}
                 onClick={() => {
                   if (!canToggleSvd) return
                   setRetrievalModel(currentModel => (currentModel === 'svd' ? 'tfidf' : 'svd'))
                 }}
                 disabled={!canToggleSvd}
               >
-                <span className="retrieval-toggle-label">Use SVD</span>
+                <span className="retrieval-toggle-label">{isSvdEnabled ? 'Semantic mode' : 'Lexical mode'}</span>
                 <span className="retrieval-toggle-switch" aria-hidden="true">
                   <span className="retrieval-toggle-thumb" />
                 </span>
@@ -2734,7 +2734,7 @@ function App(): JSX.Element {
                       <strong>Stage 1: Topic relevance.</strong> We first identify articles that are
                       relevant to your topic. To do this, we compute the similarity between your
                       input and each Guardian article using the retrieval representation selected
-                      with the Use SVD toggle: either base TF-IDF term-document vectors or
+                      in topic relevance mode: either Lexical TF-IDF term vectors or Semantic
                       truncated-SVD latent dimensions, both compared with cosine similarity. This
                       helps us find articles that discuss similar themes and keywords.
                     </p>
@@ -2773,8 +2773,8 @@ function App(): JSX.Element {
                       <strong>Stage 2: Topic relevance.</strong> After you select the best thesis
                       sentence, we identify articles that are relevant to your essay as a whole. To
                       do this, we compute the similarity between your full essay and each Guardian
-                      article using the retrieval representation selected with the Use SVD toggle:
-                      either base TF-IDF term-document vectors or truncated-SVD latent dimensions,
+                      article using the retrieval representation selected in topic relevance mode:
+                      either Lexical TF-IDF term vectors or Semantic truncated-SVD latent dimensions,
                       both compared with cosine similarity. This surfaces articles that discuss
                       similar themes, issues, and vocabulary.
                     </p>
@@ -2897,7 +2897,7 @@ function App(): JSX.Element {
           role="presentation"
         >
           <div
-            className="modal-card"
+            className="modal-card settings-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="search-settings-title"
@@ -2917,222 +2917,283 @@ function App(): JSX.Element {
                 Close
               </button>
             </div>
-            <div className="modal-settings-grid">
-              <div className="weight-card full-row settings-selection-card">
-                <span>Stage 2 candidate selection</span>
-                <div className="retrieval-model-grid">
-                  <button
-                    type="button"
-                    className={`retrieval-model-button ${rerankSelectionMode === 'manual' ? 'active' : ''}`}
-                    onClick={() => setRerankSelectionMode('manual')}
-                  >
-                    <strong>Manual K</strong>
-                    <p>Use a fixed number of top topic matches.</p>
-                  </button>
-                  <button
-                    type="button"
-                    className={`retrieval-model-button ${rerankSelectionMode === 'automatic' ? 'active' : ''}`}
-                    onClick={() => setRerankSelectionMode('automatic')}
-                  >
-                    <strong>Automatic threshold</strong>
-                    <p>Only move articles forward when their raw topic relevance clears a threshold.</p>
-                  </button>
+            <div className="settings-scroll-pane">
+              <section className="settings-stage-section">
+                <div className="settings-stage-heading">
+                  <span>Stage 1</span>
+                  <h4>Topic retrieval</h4>
                 </div>
-                {rerankSelectionMode === 'manual' ? (
-                  <label className="settings-inline-field settings-range-field">
-                    <div className="settings-range-header">
-                      <span>Top K</span>
-                      <strong className="settings-range-value">{rerankTopK}</strong>
+                <div className="modal-settings-grid">
+                  <div className="weight-card full-row settings-selection-card">
+                    <span>Topic relevance mode</span>
+                    <div className="retrieval-model-grid">
+                      {canUseTfidf && (
+                        <button
+                          type="button"
+                          className={`retrieval-model-button ${retrievalModel === 'tfidf' ? 'active' : ''}`}
+                          onClick={() => setRetrievalModel('tfidf')}
+                          disabled={!canToggleSvd}
+                        >
+                          <strong>Lexical</strong>
+                          <p>Pure TF-IDF term matching with cosine similarity.</p>
+                        </button>
+                      )}
+                      {canUseSvd && (
+                        <button
+                          type="button"
+                          className={`retrieval-model-button ${retrievalModel === 'svd' ? 'active' : ''}`}
+                          onClick={() => setRetrievalModel('svd')}
+                          disabled={!canToggleSvd}
+                        >
+                          <strong>Semantic</strong>
+                          <p>SVD on TF-IDF to compare articles in latent concept space.</p>
+                        </button>
+                      )}
                     </div>
-                    <input
-                      type="range"
-                      min="1"
-                      max="100"
-                      step="1"
-                      value={rerankTopK}
-                      onChange={(e) => setRerankTopK(parseTopKInput(e.target.value, rerankTopK))}
-                    />
-                    <div className="settings-range-scale" aria-hidden="true">
-                      <span>1</span>
-                      <span>100</span>
-                    </div>
-                  </label>
-                ) : (
-                  <label className="settings-inline-field settings-range-field">
-                    <div className="settings-range-header">
-                      <span>{`Topic relevance threshold (${retrievalModel === 'svd' ? 'SVD' : 'TF-IDF'})`}</span>
-                      <strong className="settings-range-value">{formatThresholdValue(currentAutoRerankThreshold)}</strong>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      value={currentAutoRerankThreshold}
-                      onChange={(e) => updateCurrentAutoRerankThreshold(e.target.value)}
-                    />
-                    <div className="settings-range-scale" aria-hidden="true">
-                      <span>0.00</span>
-                      <span>1.00</span>
-                    </div>
-                  </label>
-                )}
-                <p className="setting-help-text">
-                  {rerankSelectionMode === 'manual'
-                    ? 'How many top retrieval matches move into the agreement reranking stage.'
-                    : `Articles at or above this raw topic relevance threshold move into the next stage, with at most ${maxAutoRerankCandidates} articles reranked.`}
-                </p>
-              </div>
-              <div className="weight-card full-row settings-selection-card">
-                <span>Agreement scorer</span>
-                <div className="retrieval-model-grid">
-                  {canUseNliAgreement && (
-                    <button
-                      type="button"
-                      className={`retrieval-model-button ${stanceMethod === 'nli' ? 'active' : ''}`}
-                      onClick={() => {
-                        if (!useChunking) {
-                          setStanceMethod('nli')
-                        }
-                      }}
-                      disabled={useChunking}
-                    >
-                      <strong>NLI</strong>
-                      <p>{useChunking ? 'Disabled while chunking is on.' : 'Compare the thesis against each extracted article claim with DeBERTa.'}</p>
-                    </button>
-                  )}
-                  {supportedStanceMethods.includes('llm') && (
-                    <button
-                      type="button"
-                      className={`retrieval-model-button ${stanceMethod === 'llm' ? 'active' : ''}`}
-                      onClick={() => {
-                        if (canUseLlmAgreement) {
-                          setStanceMethod('llm')
-                        }
-                      }}
-                      disabled={!canUseLlmAgreement}
-                    >
-                      <strong>LLM RAG</strong>
-                      <p>Send retrieved article context to Spark for a 0-1 agreement score.</p>
-                    </button>
-                  )}
-                </div>
-                <p className="setting-help-text">
-                  {stanceMethod === 'llm'
-                    ? (useChunking
-                      ? 'The final agreement meter averages Spark scores across semantic chunks the LLM marks relevant.'
-                      : 'The final agreement meter comes from Spark scoring the retrieved articles against your thesis.')
-                    : 'The final agreement meter comes from local NLI over extracted article claims.'}
-                  {!llmAgreementAvailable && supportedStanceMethods.includes('llm')
-                    ? ' Add SPARK_API_KEY or API_KEY to enable the LLM scorer.'
-                    : ''}
-                </p>
-              </div>
-              <div className="weight-card full-row settings-toggle-card">
-                <div className="settings-toggle-row">
-                  <div className="settings-toggle-copy">
-                    <span>Semantic chunking</span>
                     <p className="setting-help-text">
-                      When on, Spark scores semantic chunks, averages the related chunk scores, and hides articles with no related chunks.
+                      {retrievalModel === 'svd'
+                        ? 'Semantic mode uses truncated-SVD dimensions from the TF-IDF matrix before cosine retrieval.'
+                        : 'Lexical mode uses the original TF-IDF term vectors before cosine retrieval.'}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className={`settings-switch-button ${useChunking ? 'active' : ''}`}
-                    aria-pressed={useChunking}
-                    onClick={() => {
-                      if (!canUseChunking) return
-                      setChunkingMode(currentMode => {
-                        const nextMode = currentMode === 'semantic' ? 'none' : 'semantic'
-                        if (nextMode === 'semantic') {
-                          setStanceMethod('llm')
-                        }
-                        return nextMode
-                      })
-                    }}
-                    disabled={!canUseChunking}
-                  >
-                    <span className="settings-switch-label">
-                      {useChunking ? 'Semantic' : 'Article-level'}
-                    </span>
-                    <span className="retrieval-toggle-switch" aria-hidden="true">
-                      <span className="retrieval-toggle-thumb" />
-                    </span>
-                  </button>
-                </div>
-                {!llmAgreementAvailable && supportedChunkingModes.includes('semantic') && (
-                  <p className="setting-help-text">Add SPARK_API_KEY or API_KEY to enable semantic chunking.</p>
-                )}
-              </div>
-              <div className="weight-card full-row settings-toggle-card">
-                <div className="settings-toggle-row">
-                  <div className="settings-toggle-copy">
-                    <span>Normalize topic relevance</span>
+
+                  <div className="weight-card full-row settings-toggle-card">
+                    <div className="settings-toggle-row">
+                      <div className="settings-toggle-copy">
+                        <span>Normalize topic relevance</span>
+                        <p className="setting-help-text">
+                          When on, the strongest retrieved article becomes 100% topic match within the current result set. When off, the app uses the raw retrieval similarity instead.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className={`settings-switch-button ${normalizeTopicScores ? 'active' : ''}`}
+                        aria-pressed={normalizeTopicScores}
+                        onClick={() => setNormalizeTopicScores(current => !current)}
+                      >
+                        <span className="settings-switch-label">
+                          {normalizeTopicScores ? 'Normalized' : 'Raw'}
+                        </span>
+                        <span className="retrieval-toggle-switch" aria-hidden="true">
+                          <span className="retrieval-toggle-thumb" />
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="weight-card full-row settings-selection-card">
+                    <span>Candidate selection</span>
+                    <div className="retrieval-model-grid">
+                      <button
+                        type="button"
+                        className={`retrieval-model-button ${rerankSelectionMode === 'manual' ? 'active' : ''}`}
+                        onClick={() => setRerankSelectionMode('manual')}
+                      >
+                        <strong>Manual K</strong>
+                        <p>Use a fixed number of top topic matches.</p>
+                      </button>
+                      <button
+                        type="button"
+                        className={`retrieval-model-button ${rerankSelectionMode === 'automatic' ? 'active' : ''}`}
+                        onClick={() => setRerankSelectionMode('automatic')}
+                      >
+                        <strong>Automatic threshold</strong>
+                        <p>Only move articles forward when their raw topic relevance clears a threshold.</p>
+                      </button>
+                    </div>
+                    {rerankSelectionMode === 'manual' ? (
+                      <label className="settings-inline-field settings-range-field">
+                        <div className="settings-range-header">
+                          <span>Top K</span>
+                          <strong className="settings-range-value">{rerankTopK}</strong>
+                        </div>
+                        <input
+                          type="range"
+                          min="1"
+                          max="100"
+                          step="1"
+                          value={rerankTopK}
+                          onChange={(e) => setRerankTopK(parseTopKInput(e.target.value, rerankTopK))}
+                        />
+                        <div className="settings-range-scale" aria-hidden="true">
+                          <span>1</span>
+                          <span>100</span>
+                        </div>
+                      </label>
+                    ) : (
+                      <label className="settings-inline-field settings-range-field">
+                        <div className="settings-range-header">
+                          <span>{`Topic relevance threshold (${retrievalModel === 'svd' ? 'Semantic' : 'Lexical'})`}</span>
+                          <strong className="settings-range-value">{formatThresholdValue(currentAutoRerankThreshold)}</strong>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={currentAutoRerankThreshold}
+                          onChange={(e) => updateCurrentAutoRerankThreshold(e.target.value)}
+                        />
+                        <div className="settings-range-scale" aria-hidden="true">
+                          <span>0.00</span>
+                          <span>1.00</span>
+                        </div>
+                      </label>
+                    )}
                     <p className="setting-help-text">
-                      When on, the strongest retrieved article becomes 100% topic match within the current result set. When off, the app uses the raw retrieval similarity instead.
+                      {rerankSelectionMode === 'manual'
+                        ? 'How many top retrieval matches move into the agreement reranking stage.'
+                        : `Articles at or above this raw topic relevance threshold move into the next stage, with at most ${maxAutoRerankCandidates} articles reranked.`}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className={`settings-switch-button ${normalizeTopicScores ? 'active' : ''}`}
-                    aria-pressed={normalizeTopicScores}
-                    onClick={() => setNormalizeTopicScores(current => !current)}
-                  >
-                    <span className="settings-switch-label">
-                      {normalizeTopicScores ? 'Normalized' : 'Raw'}
-                    </span>
-                    <span className="retrieval-toggle-switch" aria-hidden="true">
-                      <span className="retrieval-toggle-thumb" />
-                    </span>
-                  </button>
                 </div>
-              </div>
-              <div className="weight-card full-row weights-group-card">
-                <span>Weights</span>
-                <div className="weight-pair-grid">
-                  <label className="paired-weight-field">
-                    <span>Topic / essay weight</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.05"
-                      value={topicWeight}
-                      onChange={(e) => setTopicWeight(parseWeightInput(e.target.value, topicWeight))}
-                    />
-                  </label>
-                  <label className="paired-weight-field">
-                    <span>Stance / thesis weight</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.05"
-                      value={stanceWeight}
-                      onChange={(e) => setStanceWeight(parseWeightInput(e.target.value, stanceWeight))}
-                    />
-                  </label>
-                  <label className="paired-weight-field">
-                    <span>Recency weight</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.05"
-                      value={recencyWeight}
-                      onChange={(e) => setRecencyWeight(parseWeightInput(e.target.value, recencyWeight))}
-                    />
-                  </label>
+              </section>
+
+              <section className="settings-stage-section">
+                <div className="settings-stage-heading">
+                  <span>Stage 2</span>
+                  <h4>Agreement scoring</h4>
                 </div>
-                <div className="parameter-help-list">
-                  <p className="parameter-help-item">
-                    <strong>Topic / essay weight:</strong> how much the final score prioritizes whole-text topical similarity.
-                  </p>
-                  <p className="parameter-help-item">
-                    <strong>Stance / thesis weight:</strong> how much the final score prioritizes whether the selected claim aligns with an article&apos;s central claim.
-                  </p>
-                  <p className="parameter-help-item">
-                    <strong>Recency weight:</strong> how much the final score rewards newer publication dates.
-                  </p>
+                <div className="modal-settings-grid">
+                  <div className="weight-card full-row settings-toggle-card">
+                    <div className="settings-toggle-row">
+                      <div className="settings-toggle-copy">
+                        <span>Semantic chunking</span>
+                        <p className="setting-help-text">
+                          When on, Spark scores semantic chunks, averages the related chunk scores, and hides articles with no related chunks.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className={`settings-switch-button ${useChunking ? 'active' : ''}`}
+                        aria-pressed={useChunking}
+                        onClick={() => {
+                          if (!canUseChunking) return
+                          setChunkingMode(currentMode => {
+                            const nextMode = currentMode === 'semantic' ? 'none' : 'semantic'
+                            if (nextMode === 'semantic') {
+                              setStanceMethod('llm')
+                            }
+                            return nextMode
+                          })
+                        }}
+                        disabled={!canUseChunking}
+                      >
+                        <span className="settings-switch-label">
+                          {useChunking ? 'Semantic' : 'Article-level'}
+                        </span>
+                        <span className="retrieval-toggle-switch" aria-hidden="true">
+                          <span className="retrieval-toggle-thumb" />
+                        </span>
+                      </button>
+                    </div>
+                    {!llmAgreementAvailable && supportedChunkingModes.includes('semantic') && (
+                      <p className="setting-help-text">Add SPARK_API_KEY or API_KEY to enable semantic chunking.</p>
+                    )}
+                  </div>
+
+                  <div className="weight-card full-row settings-selection-card">
+                    <span>Agreement scorer</span>
+                    <div className="retrieval-model-grid">
+                      {canUseNliAgreement && (
+                        <button
+                          type="button"
+                          className={`retrieval-model-button ${stanceMethod === 'nli' ? 'active' : ''}`}
+                          onClick={() => {
+                            if (!useChunking) {
+                              setStanceMethod('nli')
+                            }
+                          }}
+                          disabled={useChunking}
+                        >
+                          <strong>NLI</strong>
+                          <p>{useChunking ? 'Disabled while chunking is on.' : 'Compare the thesis against each extracted article claim with DeBERTa.'}</p>
+                        </button>
+                      )}
+                      {supportedStanceMethods.includes('llm') && (
+                        <button
+                          type="button"
+                          className={`retrieval-model-button ${stanceMethod === 'llm' ? 'active' : ''}`}
+                          onClick={() => {
+                            if (canUseLlmAgreement) {
+                              setStanceMethod('llm')
+                            }
+                          }}
+                          disabled={!canUseLlmAgreement}
+                        >
+                          <strong>LLM RAG</strong>
+                          <p>Send retrieved article context to Spark for a 0-1 agreement score.</p>
+                        </button>
+                      )}
+                    </div>
+                    <p className="setting-help-text">
+                      {stanceMethod === 'llm'
+                        ? (useChunking
+                          ? 'The final agreement meter averages Spark scores across semantic chunks the LLM marks relevant.'
+                          : 'The final agreement meter comes from Spark scoring the retrieved articles against your thesis.')
+                        : 'The final agreement meter comes from local NLI over extracted article claims.'}
+                      {!llmAgreementAvailable && supportedStanceMethods.includes('llm')
+                        ? ' Add SPARK_API_KEY or API_KEY to enable the LLM scorer.'
+                        : ''}
+                    </p>
+                  </div>
                 </div>
-              </div>
+              </section>
+
+              <section className="settings-stage-section">
+                <div className="settings-stage-heading">
+                  <span>Final ranking</span>
+                  <h4>Score weights</h4>
+                </div>
+                <div className="modal-settings-grid">
+                  <div className="weight-card full-row weights-group-card">
+                    <span>Final ranking weights</span>
+                    <div className="weight-pair-grid">
+                      <label className="paired-weight-field">
+                        <span>Topic / essay weight</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.05"
+                          value={topicWeight}
+                          onChange={(e) => setTopicWeight(parseWeightInput(e.target.value, topicWeight))}
+                        />
+                      </label>
+                      <label className="paired-weight-field">
+                        <span>Stance / thesis weight</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.05"
+                          value={stanceWeight}
+                          onChange={(e) => setStanceWeight(parseWeightInput(e.target.value, stanceWeight))}
+                        />
+                      </label>
+                      <label className="paired-weight-field">
+                        <span>Recency weight</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.05"
+                          value={recencyWeight}
+                          onChange={(e) => setRecencyWeight(parseWeightInput(e.target.value, recencyWeight))}
+                        />
+                      </label>
+                    </div>
+                    <div className="parameter-help-list">
+                      <p className="parameter-help-item">
+                        <strong>Topic / essay weight:</strong> how much the final score prioritizes whole-text topical similarity.
+                      </p>
+                      <p className="parameter-help-item">
+                        <strong>Stance / thesis weight:</strong> how much the final score prioritizes whether the selected claim aligns with an article&apos;s central claim.
+                      </p>
+                      <p className="parameter-help-item">
+                        <strong>Recency weight:</strong> how much the final score rewards newer publication dates.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </section>
             </div>
           </div>
         </div>

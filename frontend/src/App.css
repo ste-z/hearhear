@@ -2088,6 +2088,15 @@
   box-shadow: 0 20px 48px rgba(32, 33, 36, 0.1);
 }
 
+.settings-modal {
+  max-height: min(860px, calc(100vh - 40px));
+  overflow: hidden;
+}
+
+.settings-modal .modal-header {
+  flex: 0 0 auto;
+}
+
 .filter-modal {
   width: min(620px, 100%);
 }
@@ -2209,6 +2218,48 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.settings-scroll-pane {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto;
+  padding-right: 6px;
+  overscroll-behavior: contain;
+}
+
+.settings-stage-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-stage-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 2px 2px 0;
+}
+
+.settings-stage-heading span {
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5f6368;
+}
+
+.settings-stage-heading h4 {
+  margin: 0;
+  font-family: 'Kanit', sans-serif;
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: #202124;
 }
 
 .weight-card.full-row {
@@ -3169,7 +3220,10 @@
 
   .modal-card {
     padding: 20px;
-    
+  }
+
+  .settings-scroll-pane {
+    padding-right: 0;
   }
 
   .modal-header {
