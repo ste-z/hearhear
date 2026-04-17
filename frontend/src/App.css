@@ -2377,6 +2377,18 @@
   transform: translateY(-1px);
 }
 
+.retrieval-model-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.retrieval-model-button:disabled:hover {
+  border-color: var(--editorial-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--editorial-muted);
+  transform: none;
+}
+
 .retrieval-model-button.active {
   border-color: rgba(219, 192, 160, 0.32);
   background: rgba(219, 192, 160, 0.16);

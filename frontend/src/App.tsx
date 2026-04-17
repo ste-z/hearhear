@@ -24,11 +24,15 @@ type IntroStage = 0 | 1 | 2
 type EssayStep = 1 | 2
 type EssayThesisMode = 'candidate' | 'custom'
 type RerankSelectionMode = 'manual' | 'automatic'
+type StanceMethod = 'nli' | 'llm'
 
 type ConfigResponse = {
   use_llm: boolean
   default_retrieval_model?: string | null
   default_normalize_topic_scores?: boolean | null
+  default_stance_method?: string | null
+  supported_stance_methods?: string[] | null
+  llm_agreement_available?: boolean | null
   default_rerank_selection_mode?: string | null
   default_auto_rerank_thresholds?: Partial<Record<RetrievalModel, number | null>> | null
   max_auto_rerank_candidates?: number | null
@@ -73,6 +77,8 @@ const introClaimSequence = introClaimsByTopic[finalIntroTopic]
 const landingSeenStorageKey = 'hearhear.hasSeenLanding'
 const defaultSupportedRetrievalModels: RetrievalModel[] = ['svd', 'tfidf']
 const defaultRerankSelectionMode: RerankSelectionMode = 'automatic'
+const defaultStanceMethod: StanceMethod = 'nli'
+const defaultSupportedStanceMethods: StanceMethod[] = ['nli', 'llm']
 const defaultAutoRerankThresholds: Record<RetrievalModel, number> = {
   tfidf: 0.3,
   svd: 0.6,
@@ -94,6 +100,18 @@ const normalizeRetrievalModels = (value: unknown): RetrievalModel[] => {
 const isRerankSelectionMode = (value: unknown): value is RerankSelectionMode => (
   value === 'manual' || value === 'automatic'
 )
+
+const isStanceMethod = (value: unknown): value is StanceMethod => (
+  value === 'nli' || value === 'llm'
+)
+
+const normalizeStanceMethods = (value: unknown): StanceMethod[] => {
+  if (!Array.isArray(value)) return defaultSupportedStanceMethods
+
+  const filtered = value.filter(isStanceMethod)
+  const unique = Array.from(new Set(filtered))
+  return unique.length > 0 ? unique : defaultSupportedStanceMethods
+}
 
 const clampAutoRerankThreshold = (value: number): number => (
   Math.max(0, Math.min(1, value))
@@ -686,6 +704,11 @@ function App(): JSX.Element {
   const [recencyWeight, setRecencyWeight] = useState<number>(0.2)
   const [rerankTopK, setRerankTopK] = useState<number>(20)
   const [rerankSelectionMode, setRerankSelectionMode] = useState<RerankSelectionMode>(defaultRerankSelectionMode)
+  const [stanceMethod, setStanceMethod] = useState<StanceMethod>(defaultStanceMethod)
+  const [supportedStanceMethods, setSupportedStanceMethods] = useState<StanceMethod[]>(
+    defaultSupportedStanceMethods,
+  )
+  const [llmAgreementAvailable, setLlmAgreementAvailable] = useState<boolean>(false)
   const [autoRerankThresholds, setAutoRerankThresholds] = useState<Record<RetrievalModel, number>>(
     defaultAutoRerankThresholds,
   )
@@ -738,17 +761,29 @@ function App(): JSX.Element {
         if (!isActive) return
         setUseLlm(Boolean(data.use_llm))
         const supportedModels = normalizeRetrievalModels(data.supported_retrieval_models)
+        const supportedAgreementMethods = normalizeStanceMethods(data.supported_stance_methods)
         const preferredModel = isRetrievalModel(data.default_retrieval_model)
           ? data.default_retrieval_model
           : supportedModels[0]
         const resolvedModel = supportedModels.includes(preferredModel)
           ? preferredModel
           : supportedModels[0]
+        const preferredStanceMethod = isStanceMethod(data.default_stance_method)
+          ? data.default_stance_method
+          : defaultStanceMethod
+        const resolvedStanceMethod = supportedAgreementMethods.includes(preferredStanceMethod)
+          ? preferredStanceMethod
+          : supportedAgreementMethods[0]
         const nextMinArticleYear = normalizeConfigYear(data.min_article_year)
         const nextMaxArticleYear = normalizeConfigYear(data.max_article_year)
         setSupportedRetrievalModels(supportedModels)
+        setSupportedStanceMethods(supportedAgreementMethods)
+        setLlmAgreementAvailable(Boolean(data.llm_agreement_available))
         setRetrievalModel(currentModel => (
           supportedModels.includes(currentModel) ? currentModel : resolvedModel
+        ))
+        setStanceMethod(currentMethod => (
+          supportedAgreementMethods.includes(currentMethod) ? currentMethod : resolvedStanceMethod
         ))
         setRerankSelectionMode(currentMode => (
           isRerankSelectionMode(data.default_rerank_selection_mode)
@@ -787,6 +822,9 @@ function App(): JSX.Element {
         if (!isActive) return
         setUseLlm(false)
         setRerankSelectionMode(defaultRerankSelectionMode)
+        setStanceMethod(defaultStanceMethod)
+        setSupportedStanceMethods(defaultSupportedStanceMethods)
+        setLlmAgreementAvailable(false)
         setAutoRerankThresholds(defaultAutoRerankThresholds)
         setMaxAutoRerankCandidates(defaultMaxAutoRerankCandidates)
         setError(
@@ -935,7 +973,7 @@ function App(): JSX.Element {
     setEmptyResultsMessage(null)
     setError(null)
     setHasSubmittedSearch(false)
-  }, [inputMode, opinion, recencyWeight, rerankTopK, stanceWeight, topic, topicWeight])
+  }, [inputMode, opinion, recencyWeight, rerankTopK, stanceMethod, stanceWeight, topic, topicWeight])
 
   useEffect(() => {
     setArticles([])
@@ -951,6 +989,7 @@ function App(): JSX.Element {
     rerankSelectionMode,
     rerankTopK,
     retrievalModel,
+    stanceMethod,
     stanceWeight,
     topicWeight,
   ])
@@ -1123,6 +1162,8 @@ function App(): JSX.Element {
   const essayWorkflowStep = isEssayStepTwoAvailable ? essayActiveStep : 1
   const canUseSvd = supportedRetrievalModels.includes('svd')
   const canUseTfidf = supportedRetrievalModels.includes('tfidf')
+  const canUseNliAgreement = supportedStanceMethods.includes('nli')
+  const canUseLlmAgreement = supportedStanceMethods.includes('llm') && llmAgreementAvailable
   const isSvdEnabled = retrievalModel === 'svd'
   const canToggleSvd = canUseSvd && canUseTfidf
   const currentAutoRerankThreshold = autoRerankThresholds[retrievalModel]
@@ -1394,6 +1435,7 @@ function App(): JSX.Element {
           recency_weight: recencyWeight,
           top_k: rerankTopK,
           normalize_topic_scores: normalizeTopicScores,
+          stance_method: stanceMethod,
           retrieval_model: retrievalModel,
           rerank_selection_mode: rerankSelectionMode,
           rerank_threshold: currentAutoRerankThreshold,
@@ -1509,6 +1551,7 @@ function App(): JSX.Element {
           recency_weight: recencyWeight,
           top_k: rerankTopK,
           normalize_topic_scores: normalizeTopicScores,
+          stance_method: stanceMethod,
           retrieval_model: retrievalModel,
           rerank_selection_mode: rerankSelectionMode,
           rerank_threshold: currentAutoRerankThreshold,
@@ -1614,7 +1657,6 @@ function App(): JSX.Element {
     article.stance_neutral_prob != null ||
     article.stance_contradiction_prob != null
   )
-
   const getMatchSummary = (article: Article): string => {
     const hasWeightedRecency = (article.recency_weight ?? recencyWeight) > 0
 
@@ -2549,10 +2591,10 @@ function App(): JSX.Element {
                     <p className="about-section-label">Stage 2</p>
                     <p className="modal-copy">
                       <strong>Stage 2: Stance relevance.</strong> From the candidate articles identified
-                      in Stage 1, we then rank them based on how they relate to your opinion. We use a Natural Language
-                      Inference (NLI) model, DeBERTa (Decoding-enhanced BERT with disentangled
-                      attention), to compare your claim with each article&apos;s central argument
-                      (extracted using an LLM). The model estimates whether each article supports,
+                      in Stage 1, we then rank them based on how they relate to your opinion.
+                      The Agreement scorer in Settings can use either DeBERTa Natural Language
+                      Inference (NLI) over each extracted article claim or Spark LLM scoring over
+                      retrieved article context. The model estimates whether each article supports,
                       contradicts, or is neutral toward your stance. If you raise the recency
                       weight in Settings, newer publication dates also contribute to the final
                       ranking.
@@ -2589,10 +2631,10 @@ function App(): JSX.Element {
                     <p className="about-section-label">Stage 3</p>
                     <p className="modal-copy">
                       <strong>Stage 3: Thesis relevance.</strong> From the candidate articles identified
-                      in Stage 2, we then rank them based on how they relate to your selected thesis. We use a DeBERTa NLI
-                      model to compare your chosen thesis sentence with each article&apos;s central
-                      argument, which was extracted beforehand using an LLM. The model estimates
-                      whether each article supports, contradicts, or is neutral toward your thesis.
+                      in Stage 2, we then rank them based on how they relate to your selected thesis.
+                      The Agreement scorer in Settings can use either DeBERTa NLI over each
+                      extracted article claim or Spark LLM scoring over retrieved article context.
+                      The model estimates whether each article supports, contradicts, or is neutral toward your thesis.
                       If you raise the recency weight in Settings, newer publication dates also
                       contribute to the final ranking.
                     </p>
@@ -2785,8 +2827,46 @@ function App(): JSX.Element {
                 )}
                 <p className="setting-help-text">
                   {rerankSelectionMode === 'manual'
-                    ? 'How many top retrieval matches move into the NLI reranking stage.'
+                    ? 'How many top retrieval matches move into the agreement reranking stage.'
                     : `Articles at or above this raw topic relevance threshold move into the next stage, with at most ${maxAutoRerankCandidates} articles reranked.`}
+                </p>
+              </div>
+              <div className="weight-card full-row settings-selection-card">
+                <span>Agreement scorer</span>
+                <div className="retrieval-model-grid">
+                  {canUseNliAgreement && (
+                    <button
+                      type="button"
+                      className={`retrieval-model-button ${stanceMethod === 'nli' ? 'active' : ''}`}
+                      onClick={() => setStanceMethod('nli')}
+                    >
+                      <strong>NLI</strong>
+                      <p>Compare the thesis against each extracted article claim with DeBERTa.</p>
+                    </button>
+                  )}
+                  {supportedStanceMethods.includes('llm') && (
+                    <button
+                      type="button"
+                      className={`retrieval-model-button ${stanceMethod === 'llm' ? 'active' : ''}`}
+                      onClick={() => {
+                        if (canUseLlmAgreement) {
+                          setStanceMethod('llm')
+                        }
+                      }}
+                      disabled={!canUseLlmAgreement}
+                    >
+                      <strong>LLM RAG</strong>
+                      <p>Send retrieved article context to Spark for a 0-1 agreement score.</p>
+                    </button>
+                  )}
+                </div>
+                <p className="setting-help-text">
+                  {stanceMethod === 'llm'
+                    ? 'The final agreement meter comes from Spark scoring the retrieved articles against your thesis.'
+                    : 'The final agreement meter comes from local NLI over extracted article claims.'}
+                  {!llmAgreementAvailable && supportedStanceMethods.includes('llm')
+                    ? ' Add SPARK_API_KEY or API_KEY to enable the LLM scorer.'
+                    : ''}
                 </p>
               </div>
               <div className="weight-card full-row settings-toggle-card">

@@ -16,6 +16,8 @@ DEFAULT_RERANK_TOP_N = 20
 MAX_RERANK_TOP_N = 100
 RECENCY_HALF_LIFE_DAYS = 365.0 * 3.0
 DEFAULT_NORMALIZE_TOPIC_SCORES = False
+DEFAULT_STANCE_METHOD = "nli"
+SUPPORTED_STANCE_METHODS = ("nli", "llm")
 
 
 def build_stance_statement(topic, opinion):
@@ -52,6 +54,19 @@ def _resolve_top_n(top_n):
     except (TypeError, ValueError):
         resolved = DEFAULT_RERANK_TOP_N
     return max(1, min(MAX_RERANK_TOP_N, resolved))
+
+
+def normalize_stance_method(value, default=DEFAULT_STANCE_METHOD):
+    normalized = str(value or default).strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized in {"nli", "deberta", "deberta_nli"}:
+        return "nli"
+    if normalized in {"llm", "spark", "spark_llm", "rag", "llm_rag"}:
+        return "llm"
+
+    supported = ", ".join(SUPPORTED_STANCE_METHODS)
+    raise ValueError(
+        f"Unsupported stance_method {value!r}. Supported methods: {supported}."
+    )
 
 
 def _normalize_topic_scores(matches):
@@ -162,8 +177,10 @@ def rerank_article_matches_by_statement(
     recency_weight=DEFAULT_RECENCY_WEIGHT,
     top_n=DEFAULT_RERANK_TOP_N,
     normalize_topic_scores=DEFAULT_NORMALIZE_TOPIC_SCORES,
+    stance_method=DEFAULT_STANCE_METHOD,
 ):
     resolved_top_n = _resolve_top_n(top_n)
+    resolved_stance_method = normalize_stance_method(stance_method)
     matches = [dict(match) for match in list(article_matches)[:resolved_top_n]]
     if not matches:
         return []
@@ -174,6 +191,7 @@ def rerank_article_matches_by_statement(
         statement_chars=len(str(statement or "").strip()),
         top_n=resolved_top_n,
         normalize_topic_scores=bool(normalize_topic_scores),
+        stance_method=resolved_stance_method,
     )
     topic_weight, stance_weight, recency_weight = _resolve_weight_triplet(
         topic_weight,
@@ -202,9 +220,20 @@ def rerank_article_matches_by_statement(
         match_count=len(matches),
     )
 
-    nli_rows = score_nli_pairs(premises, query_statement) if premises else []
-    log_runtime_event("stance_rerank.nli_done", nli_row_count=len(nli_rows))
-    nli_by_match_idx = dict(zip(indexed_claims, nli_rows))
+    if resolved_stance_method == "llm":
+        from backend.stance_processing.llm_processor import score_llm_article_agreement
+
+        stance_rows = score_llm_article_agreement(matches, query_statement)
+        log_runtime_event(
+            "stance_rerank.llm_done",
+            llm_row_count=len(stance_rows),
+        )
+        stance_by_match_idx = dict(enumerate(stance_rows))
+    else:
+        nli_rows = score_nli_pairs(premises, query_statement) if premises else []
+        log_runtime_event("stance_rerank.nli_done", nli_row_count=len(nli_rows))
+        stance_by_match_idx = dict(zip(indexed_claims, nli_rows))
+
     topic_scores = _normalize_topic_scores(matches)
     reference_time = datetime.now(timezone.utc)
 
@@ -218,8 +247,8 @@ def rerank_article_matches_by_statement(
             match.get("date"),
             reference_time=reference_time,
         )
-        nli_row = nli_by_match_idx.get(idx)
-        if nli_row is None:
+        stance_row = stance_by_match_idx.get(idx)
+        if stance_row is None:
             stance_score = None
             stance_score_normalized = None
             entailment_prob = None
@@ -227,19 +256,28 @@ def rerank_article_matches_by_statement(
             contradiction_prob = None
             stance_label = None
         else:
-            entailment_prob = nli_row["entailment_prob"]
-            neutral_prob = nli_row["neutral_prob"]
-            contradiction_prob = nli_row["contradiction_prob"]
-            stance_score = nli_row["stance_score"]
-            stance_score_normalized = normalize_stance_score(stance_score)
-            stance_label = stance_label_from_probs(
-                entailment_prob=entailment_prob,
-                neutral_prob=neutral_prob,
-                contradiction_prob=contradiction_prob,
-            )
+            if resolved_stance_method == "llm":
+                entailment_prob = None
+                neutral_prob = None
+                contradiction_prob = None
+                stance_score = stance_row["stance_score"]
+                stance_score_normalized = stance_row["agreement_score"]
+                stance_label = None
+            else:
+                entailment_prob = stance_row["entailment_prob"]
+                neutral_prob = stance_row["neutral_prob"]
+                contradiction_prob = stance_row["contradiction_prob"]
+                stance_score = stance_row["stance_score"]
+                stance_score_normalized = normalize_stance_score(stance_score)
+                stance_label = stance_label_from_probs(
+                    entailment_prob=entailment_prob,
+                    neutral_prob=neutral_prob,
+                    contradiction_prob=contradiction_prob,
+                )
 
         match["query_statement"] = query_statement
         match["topic_statement"] = query_statement
+        match["stance_method"] = resolved_stance_method
         match["topic_score"] = topic_score
         match["topic_score_normalized"] = topic_score_normalized
         match["topic_score_display"] = topic_score_display
@@ -251,6 +289,9 @@ def rerank_article_matches_by_statement(
         match["stance_score"] = stance_score
         match["stance_score_normalized"] = stance_score_normalized
         match["stance_label"] = stance_label
+        match["llm_agreement_score"] = (
+            stance_score_normalized if resolved_stance_method == "llm" else None
+        )
         match["combined_score"] = _combined_score(
             topic_score=topic_score_display,
             stance_score=stance_score_normalized,
@@ -290,6 +331,7 @@ def rerank_article_matches(
     recency_weight=DEFAULT_RECENCY_WEIGHT,
     top_n=DEFAULT_RERANK_TOP_N,
     normalize_topic_scores=DEFAULT_NORMALIZE_TOPIC_SCORES,
+    stance_method=DEFAULT_STANCE_METHOD,
 ):
     return rerank_article_matches_by_statement(
         article_matches=article_matches,
@@ -299,4 +341,5 @@ def rerank_article_matches(
         recency_weight=recency_weight,
         top_n=top_n,
         normalize_topic_scores=normalize_topic_scores,
+        stance_method=stance_method,
     )

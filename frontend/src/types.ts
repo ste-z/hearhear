@@ -28,10 +28,12 @@ export type Article = {
   topic_score_is_normalized?: boolean | null
   recency_score_normalized?: number | null
   recency_weight?: number | null
+  stance_method?: string | null
   stance_label?: string | null
   stance_entailment_prob?: number | null
   stance_neutral_prob?: number | null
   stance_contradiction_prob?: number | null
+  llm_agreement_score?: number | null
   thesis_sentence?: string | null
   support_sentences?: string[] | null
   svd_query_chart_dimensions?: SvdLatentDimension[] | null

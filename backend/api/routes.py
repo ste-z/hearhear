@@ -27,7 +27,12 @@ from backend.services.retrieval_service import (
     SUPPORTED_RETRIEVAL_MODELS,
     stance_search,
 )
-from backend.stance_processing.stance_rerank import DEFAULT_NORMALIZE_TOPIC_SCORES
+from backend.stance_processing.stance_rerank import (
+    DEFAULT_NORMALIZE_TOPIC_SCORES,
+    DEFAULT_STANCE_METHOD,
+    SUPPORTED_STANCE_METHODS,
+    normalize_stance_method,
+)
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
 USE_LLM = False
@@ -114,6 +119,11 @@ def _extract_request_context():
         payload.get("normalize_topic_scores"),
         DEFAULT_NORMALIZE_TOPIC_SCORES,
     )
+    stance_method = normalize_stance_method(
+        payload.get("stance_method")
+        or payload.get("agreement_method")
+        or DEFAULT_STANCE_METHOD
+    )
     retrieval_model = normalize_retrieval_model(
         payload.get("retrieval_model")
         or payload.get("search_backend")
@@ -158,6 +168,7 @@ def _extract_request_context():
         "rerank_top_k": rerank_top_k,
         "candidate_top_n": candidate_top_n,
         "normalize_topic_scores": normalize_topic_scores,
+        "stance_method": stance_method,
         "retrieval_model": retrieval_model,
         "rerank_selection_mode": rerank_selection_mode,
         "rerank_threshold": rerank_threshold,
@@ -202,6 +213,11 @@ def register_routes(app):
             "use_llm": USE_LLM,
             "default_retrieval_model": DEFAULT_RETRIEVAL_MODEL,
             "default_normalize_topic_scores": DEFAULT_NORMALIZE_TOPIC_SCORES,
+            "default_stance_method": DEFAULT_STANCE_METHOD,
+            "supported_stance_methods": list(SUPPORTED_STANCE_METHODS),
+            "llm_agreement_available": bool(
+                (os.getenv("SPARK_API_KEY") or os.getenv("API_KEY") or "").strip()
+            ),
             "supported_retrieval_models": list(SUPPORTED_RETRIEVAL_MODELS),
             "default_rerank_selection_mode": DEFAULT_RERANK_SELECTION_MODE,
             "supported_rerank_selection_modes": list(SUPPORTED_RERANK_SELECTION_MODES),
@@ -225,6 +241,7 @@ def register_routes(app):
                 opinion_chars=len(context["opinion"]),
                 rerank_top_k=context["rerank_top_k"],
                 normalize_topic_scores=context["normalize_topic_scores"],
+                stance_method=context["stance_method"],
                 rerank_selection_mode=context["rerank_selection_mode"],
                 rerank_threshold=context["rerank_threshold"],
             )
@@ -241,6 +258,7 @@ def register_routes(app):
                     year_start=context["year_start"],
                     year_end=context["year_end"],
                     normalize_topic_scores=context["normalize_topic_scores"],
+                    stance_method=context["stance_method"],
                     rerank_selection_mode=context["rerank_selection_mode"],
                     rerank_threshold=context["rerank_threshold"],
                 )
@@ -257,6 +275,7 @@ def register_routes(app):
                     year_start=context["year_start"],
                     year_end=context["year_end"],
                     normalize_topic_scores=context["normalize_topic_scores"],
+                    stance_method=context["stance_method"],
                     rerank_selection_mode=context["rerank_selection_mode"],
                     rerank_threshold=context["rerank_threshold"],
                 )
