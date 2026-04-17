@@ -26,6 +26,7 @@ type EssayStep = 1 | 2
 type EssayThesisMode = 'candidate' | 'custom'
 type RerankSelectionMode = 'manual' | 'automatic'
 type StanceMethod = 'nli' | 'llm'
+type ChunkingMode = 'none' | 'paragraph' | 'semantic'
 
 type ConfigResponse = {
   use_llm: boolean
@@ -33,6 +34,8 @@ type ConfigResponse = {
   default_normalize_topic_scores?: boolean | null
   default_stance_method?: string | null
   default_use_chunking?: boolean | null
+  default_chunking_mode?: string | null
+  supported_chunking_modes?: string[] | null
   supported_stance_methods?: string[] | null
   llm_agreement_available?: boolean | null
   default_rerank_selection_mode?: string | null
@@ -81,6 +84,22 @@ const defaultSupportedRetrievalModels: RetrievalModel[] = ['svd', 'tfidf']
 const defaultRerankSelectionMode: RerankSelectionMode = 'automatic'
 const defaultStanceMethod: StanceMethod = 'nli'
 const defaultSupportedStanceMethods: StanceMethod[] = ['nli', 'llm']
+const defaultChunkingMode: ChunkingMode = 'none'
+const defaultSupportedChunkingModes: ChunkingMode[] = ['none', 'paragraph', 'semantic']
+const chunkingModeDetails: Record<ChunkingMode, { label: string, description: string }> = {
+  none: {
+    label: 'No chunking',
+    description: 'Score each article as a whole.',
+  },
+  paragraph: {
+    label: 'Paragraph chunking',
+    description: 'Score paragraph chunks with Spark.',
+  },
+  semantic: {
+    label: 'Semantic chunking',
+    description: 'Split where adjacent SVD sentence vectors shift.',
+  },
+}
 const defaultAutoRerankThresholds: Record<RetrievalModel, number> = {
   tfidf: 0.3,
   svd: 0.6,
@@ -107,12 +126,24 @@ const isStanceMethod = (value: unknown): value is StanceMethod => (
   value === 'nli' || value === 'llm'
 )
 
+const isChunkingMode = (value: unknown): value is ChunkingMode => (
+  value === 'none' || value === 'paragraph' || value === 'semantic'
+)
+
 const normalizeStanceMethods = (value: unknown): StanceMethod[] => {
   if (!Array.isArray(value)) return defaultSupportedStanceMethods
 
   const filtered = value.filter(isStanceMethod)
   const unique = Array.from(new Set(filtered))
   return unique.length > 0 ? unique : defaultSupportedStanceMethods
+}
+
+const normalizeChunkingModes = (value: unknown): ChunkingMode[] => {
+  if (!Array.isArray(value)) return defaultSupportedChunkingModes
+
+  const filtered = value.filter(isChunkingMode)
+  const unique = Array.from(new Set(filtered))
+  return unique.length > 0 ? unique : defaultSupportedChunkingModes
 }
 
 const clampAutoRerankThreshold = (value: number): number => (
@@ -707,9 +738,12 @@ function App(): JSX.Element {
   const [rerankTopK, setRerankTopK] = useState<number>(20)
   const [rerankSelectionMode, setRerankSelectionMode] = useState<RerankSelectionMode>(defaultRerankSelectionMode)
   const [stanceMethod, setStanceMethod] = useState<StanceMethod>(defaultStanceMethod)
-  const [useChunking, setUseChunking] = useState<boolean>(false)
+  const [chunkingMode, setChunkingMode] = useState<ChunkingMode>(defaultChunkingMode)
   const [supportedStanceMethods, setSupportedStanceMethods] = useState<StanceMethod[]>(
     defaultSupportedStanceMethods,
+  )
+  const [supportedChunkingModes, setSupportedChunkingModes] = useState<ChunkingMode[]>(
+    defaultSupportedChunkingModes,
   )
   const [llmAgreementAvailable, setLlmAgreementAvailable] = useState<boolean>(false)
   const [autoRerankThresholds, setAutoRerankThresholds] = useState<Record<RetrievalModel, number>>(
@@ -753,6 +787,7 @@ function App(): JSX.Element {
   const lastAppliedYearRangeRef = useRef<{ yearStart: number | null, yearEnd: number | null } | null>(null)
   const [isSearchStageVisible, setIsSearchStageVisible] = useState<boolean>(hasSeenLandingRef.current)
   const [hasSubmittedSearch, setHasSubmittedSearch] = useState<boolean>(false)
+  const useChunking = chunkingMode !== 'none'
 
   useEffect(() => {
     let isActive = true
@@ -765,6 +800,7 @@ function App(): JSX.Element {
         setUseLlm(Boolean(data.use_llm))
         const supportedModels = normalizeRetrievalModels(data.supported_retrieval_models)
         const supportedAgreementMethods = normalizeStanceMethods(data.supported_stance_methods)
+        const supportedChunkingOptions = normalizeChunkingModes(data.supported_chunking_modes)
         const preferredModel = isRetrievalModel(data.default_retrieval_model)
           ? data.default_retrieval_model
           : supportedModels[0]
@@ -777,10 +813,19 @@ function App(): JSX.Element {
         const resolvedStanceMethod = supportedAgreementMethods.includes(preferredStanceMethod)
           ? preferredStanceMethod
           : supportedAgreementMethods[0]
+        const preferredChunkingMode = isChunkingMode(data.default_chunking_mode)
+          ? data.default_chunking_mode
+          : (data.default_use_chunking ? 'paragraph' : defaultChunkingMode)
+        const resolvedChunkingMode = supportedChunkingOptions.includes(preferredChunkingMode)
+          ? preferredChunkingMode
+          : (supportedChunkingOptions.includes(defaultChunkingMode)
+            ? defaultChunkingMode
+            : supportedChunkingOptions[0])
         const nextMinArticleYear = normalizeConfigYear(data.min_article_year)
         const nextMaxArticleYear = normalizeConfigYear(data.max_article_year)
         setSupportedRetrievalModels(supportedModels)
         setSupportedStanceMethods(supportedAgreementMethods)
+        setSupportedChunkingModes(supportedChunkingOptions)
         setLlmAgreementAvailable(Boolean(data.llm_agreement_available))
         setRetrievalModel(currentModel => (
           supportedModels.includes(currentModel) ? currentModel : resolvedModel
@@ -788,7 +833,9 @@ function App(): JSX.Element {
         setStanceMethod(currentMethod => (
           supportedAgreementMethods.includes(currentMethod) ? currentMethod : resolvedStanceMethod
         ))
-        setUseChunking(Boolean(data.default_use_chunking))
+        setChunkingMode(currentMode => (
+          supportedChunkingOptions.includes(currentMode) ? currentMode : resolvedChunkingMode
+        ))
         setRerankSelectionMode(currentMode => (
           isRerankSelectionMode(data.default_rerank_selection_mode)
             ? data.default_rerank_selection_mode
@@ -827,8 +874,9 @@ function App(): JSX.Element {
         setUseLlm(false)
         setRerankSelectionMode(defaultRerankSelectionMode)
         setStanceMethod(defaultStanceMethod)
-        setUseChunking(false)
+        setChunkingMode(defaultChunkingMode)
         setSupportedStanceMethods(defaultSupportedStanceMethods)
+        setSupportedChunkingModes(defaultSupportedChunkingModes)
         setLlmAgreementAvailable(false)
         setAutoRerankThresholds(defaultAutoRerankThresholds)
         setMaxAutoRerankCandidates(defaultMaxAutoRerankCandidates)
@@ -978,7 +1026,7 @@ function App(): JSX.Element {
     setEmptyResultsMessage(null)
     setError(null)
     setHasSubmittedSearch(false)
-  }, [inputMode, opinion, recencyWeight, rerankTopK, stanceMethod, stanceWeight, topic, topicWeight, useChunking])
+  }, [chunkingMode, inputMode, opinion, recencyWeight, rerankTopK, stanceMethod, stanceWeight, topic, topicWeight])
 
   useEffect(() => {
     setArticles([])
@@ -997,7 +1045,7 @@ function App(): JSX.Element {
     stanceMethod,
     stanceWeight,
     topicWeight,
-    useChunking,
+    chunkingMode,
   ])
 
   useEffect(() => {
@@ -1444,6 +1492,7 @@ function App(): JSX.Element {
           normalize_topic_scores: normalizeTopicScores,
           stance_method: stanceMethod,
           use_chunking: useChunking,
+          chunking_mode: chunkingMode,
           retrieval_model: retrievalModel,
           rerank_selection_mode: rerankSelectionMode,
           rerank_threshold: currentAutoRerankThreshold,
@@ -1561,6 +1610,7 @@ function App(): JSX.Element {
           normalize_topic_scores: normalizeTopicScores,
           stance_method: stanceMethod,
           use_chunking: useChunking,
+          chunking_mode: chunkingMode,
           retrieval_model: retrievalModel,
           rerank_selection_mode: rerankSelectionMode,
           rerank_threshold: currentAutoRerankThreshold,
@@ -1673,13 +1723,20 @@ function App(): JSX.Element {
     Array.isArray(article.llm_relevant_paragraphs) &&
     article.llm_relevant_paragraphs.length > 0
   )
+  const getLlmChunkNoun = (article: Article, plural = true): string => {
+    if (article.llm_chunking_mode === 'semantic') {
+      return plural ? 'semantic chunks' : 'Semantic chunk'
+    }
+    return plural ? 'paragraphs' : 'Paragraph'
+  }
   const getParagraphEvidenceHint = (article: Article): string => {
     const relatedCount = article.llm_related_chunk_count ?? article.llm_relevant_paragraphs?.length ?? 0
     const totalCount = article.llm_chunk_count ?? 0
+    const chunkNoun = getLlmChunkNoun(article)
     if (relatedCount > 0 && totalCount > 0) {
-      return `Expand to inspect the strongest ${Math.min(relatedCount, article.llm_relevant_paragraphs?.length ?? relatedCount)} of ${relatedCount} related paragraphs.`
+      return `Expand to inspect the strongest ${Math.min(relatedCount, article.llm_relevant_paragraphs?.length ?? relatedCount)} of ${relatedCount} related ${chunkNoun}.`
     }
-    return 'Expand to inspect the paragraphs behind this LLM score.'
+    return `Expand to inspect the ${chunkNoun} behind this LLM score.`
   }
   const paragraphKey = (
     article: Article,
@@ -2447,7 +2504,7 @@ function App(): JSX.Element {
                       <details className="content-disclosure paragraph-evidence-disclosure">
                         <summary className="content-disclosure-summary">
                           <span className="content-disclosure-copy">
-                            <span className="content-disclosure-title">Relevant paragraphs</span>
+                            <span className="content-disclosure-title">{`Relevant ${getLlmChunkNoun(article)}`}</span>
                             <span className="content-disclosure-hint">{getParagraphEvidenceHint(article)}</span>
                           </span>
                           <span className="content-disclosure-status" aria-hidden="true" />
@@ -2457,7 +2514,7 @@ function App(): JSX.Element {
                           {(article.llm_relevant_paragraphs ?? []).map((paragraph, index) => (
                             <div key={paragraphKey(article, paragraph, index)} className="paragraph-evidence-item">
                               <div className="paragraph-evidence-header">
-                                <span>{`Paragraph ${(paragraph.paragraph_index ?? index) + 1}`}</span>
+                                <span>{`${getLlmChunkNoun(article, false)} ${(paragraph.paragraph_index ?? index) + 1}`}</span>
                                 <strong>{formatPercent(paragraph.agreement_score)}</strong>
                               </div>
                               <p>{paragraph.text}</p>
@@ -2954,7 +3011,7 @@ function App(): JSX.Element {
                       disabled={useChunking}
                     >
                       <strong>NLI</strong>
-                      <p>{useChunking ? 'Disabled while paragraph chunking is on.' : 'Compare the thesis against each extracted article claim with DeBERTa.'}</p>
+                      <p>{useChunking ? 'Disabled while chunking is on.' : 'Compare the thesis against each extracted article claim with DeBERTa.'}</p>
                     </button>
                   )}
                   {supportedStanceMethods.includes('llm') && (
@@ -2976,7 +3033,7 @@ function App(): JSX.Element {
                 <p className="setting-help-text">
                   {stanceMethod === 'llm'
                     ? (useChunking
-                      ? 'The final agreement meter averages Spark scores across paragraphs the LLM marks relevant.'
+                      ? `The final agreement meter averages Spark scores across ${chunkingMode === 'semantic' ? 'semantic chunks' : 'paragraphs'} the LLM marks relevant.`
                       : 'The final agreement meter comes from Spark scoring the retrieved articles against your thesis.')
                     : 'The final agreement meter comes from local NLI over extracted article claims.'}
                   {!llmAgreementAvailable && supportedStanceMethods.includes('llm')
@@ -2984,38 +3041,41 @@ function App(): JSX.Element {
                     : ''}
                 </p>
               </div>
-              <div className="weight-card full-row settings-toggle-card">
-                <div className="settings-toggle-row">
-                  <div className="settings-toggle-copy">
-                    <span>Paragraph chunking</span>
-                    <p className="setting-help-text">
-                      When on, Spark scores article paragraphs, averages the related paragraph scores, and hides articles with no related paragraphs.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className={`settings-switch-button ${useChunking ? 'active' : ''}`}
-                    aria-pressed={useChunking}
-                    onClick={() => {
-                      if (!canUseChunking) return
-                      setUseChunking(current => {
-                        const nextValue = !current
-                        if (nextValue) {
-                          setStanceMethod('llm')
-                        }
-                        return nextValue
-                      })
-                    }}
-                    disabled={!canUseChunking}
-                  >
-                    <span className="settings-switch-label">
-                      {useChunking ? 'Chunked' : 'Article-level'}
-                    </span>
-                    <span className="retrieval-toggle-switch" aria-hidden="true">
-                      <span className="retrieval-toggle-thumb" />
-                    </span>
-                  </button>
+              <div className="weight-card full-row settings-selection-card">
+                <span>Chunking</span>
+                <div className="retrieval-model-grid chunking-mode-grid">
+                  {defaultSupportedChunkingModes
+                    .filter(mode => supportedChunkingModes.includes(mode))
+                    .map((mode) => {
+                      const isDisabled = mode !== 'none' && !canUseChunking
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={`retrieval-model-button ${chunkingMode === mode ? 'active' : ''}`}
+                          onClick={() => {
+                            if (isDisabled) return
+                            setChunkingMode(mode)
+                            if (mode !== 'none') {
+                              setStanceMethod('llm')
+                            }
+                          }}
+                          disabled={isDisabled}
+                        >
+                          <strong>{chunkingModeDetails[mode].label}</strong>
+                          <p>{chunkingModeDetails[mode].description}</p>
+                        </button>
+                      )
+                    })}
                 </div>
+                <p className="setting-help-text">
+                  {useChunking
+                    ? 'Chunked reranking uses Spark and hides articles with no related chunks.'
+                    : 'Article-level scoring keeps the selected agreement scorer.'}
+                  {!llmAgreementAvailable && supportedChunkingModes.some(mode => mode !== 'none')
+                    ? ' Add SPARK_API_KEY or API_KEY to enable chunking.'
+                    : ''}
+                </p>
               </div>
               <div className="weight-card full-row settings-toggle-card">
                 <div className="settings-toggle-row">

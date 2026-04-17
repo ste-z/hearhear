@@ -523,6 +523,7 @@ def stance_search(
     rerank_threshold=None,
     stance_method="nli",
     use_chunking=False,
+    chunking_mode="none",
 ):
     from backend.stance_processing.stance_rerank import rerank_article_matches
 
@@ -570,6 +571,7 @@ def stance_search(
         rerank_threshold=candidate_payload.get("rerank_threshold"),
         stance_method=stance_method,
         use_chunking=bool(use_chunking),
+        chunking_mode=chunking_mode,
     )
     reranked = rerank_article_matches(
         article_matches=topic_matches,
@@ -582,6 +584,7 @@ def stance_search(
         normalize_topic_scores=normalize_topic_scores,
         stance_method=stance_method,
         use_chunking=use_chunking,
+        chunking_mode=chunking_mode,
     )
     return {
         "results": reranked,

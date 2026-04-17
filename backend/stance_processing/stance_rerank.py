@@ -18,6 +18,8 @@ RECENCY_HALF_LIFE_DAYS = 365.0 * 3.0
 DEFAULT_NORMALIZE_TOPIC_SCORES = False
 DEFAULT_STANCE_METHOD = "nli"
 SUPPORTED_STANCE_METHODS = ("nli", "llm")
+DEFAULT_CHUNKING_MODE = "none"
+SUPPORTED_CHUNKING_MODES = ("none", "paragraph", "semantic")
 
 
 def build_stance_statement(topic, opinion):
@@ -66,6 +68,53 @@ def normalize_stance_method(value, default=DEFAULT_STANCE_METHOD):
     supported = ", ".join(SUPPORTED_STANCE_METHODS)
     raise ValueError(
         f"Unsupported stance_method {value!r}. Supported methods: {supported}."
+    )
+
+
+def normalize_chunking_mode(value, default=DEFAULT_CHUNKING_MODE):
+    if isinstance(value, bool):
+        return "paragraph" if value else default
+
+    normalized = str(value or default).strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized in {
+        "",
+        "0",
+        "false",
+        "no",
+        "none",
+        "off",
+        "article",
+        "article_level",
+        "whole_article",
+        "no_chunking",
+        "no_chunks",
+    }:
+        return "none"
+    if normalized in {
+        "1",
+        "true",
+        "yes",
+        "on",
+        "chunking",
+        "chunked",
+        "paragraph",
+        "paragraphs",
+        "paragraph_chunking",
+        "paragraph_chunks",
+        "paragraph_chunkung",
+    }:
+        return "paragraph"
+    if normalized in {
+        "semantic",
+        "semantic_chunking",
+        "semantic_chunks",
+        "semantic_chunk",
+    }:
+        return "semantic"
+
+    supported = ", ".join(SUPPORTED_CHUNKING_MODES)
+    raise ValueError(
+        f"Unsupported chunking_mode {value!r}. Supported modes: {supported}."
     )
 
 
@@ -179,9 +228,16 @@ def rerank_article_matches_by_statement(
     normalize_topic_scores=DEFAULT_NORMALIZE_TOPIC_SCORES,
     stance_method=DEFAULT_STANCE_METHOD,
     use_chunking=False,
+    chunking_mode=DEFAULT_CHUNKING_MODE,
 ):
     resolved_top_n = _resolve_top_n(top_n)
-    resolved_stance_method = "llm" if use_chunking else normalize_stance_method(stance_method)
+    resolved_chunking_mode = normalize_chunking_mode(chunking_mode)
+    if use_chunking and resolved_chunking_mode == "none":
+        resolved_chunking_mode = "paragraph"
+    resolved_use_chunking = resolved_chunking_mode != "none"
+    resolved_stance_method = (
+        "llm" if resolved_use_chunking else normalize_stance_method(stance_method)
+    )
     matches = [dict(match) for match in list(article_matches)[:resolved_top_n]]
     if not matches:
         return []
@@ -193,7 +249,8 @@ def rerank_article_matches_by_statement(
         top_n=resolved_top_n,
         normalize_topic_scores=bool(normalize_topic_scores),
         stance_method=resolved_stance_method,
-        use_chunking=bool(use_chunking),
+        use_chunking=bool(resolved_use_chunking),
+        chunking_mode=resolved_chunking_mode,
     )
     topic_weight, stance_weight, recency_weight = _resolve_weight_triplet(
         topic_weight,
@@ -228,17 +285,19 @@ def rerank_article_matches_by_statement(
             score_llm_article_agreement_by_paragraphs,
         )
 
-        if use_chunking:
+        if resolved_use_chunking:
             stance_rows = score_llm_article_agreement_by_paragraphs(
                 matches,
                 query_statement,
+                chunking_mode=resolved_chunking_mode,
             )
         else:
             stance_rows = score_llm_article_agreement(matches, query_statement)
         log_runtime_event(
             "stance_rerank.llm_done",
             llm_row_count=len(stance_rows),
-            use_chunking=bool(use_chunking),
+            use_chunking=bool(resolved_use_chunking),
+            chunking_mode=resolved_chunking_mode,
         )
         stance_by_match_idx = dict(enumerate(stance_rows))
     else:
@@ -271,6 +330,7 @@ def rerank_article_matches_by_statement(
             llm_relevant_paragraphs = None
             llm_chunk_count = None
             llm_related_chunk_count = None
+            llm_chunking_mode = None
         else:
             if resolved_stance_method == "llm":
                 entailment_prob = None
@@ -283,6 +343,7 @@ def rerank_article_matches_by_statement(
                 llm_relevant_paragraphs = stance_row.get("llm_relevant_paragraphs")
                 llm_chunk_count = stance_row.get("llm_chunk_count")
                 llm_related_chunk_count = stance_row.get("llm_related_chunk_count")
+                llm_chunking_mode = stance_row.get("llm_chunking_mode")
             else:
                 entailment_prob = stance_row["entailment_prob"]
                 neutral_prob = stance_row["neutral_prob"]
@@ -298,6 +359,7 @@ def rerank_article_matches_by_statement(
                 llm_relevant_paragraphs = None
                 llm_chunk_count = None
                 llm_related_chunk_count = None
+                llm_chunking_mode = None
 
         match["query_statement"] = query_statement
         match["topic_statement"] = query_statement
@@ -318,7 +380,10 @@ def rerank_article_matches_by_statement(
         )
         match["llm_irrelevant"] = llm_irrelevant
         match["llm_chunking_enabled"] = bool(
-            resolved_stance_method == "llm" and use_chunking
+            resolved_stance_method == "llm" and resolved_use_chunking
+        )
+        match["llm_chunking_mode"] = (
+            llm_chunking_mode if resolved_stance_method == "llm" and resolved_use_chunking else None
         )
         match["llm_relevant_paragraphs"] = llm_relevant_paragraphs or []
         match["llm_chunk_count"] = llm_chunk_count
@@ -365,6 +430,7 @@ def rerank_article_matches(
     normalize_topic_scores=DEFAULT_NORMALIZE_TOPIC_SCORES,
     stance_method=DEFAULT_STANCE_METHOD,
     use_chunking=False,
+    chunking_mode=DEFAULT_CHUNKING_MODE,
 ):
     return rerank_article_matches_by_statement(
         article_matches=article_matches,
@@ -376,4 +442,5 @@ def rerank_article_matches(
         normalize_topic_scores=normalize_topic_scores,
         stance_method=stance_method,
         use_chunking=use_chunking,
+        chunking_mode=chunking_mode,
     )

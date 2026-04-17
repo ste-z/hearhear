@@ -18,8 +18,28 @@ from backend.stance_processing.llm_processor import (
     score_llm_article_agreement,
     score_llm_article_agreement_by_paragraphs,
 )
+from backend.stance_processing.stance_rerank import (
+    DEFAULT_CHUNKING_MODE,
+    normalize_chunking_mode,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_bool(value, default=False):
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
 
 
 def llm_search_decision(client, user_message):
@@ -123,11 +143,23 @@ def register_chat_route(app, json_search):
         if not isinstance(articles, list) or not articles:
             return jsonify({"error": "A non-empty articles list is required"}), 400
 
+        raw_chunking_mode = data.get("chunking_mode") or data.get("chunking")
+        legacy_use_chunking = _coerce_bool(
+            data.get("use_chunking")
+            if "use_chunking" in data
+            else data.get("paragraph_chunking"),
+            False,
+        )
+        chunking_mode = normalize_chunking_mode(raw_chunking_mode, DEFAULT_CHUNKING_MODE)
+        if raw_chunking_mode is None and legacy_use_chunking and chunking_mode == "none":
+            chunking_mode = "paragraph"
+
         try:
-            if data.get("use_chunking") or data.get("paragraph_chunking"):
+            if chunking_mode != "none":
                 scores = score_llm_article_agreement_by_paragraphs(
                     articles=articles,
                     thesis=thesis,
+                    chunking_mode=chunking_mode,
                 )
             else:
                 scores = score_llm_article_agreement(

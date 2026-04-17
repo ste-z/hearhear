@@ -36,6 +36,7 @@ export type Article = {
   llm_agreement_score?: number | null
   llm_irrelevant?: boolean | null
   llm_chunking_enabled?: boolean | null
+  llm_chunking_mode?: string | null
   llm_chunk_count?: number | null
   llm_related_chunk_count?: number | null
   llm_relevant_paragraphs?: LlmRelevantParagraph[] | null
@@ -53,6 +54,8 @@ export type LlmRelevantParagraph = {
   paragraph_index?: number | null
   text: string
   agreement_score?: number | null
+  sentence_start_index?: number | null
+  sentence_end_index?: number | null
 }
 
 export type ArticleSearchResponse = {

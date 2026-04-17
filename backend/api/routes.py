@@ -28,9 +28,12 @@ from backend.services.retrieval_service import (
     stance_search,
 )
 from backend.stance_processing.stance_rerank import (
+    DEFAULT_CHUNKING_MODE,
     DEFAULT_NORMALIZE_TOPIC_SCORES,
     DEFAULT_STANCE_METHOD,
+    SUPPORTED_CHUNKING_MODES,
     SUPPORTED_STANCE_METHODS,
+    normalize_chunking_mode,
     normalize_stance_method,
 )
 
@@ -119,12 +122,17 @@ def _extract_request_context():
         payload.get("normalize_topic_scores"),
         DEFAULT_NORMALIZE_TOPIC_SCORES,
     )
-    use_chunking = _coerce_bool(
+    raw_chunking_mode = payload.get("chunking_mode") or payload.get("chunking")
+    legacy_use_chunking = _coerce_bool(
         payload.get("use_chunking")
         if "use_chunking" in payload
         else payload.get("paragraph_chunking"),
         False,
     )
+    chunking_mode = normalize_chunking_mode(raw_chunking_mode, DEFAULT_CHUNKING_MODE)
+    if raw_chunking_mode is None and legacy_use_chunking and chunking_mode == "none":
+        chunking_mode = "paragraph"
+    use_chunking = chunking_mode != "none"
     stance_method = normalize_stance_method(
         payload.get("stance_method")
         or payload.get("agreement_method")
@@ -177,6 +185,7 @@ def _extract_request_context():
         "candidate_top_n": candidate_top_n,
         "normalize_topic_scores": normalize_topic_scores,
         "use_chunking": use_chunking,
+        "chunking_mode": chunking_mode,
         "stance_method": stance_method,
         "retrieval_model": retrieval_model,
         "rerank_selection_mode": rerank_selection_mode,
@@ -225,6 +234,8 @@ def register_routes(app):
             "default_stance_method": DEFAULT_STANCE_METHOD,
             "supported_stance_methods": list(SUPPORTED_STANCE_METHODS),
             "default_use_chunking": False,
+            "default_chunking_mode": DEFAULT_CHUNKING_MODE,
+            "supported_chunking_modes": list(SUPPORTED_CHUNKING_MODES),
             "llm_agreement_available": bool(
                 (os.getenv("SPARK_API_KEY") or os.getenv("API_KEY") or "").strip()
             ),
@@ -252,6 +263,7 @@ def register_routes(app):
                 rerank_top_k=context["rerank_top_k"],
                 normalize_topic_scores=context["normalize_topic_scores"],
                 use_chunking=context["use_chunking"],
+                chunking_mode=context["chunking_mode"],
                 stance_method=context["stance_method"],
                 rerank_selection_mode=context["rerank_selection_mode"],
                 rerank_threshold=context["rerank_threshold"],
@@ -271,6 +283,7 @@ def register_routes(app):
                     normalize_topic_scores=context["normalize_topic_scores"],
                     stance_method=context["stance_method"],
                     use_chunking=context["use_chunking"],
+                    chunking_mode=context["chunking_mode"],
                     rerank_selection_mode=context["rerank_selection_mode"],
                     rerank_threshold=context["rerank_threshold"],
                 )
@@ -289,6 +302,7 @@ def register_routes(app):
                     normalize_topic_scores=context["normalize_topic_scores"],
                     stance_method=context["stance_method"],
                     use_chunking=context["use_chunking"],
+                    chunking_mode=context["chunking_mode"],
                     rerank_selection_mode=context["rerank_selection_mode"],
                     rerank_threshold=context["rerank_threshold"],
                 )

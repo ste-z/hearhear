@@ -4,6 +4,10 @@ import re
 
 from backend.runtime.runtime_debug import log_runtime_event
 from backend.text_processing.paragraph_splitter import paragraph_rows_from_text
+from backend.text_processing.semantic_chunker import (
+    DEFAULT_SEMANTIC_BREAK_SIMILARITY_THRESHOLD,
+    semantic_chunk_rows_from_text,
+)
 
 
 DEFAULT_LLM_BATCH_SIZE = 20
@@ -12,6 +16,7 @@ DEFAULT_LLM_PARAGRAPH_BATCH_SIZE = 100
 DEFAULT_MAX_PARAGRAPHS_PER_ARTICLE = 40
 DEFAULT_MAX_PARAGRAPH_CHARS = 2500
 DEFAULT_RELEVANT_PARAGRAPH_COUNT = 20
+DEFAULT_CHUNKING_MODE = "paragraph"
 SPARK_API_KEY_ENV_NAMES = ("SPARK_API_KEY", "API_KEY")
 
 LLM_ARTICLE_AGREEMENT_SYSTEM_PROMPT = """
@@ -43,32 +48,33 @@ return article IDs, labels, rationale, markdown, comments, or prose. Example:
 """.strip()
 
 LLM_PARAGRAPH_AGREEMENT_SYSTEM_PROMPT = """
-You evaluate retrieved article paragraphs against a user's thesis.
+You evaluate retrieved article chunks against a user's thesis. A chunk may be a
+paragraph or a semantic group of adjacent sentences.
 
-Use only the paragraph context supplied by the application. Do not rely on
+Use only the chunk context supplied by the application. Do not rely on
 outside knowledge of the publication, author, topic, or article. Judge each
-paragraph independently, not whether the whole article agrees.
+chunk independently, not whether the whole article agrees.
 
-For each paragraph, assign an agreement score from 0 to 1:
-- 1.00 means the paragraph directly supports the user's thesis.
-- 0.75 means the paragraph mostly supports the thesis, with qualifications.
-- 0.50 means the paragraph is related but neutral, descriptive, background,
+For each chunk, assign an agreement score from 0 to 1:
+- 1.00 means the chunk directly supports the user's thesis.
+- 0.75 means the chunk mostly supports the thesis, with qualifications.
+- 0.50 means the chunk is related but neutral, descriptive, background,
   mixed, unclear, or not stance-bearing.
-- 0.25 means the paragraph mostly pushes against the thesis, with qualifications.
-- 0.00 means the paragraph directly contradicts the thesis.
+- 0.25 means the chunk mostly pushes against the thesis, with qualifications.
+- 0.00 means the chunk directly contradicts the thesis.
 
 Also assign an irrelevant flag:
-- 1 means the paragraph is completely unrelated to the broad topic, issue,
+- 1 means the chunk is completely unrelated to the broad topic, issue,
   actors, policy area, cause, consequence, or debate in the user's thesis.
-- 0 means the paragraph is related or even broadly related.
+- 0 means the chunk is related or even broadly related.
 Be conservative. When in doubt, use 0. Background, evidence, context,
 counterarguments, nearby subtopics, causes, consequences, and policy details are
 relevant if they connect to the broad issue. Energy policy is related to climate
-change. An article paragraph about free buses is not related to free speech.
+change. A chunk about free buses is not related to free speech.
 
 Return valid JSON only: a single array in the exact same order as the
-paragraph_ids list. Each item must be [agreement_score, irrelevant_flag]. Do not
-return paragraph IDs, labels, rationale, markdown, comments, or prose. Example:
+chunk_ids list. Each item must be [agreement_score, irrelevant_flag]. Do not
+return chunk IDs, labels, rationale, markdown, comments, or prose. Example:
 [[0.9, 0], [0.5, 0], [0.5, 1]]
 """.strip()
 
@@ -141,6 +147,13 @@ def _article_value(article, key, default=None):
     return getattr(article, key, default)
 
 
+def _normalize_chunking_mode(value):
+    text = str(value or DEFAULT_CHUNKING_MODE).strip().lower().replace("-", "_").replace(" ", "_")
+    if text in {"semantic", "semantic_chunking", "semantic_chunks"}:
+        return "semantic"
+    return "paragraph"
+
+
 def _article_body_text_lookup(articles):
     article_ids = []
     for index, article in enumerate(articles):
@@ -156,14 +169,17 @@ def _article_body_text_lookup(articles):
     except Exception:
         return {}
 
-    rows = (
-        GuardianArticle.query.with_entities(
-            GuardianArticle.id,
-            GuardianArticle.body_text,
+    try:
+        rows = (
+            GuardianArticle.query.with_entities(
+                GuardianArticle.id,
+                GuardianArticle.body_text,
+            )
+            .filter(GuardianArticle.id.in_(article_ids))
+            .all()
         )
-        .filter(GuardianArticle.id.in_(article_ids))
-        .all()
-    )
+    except Exception:
+        return {}
     return {row.id: row.body_text for row in rows}
 
 
@@ -332,9 +348,9 @@ def _score_row(article_id, score_value):
 
 def _paragraph_prompt_payload(paragraph_row):
     return {
-        "paragraph_id": paragraph_row["paragraph_id"],
+        "chunk_id": paragraph_row["paragraph_id"],
         "article_id": paragraph_row["article_id"],
-        "paragraph_index": paragraph_row["paragraph_index"],
+        "chunk_index": paragraph_row["paragraph_index"],
         "text": paragraph_row["paragraph"],
     }
 
@@ -344,15 +360,15 @@ def build_llm_paragraph_agreement_messages(thesis, paragraph_rows):
         _paragraph_prompt_payload(row)
         for row in paragraph_rows
     ]
-    paragraph_ids = [row["paragraph_id"] for row in paragraph_payload]
+    paragraph_ids = [row["chunk_id"] for row in paragraph_payload]
     user_prompt = (
         "User thesis:\n"
         f"{_clean_text(thesis)}\n\n"
-        "paragraph_ids in scoring order:\n"
+        "chunk_ids in scoring order:\n"
         f"{json.dumps(paragraph_ids, ensure_ascii=False)}\n\n"
-        "Retrieved paragraphs in the same order:\n"
+        "Retrieved chunks in the same order:\n"
         f"{json.dumps(paragraph_payload, ensure_ascii=False, indent=2)}\n\n"
-        f"Return exactly {len(paragraph_ids)} [score, irrelevant] pairs as a JSON array in the paragraph_ids order."
+        f"Return exactly {len(paragraph_ids)} [score, irrelevant] pairs as a JSON array in the chunk_ids order."
     )
     return [
         {"role": "system", "content": LLM_PARAGRAPH_AGREEMENT_SYSTEM_PROMPT},
@@ -382,6 +398,8 @@ def _normalize_paragraph_batch_scores(payload, paragraph_rows):
                 "article_id": paragraph_row["article_id"],
                 "paragraph_index": paragraph_row["paragraph_index"],
                 "paragraph": paragraph_row["paragraph"],
+                "sentence_start_index": paragraph_row.get("sentence_start_index"),
+                "sentence_end_index": paragraph_row.get("sentence_end_index"),
                 "agreement_score": score,
                 "stance_score": (score * 2.0) - 1.0,
                 "llm_irrelevant": _coerce_irrelevant_flag(irrelevant_value),
@@ -405,23 +423,53 @@ def _article_source_text(article, article_id, body_lookup):
     return "\n\n".join(_clean_text(part) for part in parts if _clean_text(part))
 
 
-def _paragraph_rows_for_articles(
+def _svd_processor_for_semantic_chunks():
+    try:
+        from backend.text_processing.search_helpers import build_retrieval_processor
+    except Exception:
+        return None
+
+    try:
+        return build_retrieval_processor(retrieval_model="svd")
+    except Exception:
+        return None
+
+
+def _chunk_rows_for_articles(
     articles,
+    chunking_mode=DEFAULT_CHUNKING_MODE,
     max_paragraphs_per_article=DEFAULT_MAX_PARAGRAPHS_PER_ARTICLE,
     max_paragraph_chars=DEFAULT_MAX_PARAGRAPH_CHARS,
+    semantic_break_threshold=DEFAULT_SEMANTIC_BREAK_SIMILARITY_THRESHOLD,
 ):
+    resolved_mode = _normalize_chunking_mode(chunking_mode)
     body_lookup = _article_body_text_lookup(articles)
+    svd_processor = (
+        _svd_processor_for_semantic_chunks()
+        if resolved_mode == "semantic"
+        else None
+    )
     paragraph_rows = []
     for article_index, article in enumerate(articles):
         article_id = _article_id(article, article_index)
         source_text = _article_source_text(article, article_id, body_lookup)
-        rows = paragraph_rows_from_text(
-            source_text,
-            article_id=article_id,
-            prefix=f"a{article_index}_p",
-            min_chars=20,
-            max_chars=max_paragraph_chars,
-        )
+        if resolved_mode == "semantic":
+            rows = semantic_chunk_rows_from_text(
+                source_text,
+                article_id=article_id,
+                prefix=f"a{article_index}_sc",
+                svd_processor=svd_processor,
+                similarity_threshold=semantic_break_threshold,
+                max_chars=max_paragraph_chars,
+            )
+        else:
+            rows = paragraph_rows_from_text(
+                source_text,
+                article_id=article_id,
+                prefix=f"a{article_index}_p",
+                min_chars=20,
+                max_chars=max_paragraph_chars,
+            )
         if max_paragraphs_per_article:
             rows = rows[:max(1, int(max_paragraphs_per_article))]
         paragraph_rows.extend(rows)
@@ -443,6 +491,8 @@ def _top_relevant_paragraphs(paragraph_scores, limit=DEFAULT_RELEVANT_PARAGRAPH_
             "paragraph_index": row["paragraph_index"],
             "text": row["paragraph"],
             "agreement_score": row["agreement_score"],
+            "sentence_start_index": row.get("sentence_start_index"),
+            "sentence_end_index": row.get("sentence_end_index"),
         }
         for row in ranked[:max(1, int(limit))]
     ]
@@ -578,18 +628,23 @@ def score_llm_article_agreement_by_paragraphs(
     client=None,
     api_key=None,
     batch_size=DEFAULT_LLM_PARAGRAPH_BATCH_SIZE,
+    chunking_mode=DEFAULT_CHUNKING_MODE,
     max_paragraphs_per_article=DEFAULT_MAX_PARAGRAPHS_PER_ARTICLE,
     max_paragraph_chars=DEFAULT_MAX_PARAGRAPH_CHARS,
+    semantic_break_threshold=DEFAULT_SEMANTIC_BREAK_SIMILARITY_THRESHOLD,
 ):
     article_rows = list(articles or [])
     cleaned_thesis = _clean_text(thesis)
     if not article_rows or not cleaned_thesis:
         return []
 
-    paragraph_rows = _paragraph_rows_for_articles(
+    resolved_chunking_mode = _normalize_chunking_mode(chunking_mode)
+    paragraph_rows = _chunk_rows_for_articles(
         article_rows,
+        chunking_mode=resolved_chunking_mode,
         max_paragraphs_per_article=max_paragraphs_per_article,
         max_paragraph_chars=max_paragraph_chars,
+        semantic_break_threshold=semantic_break_threshold,
     )
     if not paragraph_rows:
         return [
@@ -601,6 +656,7 @@ def score_llm_article_agreement_by_paragraphs(
                 "llm_relevant_paragraphs": [],
                 "llm_chunk_count": 0,
                 "llm_related_chunk_count": 0,
+                "llm_chunking_mode": resolved_chunking_mode,
             }
             for index, article in enumerate(article_rows)
         ]
@@ -615,6 +671,7 @@ def score_llm_article_agreement_by_paragraphs(
         paragraph_count=len(paragraph_rows),
         thesis_chars=len(cleaned_thesis),
         batch_size=resolved_batch_size,
+        chunking_mode=resolved_chunking_mode,
     )
 
     total_batches = (
@@ -645,9 +702,12 @@ def score_llm_article_agreement_by_paragraphs(
         )
 
     rows = _aggregate_paragraph_scores(article_rows, paragraph_scores)
+    for row in rows:
+        row["llm_chunking_mode"] = resolved_chunking_mode
     log_runtime_event(
         "llm_paragraph_agreement.done",
         row_count=len(rows),
         paragraph_score_count=len(paragraph_scores),
+        chunking_mode=resolved_chunking_mode,
     )
     return rows
