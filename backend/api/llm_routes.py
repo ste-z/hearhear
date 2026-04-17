@@ -16,6 +16,7 @@ from flask import request, jsonify, Response, stream_with_context
 from backend.stance_processing.llm_processor import (
     create_spark_client,
     score_llm_article_agreement,
+    score_llm_article_agreement_by_paragraphs,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,10 +124,16 @@ def register_chat_route(app, json_search):
             return jsonify({"error": "A non-empty articles list is required"}), 400
 
         try:
-            scores = score_llm_article_agreement(
-                articles=articles,
-                thesis=thesis,
-            )
+            if data.get("use_chunking") or data.get("paragraph_chunking"):
+                scores = score_llm_article_agreement_by_paragraphs(
+                    articles=articles,
+                    thesis=thesis,
+                )
+            else:
+                scores = score_llm_article_agreement(
+                    articles=articles,
+                    thesis=thesis,
+                )
         except RuntimeError as exc:
             return jsonify({"error": str(exc)}), 500
         except Exception:

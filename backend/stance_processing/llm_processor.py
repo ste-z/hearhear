@@ -3,13 +3,18 @@ import os
 import re
 
 from backend.runtime.runtime_debug import log_runtime_event
+from backend.text_processing.paragraph_splitter import paragraph_rows_from_text
 
 
 DEFAULT_LLM_BATCH_SIZE = 20
 DEFAULT_MAX_ARTICLE_CHARS = 10000
+DEFAULT_LLM_PARAGRAPH_BATCH_SIZE = 100
+DEFAULT_MAX_PARAGRAPHS_PER_ARTICLE = 40
+DEFAULT_MAX_PARAGRAPH_CHARS = 2500
+DEFAULT_RELEVANT_PARAGRAPH_COUNT = 20
 SPARK_API_KEY_ENV_NAMES = ("SPARK_API_KEY", "API_KEY")
 
-LLM_AGREEMENT_SYSTEM_PROMPT = """
+LLM_ARTICLE_AGREEMENT_SYSTEM_PROMPT = """
 You evaluate how much retrieved news opinion articles agree with a user's thesis.
 
 Use only the article context supplied by the application. Do not rely on outside
@@ -34,6 +39,36 @@ change. An article about free buses is not related to free speech.
 Return valid JSON only: a single array in the exact same order as the
 article_ids list. Each item must be [agreement_score, irrelevant_flag]. Do not
 return article IDs, labels, rationale, markdown, comments, or prose. Example:
+[[0.9, 0], [0.5, 0], [0.5, 1]]
+""".strip()
+
+LLM_PARAGRAPH_AGREEMENT_SYSTEM_PROMPT = """
+You evaluate retrieved article paragraphs against a user's thesis.
+
+Use only the paragraph context supplied by the application. Do not rely on
+outside knowledge of the publication, author, topic, or article. Judge each
+paragraph independently, not whether the whole article agrees.
+
+For each paragraph, assign an agreement score from 0 to 1:
+- 1.00 means the paragraph directly supports the user's thesis.
+- 0.75 means the paragraph mostly supports the thesis, with qualifications.
+- 0.50 means the paragraph is related but neutral, descriptive, background,
+  mixed, unclear, or not stance-bearing.
+- 0.25 means the paragraph mostly pushes against the thesis, with qualifications.
+- 0.00 means the paragraph directly contradicts the thesis.
+
+Also assign an irrelevant flag:
+- 1 means the paragraph is completely unrelated to the broad topic, issue,
+  actors, policy area, cause, consequence, or debate in the user's thesis.
+- 0 means the paragraph is related or even broadly related.
+Be conservative. When in doubt, use 0. Background, evidence, context,
+counterarguments, nearby subtopics, causes, consequences, and policy details are
+relevant if they connect to the broad issue. Energy policy is related to climate
+change. An article paragraph about free buses is not related to free speech.
+
+Return valid JSON only: a single array in the exact same order as the
+paragraph_ids list. Each item must be [agreement_score, irrelevant_flag]. Do not
+return paragraph IDs, labels, rationale, markdown, comments, or prose. Example:
 [[0.9, 0], [0.5, 0], [0.5, 1]]
 """.strip()
 
@@ -106,6 +141,32 @@ def _article_value(article, key, default=None):
     return getattr(article, key, default)
 
 
+def _article_body_text_lookup(articles):
+    article_ids = []
+    for index, article in enumerate(articles):
+        article_id = _article_id(article, index)
+        if article_id and article_id not in article_ids:
+            article_ids.append(article_id)
+
+    if not article_ids:
+        return {}
+
+    try:
+        from backend.db.models import GuardianArticle
+    except Exception:
+        return {}
+
+    rows = (
+        GuardianArticle.query.with_entities(
+            GuardianArticle.id,
+            GuardianArticle.body_text,
+        )
+        .filter(GuardianArticle.id.in_(article_ids))
+        .all()
+    )
+    return {row.id: row.body_text for row in rows}
+
+
 def _article_prompt_payload(article, index, max_article_chars=DEFAULT_MAX_ARTICLE_CHARS):
     half_budget = max(320, int(max_article_chars / 2))
     return {
@@ -158,7 +219,7 @@ def build_llm_agreement_messages(
         f"Return exactly {len(article_ids)} [score, irrelevant] pairs as a JSON array in the article_ids order."
     )
     return [
-        {"role": "system", "content": LLM_AGREEMENT_SYSTEM_PROMPT},
+        {"role": "system", "content": LLM_ARTICLE_AGREEMENT_SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
     ]
 
@@ -269,6 +330,168 @@ def _score_row(article_id, score_value):
     }
 
 
+def _paragraph_prompt_payload(paragraph_row):
+    return {
+        "paragraph_id": paragraph_row["paragraph_id"],
+        "article_id": paragraph_row["article_id"],
+        "paragraph_index": paragraph_row["paragraph_index"],
+        "text": paragraph_row["paragraph"],
+    }
+
+
+def build_llm_paragraph_agreement_messages(thesis, paragraph_rows):
+    paragraph_payload = [
+        _paragraph_prompt_payload(row)
+        for row in paragraph_rows
+    ]
+    paragraph_ids = [row["paragraph_id"] for row in paragraph_payload]
+    user_prompt = (
+        "User thesis:\n"
+        f"{_clean_text(thesis)}\n\n"
+        "paragraph_ids in scoring order:\n"
+        f"{json.dumps(paragraph_ids, ensure_ascii=False)}\n\n"
+        "Retrieved paragraphs in the same order:\n"
+        f"{json.dumps(paragraph_payload, ensure_ascii=False, indent=2)}\n\n"
+        f"Return exactly {len(paragraph_ids)} [score, irrelevant] pairs as a JSON array in the paragraph_ids order."
+    )
+    return [
+        {"role": "system", "content": LLM_PARAGRAPH_AGREEMENT_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def _normalize_paragraph_batch_scores(payload, paragraph_rows):
+    score_values = _score_values_from_payload(payload)
+    expected_count = len(paragraph_rows)
+    returned_count = len(score_values)
+    if returned_count != expected_count:
+        log_runtime_event(
+            "llm_paragraph_agreement.score_count_mismatch",
+            expected_count=expected_count,
+            returned_count=returned_count,
+        )
+
+    rows = []
+    for index, paragraph_row in enumerate(paragraph_rows):
+        score_value = score_values[index] if index < returned_count else [0.5, 1]
+        score_value, irrelevant_value = _score_pair(score_value)
+        score = _coerce_unit_score(score_value, default=0.5)
+        rows.append(
+            {
+                "paragraph_id": paragraph_row["paragraph_id"],
+                "article_id": paragraph_row["article_id"],
+                "paragraph_index": paragraph_row["paragraph_index"],
+                "paragraph": paragraph_row["paragraph"],
+                "agreement_score": score,
+                "stance_score": (score * 2.0) - 1.0,
+                "llm_irrelevant": _coerce_irrelevant_flag(irrelevant_value),
+            }
+        )
+    return rows
+
+
+def _article_source_text(article, article_id, body_lookup):
+    body_text = _article_value(article, "body_text")
+    if not body_text:
+        body_text = body_lookup.get(article_id)
+    if body_text:
+        return body_text
+
+    parts = [
+        _article_value(article, "central_claim_summary"),
+        _article_value(article, "summary"),
+        _article_value(article, "thesis_sentence"),
+    ]
+    return "\n\n".join(_clean_text(part) for part in parts if _clean_text(part))
+
+
+def _paragraph_rows_for_articles(
+    articles,
+    max_paragraphs_per_article=DEFAULT_MAX_PARAGRAPHS_PER_ARTICLE,
+    max_paragraph_chars=DEFAULT_MAX_PARAGRAPH_CHARS,
+):
+    body_lookup = _article_body_text_lookup(articles)
+    paragraph_rows = []
+    for article_index, article in enumerate(articles):
+        article_id = _article_id(article, article_index)
+        source_text = _article_source_text(article, article_id, body_lookup)
+        rows = paragraph_rows_from_text(
+            source_text,
+            article_id=article_id,
+            prefix=f"a{article_index}_p",
+            min_chars=20,
+            max_chars=max_paragraph_chars,
+        )
+        if max_paragraphs_per_article:
+            rows = rows[:max(1, int(max_paragraphs_per_article))]
+        paragraph_rows.extend(rows)
+    return paragraph_rows
+
+
+def _top_relevant_paragraphs(paragraph_scores, limit=DEFAULT_RELEVANT_PARAGRAPH_COUNT):
+    ranked = sorted(
+        paragraph_scores,
+        key=lambda row: (
+            abs(float(row.get("agreement_score", 0.5)) - 0.5),
+            float(row.get("agreement_score", 0.5)),
+        ),
+        reverse=True,
+    )
+    return [
+        {
+            "paragraph_id": row["paragraph_id"],
+            "paragraph_index": row["paragraph_index"],
+            "text": row["paragraph"],
+            "agreement_score": row["agreement_score"],
+        }
+        for row in ranked[:max(1, int(limit))]
+    ]
+
+
+def _aggregate_paragraph_scores(article_rows, paragraph_scores):
+    grouped = {}
+    for paragraph_score in paragraph_scores:
+        grouped.setdefault(paragraph_score["article_id"], []).append(paragraph_score)
+
+    rows = []
+    for index, article in enumerate(article_rows):
+        article_id = _article_id(article, index)
+        scores = grouped.get(article_id, [])
+        related_scores = [
+            score for score in scores
+            if not bool(score.get("llm_irrelevant"))
+        ]
+        if not related_scores:
+            rows.append(
+                {
+                    "article_id": article_id,
+                    "agreement_score": 0.5,
+                    "stance_score": 0.0,
+                    "llm_irrelevant": True,
+                    "llm_relevant_paragraphs": [],
+                    "llm_chunk_count": len(scores),
+                    "llm_related_chunk_count": 0,
+                }
+            )
+            continue
+
+        agreement_score = sum(
+            float(score["agreement_score"]) for score in related_scores
+        ) / len(related_scores)
+        rows.append(
+            {
+                "article_id": article_id,
+                "agreement_score": agreement_score,
+                "stance_score": (agreement_score * 2.0) - 1.0,
+                "llm_irrelevant": False,
+                "llm_relevant_paragraphs": _top_relevant_paragraphs(related_scores),
+                "llm_chunk_count": len(scores),
+                "llm_related_chunk_count": len(related_scores),
+            }
+        )
+    return rows
+
+
 def _normalize_batch_scores(payload, article_ids):
     score_values = _score_values_from_payload(payload)
     expected_count = len(article_ids)
@@ -346,4 +569,85 @@ def score_llm_article_agreement(
         )
 
     log_runtime_event("llm_agreement.done", row_count=len(rows))
+    return rows
+
+
+def score_llm_article_agreement_by_paragraphs(
+    articles,
+    thesis,
+    client=None,
+    api_key=None,
+    batch_size=DEFAULT_LLM_PARAGRAPH_BATCH_SIZE,
+    max_paragraphs_per_article=DEFAULT_MAX_PARAGRAPHS_PER_ARTICLE,
+    max_paragraph_chars=DEFAULT_MAX_PARAGRAPH_CHARS,
+):
+    article_rows = list(articles or [])
+    cleaned_thesis = _clean_text(thesis)
+    if not article_rows or not cleaned_thesis:
+        return []
+
+    paragraph_rows = _paragraph_rows_for_articles(
+        article_rows,
+        max_paragraphs_per_article=max_paragraphs_per_article,
+        max_paragraph_chars=max_paragraph_chars,
+    )
+    if not paragraph_rows:
+        return [
+            {
+                "article_id": _article_id(article, index),
+                "agreement_score": 0.5,
+                "stance_score": 0.0,
+                "llm_irrelevant": True,
+                "llm_relevant_paragraphs": [],
+                "llm_chunk_count": 0,
+                "llm_related_chunk_count": 0,
+            }
+            for index, article in enumerate(article_rows)
+        ]
+
+    resolved_batch_size = max(1, int(batch_size or DEFAULT_LLM_PARAGRAPH_BATCH_SIZE))
+    resolved_client = client or create_spark_client(api_key=api_key)
+    paragraph_scores = []
+
+    log_runtime_event(
+        "llm_paragraph_agreement.start",
+        article_count=len(article_rows),
+        paragraph_count=len(paragraph_rows),
+        thesis_chars=len(cleaned_thesis),
+        batch_size=resolved_batch_size,
+    )
+
+    total_batches = (
+        len(paragraph_rows) + resolved_batch_size - 1
+    ) // resolved_batch_size
+    for batch_index, start_index in enumerate(
+        range(0, len(paragraph_rows), resolved_batch_size),
+        start=1,
+    ):
+        batch_rows = paragraph_rows[start_index:start_index + resolved_batch_size]
+        messages = build_llm_paragraph_agreement_messages(
+            thesis=cleaned_thesis,
+            paragraph_rows=batch_rows,
+        )
+        log_runtime_event(
+            "llm_paragraph_agreement.batch_start",
+            batch_index=batch_index,
+            batch_total=total_batches,
+            batch_size=len(batch_rows),
+        )
+        response = resolved_client.chat(messages)
+        payload = _extract_json_payload(_response_content(response))
+        paragraph_scores.extend(_normalize_paragraph_batch_scores(payload, batch_rows))
+        log_runtime_event(
+            "llm_paragraph_agreement.batch_done",
+            batch_index=batch_index,
+            batch_total=total_batches,
+        )
+
+    rows = _aggregate_paragraph_scores(article_rows, paragraph_scores)
+    log_runtime_event(
+        "llm_paragraph_agreement.done",
+        row_count=len(rows),
+        paragraph_score_count=len(paragraph_scores),
+    )
     return rows

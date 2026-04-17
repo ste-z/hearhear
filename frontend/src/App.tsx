@@ -14,6 +14,7 @@ import {
   EssayClaimCandidate,
   EssayClaimCandidateResponse,
   EssayTextExtractionResponse,
+  LlmRelevantParagraph,
   RetrievalModel,
   SvdLatentDimension,
 } from './types'
@@ -31,6 +32,7 @@ type ConfigResponse = {
   default_retrieval_model?: string | null
   default_normalize_topic_scores?: boolean | null
   default_stance_method?: string | null
+  default_use_chunking?: boolean | null
   supported_stance_methods?: string[] | null
   llm_agreement_available?: boolean | null
   default_rerank_selection_mode?: string | null
@@ -705,6 +707,7 @@ function App(): JSX.Element {
   const [rerankTopK, setRerankTopK] = useState<number>(20)
   const [rerankSelectionMode, setRerankSelectionMode] = useState<RerankSelectionMode>(defaultRerankSelectionMode)
   const [stanceMethod, setStanceMethod] = useState<StanceMethod>(defaultStanceMethod)
+  const [useChunking, setUseChunking] = useState<boolean>(false)
   const [supportedStanceMethods, setSupportedStanceMethods] = useState<StanceMethod[]>(
     defaultSupportedStanceMethods,
   )
@@ -785,6 +788,7 @@ function App(): JSX.Element {
         setStanceMethod(currentMethod => (
           supportedAgreementMethods.includes(currentMethod) ? currentMethod : resolvedStanceMethod
         ))
+        setUseChunking(Boolean(data.default_use_chunking))
         setRerankSelectionMode(currentMode => (
           isRerankSelectionMode(data.default_rerank_selection_mode)
             ? data.default_rerank_selection_mode
@@ -823,6 +827,7 @@ function App(): JSX.Element {
         setUseLlm(false)
         setRerankSelectionMode(defaultRerankSelectionMode)
         setStanceMethod(defaultStanceMethod)
+        setUseChunking(false)
         setSupportedStanceMethods(defaultSupportedStanceMethods)
         setLlmAgreementAvailable(false)
         setAutoRerankThresholds(defaultAutoRerankThresholds)
@@ -973,7 +978,7 @@ function App(): JSX.Element {
     setEmptyResultsMessage(null)
     setError(null)
     setHasSubmittedSearch(false)
-  }, [inputMode, opinion, recencyWeight, rerankTopK, stanceMethod, stanceWeight, topic, topicWeight])
+  }, [inputMode, opinion, recencyWeight, rerankTopK, stanceMethod, stanceWeight, topic, topicWeight, useChunking])
 
   useEffect(() => {
     setArticles([])
@@ -992,6 +997,7 @@ function App(): JSX.Element {
     stanceMethod,
     stanceWeight,
     topicWeight,
+    useChunking,
   ])
 
   useEffect(() => {
@@ -1164,6 +1170,7 @@ function App(): JSX.Element {
   const canUseTfidf = supportedRetrievalModels.includes('tfidf')
   const canUseNliAgreement = supportedStanceMethods.includes('nli')
   const canUseLlmAgreement = supportedStanceMethods.includes('llm') && llmAgreementAvailable
+  const canUseChunking = canUseLlmAgreement
   const isSvdEnabled = retrievalModel === 'svd'
   const canToggleSvd = canUseSvd && canUseTfidf
   const currentAutoRerankThreshold = autoRerankThresholds[retrievalModel]
@@ -1436,6 +1443,7 @@ function App(): JSX.Element {
           top_k: rerankTopK,
           normalize_topic_scores: normalizeTopicScores,
           stance_method: stanceMethod,
+          use_chunking: useChunking,
           retrieval_model: retrievalModel,
           rerank_selection_mode: rerankSelectionMode,
           rerank_threshold: currentAutoRerankThreshold,
@@ -1552,6 +1560,7 @@ function App(): JSX.Element {
           top_k: rerankTopK,
           normalize_topic_scores: normalizeTopicScores,
           stance_method: stanceMethod,
+          use_chunking: useChunking,
           retrieval_model: retrievalModel,
           rerank_selection_mode: rerankSelectionMode,
           rerank_threshold: currentAutoRerankThreshold,
@@ -1659,6 +1668,25 @@ function App(): JSX.Element {
   )
   const isLlmIrrelevantArticle = (article: Article): boolean => (
     article.stance_method === 'llm' && article.llm_irrelevant === true
+  )
+  const hasLlmRelevantParagraphs = (article: Article): boolean => (
+    Array.isArray(article.llm_relevant_paragraphs) &&
+    article.llm_relevant_paragraphs.length > 0
+  )
+  const getParagraphEvidenceHint = (article: Article): string => {
+    const relatedCount = article.llm_related_chunk_count ?? article.llm_relevant_paragraphs?.length ?? 0
+    const totalCount = article.llm_chunk_count ?? 0
+    if (relatedCount > 0 && totalCount > 0) {
+      return `Expand to inspect the strongest ${Math.min(relatedCount, article.llm_relevant_paragraphs?.length ?? relatedCount)} of ${relatedCount} related paragraphs.`
+    }
+    return 'Expand to inspect the paragraphs behind this LLM score.'
+  }
+  const paragraphKey = (
+    article: Article,
+    paragraph: LlmRelevantParagraph,
+    index: number,
+  ): string => (
+    `${article.id}-paragraph-${paragraph.paragraph_id ?? paragraph.paragraph_index ?? index}`
   )
   const visibleArticles = articles.filter(article => !isLlmIrrelevantArticle(article))
   const llmIrrelevantArticles = articles.filter(isLlmIrrelevantArticle)
@@ -2415,6 +2443,30 @@ function App(): JSX.Element {
                       </div>
                     )}
 
+                    {hasLlmRelevantParagraphs(article) && (
+                      <details className="content-disclosure paragraph-evidence-disclosure">
+                        <summary className="content-disclosure-summary">
+                          <span className="content-disclosure-copy">
+                            <span className="content-disclosure-title">Relevant paragraphs</span>
+                            <span className="content-disclosure-hint">{getParagraphEvidenceHint(article)}</span>
+                          </span>
+                          <span className="content-disclosure-status" aria-hidden="true" />
+                        </summary>
+
+                        <div className="paragraph-evidence-list">
+                          {(article.llm_relevant_paragraphs ?? []).map((paragraph, index) => (
+                            <div key={paragraphKey(article, paragraph, index)} className="paragraph-evidence-item">
+                              <div className="paragraph-evidence-header">
+                                <span>{`Paragraph ${(paragraph.paragraph_index ?? index) + 1}`}</span>
+                                <strong>{formatPercent(paragraph.agreement_score)}</strong>
+                              </div>
+                              <p>{paragraph.text}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+
                     {hasSvdExplainability(article) && (
                       <details className="content-disclosure svd-explainability-disclosure">
                         <summary className="content-disclosure-summary">
@@ -2894,10 +2946,15 @@ function App(): JSX.Element {
                     <button
                       type="button"
                       className={`retrieval-model-button ${stanceMethod === 'nli' ? 'active' : ''}`}
-                      onClick={() => setStanceMethod('nli')}
+                      onClick={() => {
+                        if (!useChunking) {
+                          setStanceMethod('nli')
+                        }
+                      }}
+                      disabled={useChunking}
                     >
                       <strong>NLI</strong>
-                      <p>Compare the thesis against each extracted article claim with DeBERTa.</p>
+                      <p>{useChunking ? 'Disabled while paragraph chunking is on.' : 'Compare the thesis against each extracted article claim with DeBERTa.'}</p>
                     </button>
                   )}
                   {supportedStanceMethods.includes('llm') && (
@@ -2918,12 +2975,47 @@ function App(): JSX.Element {
                 </div>
                 <p className="setting-help-text">
                   {stanceMethod === 'llm'
-                    ? 'The final agreement meter comes from Spark scoring the retrieved articles against your thesis.'
+                    ? (useChunking
+                      ? 'The final agreement meter averages Spark scores across paragraphs the LLM marks relevant.'
+                      : 'The final agreement meter comes from Spark scoring the retrieved articles against your thesis.')
                     : 'The final agreement meter comes from local NLI over extracted article claims.'}
                   {!llmAgreementAvailable && supportedStanceMethods.includes('llm')
                     ? ' Add SPARK_API_KEY or API_KEY to enable the LLM scorer.'
                     : ''}
                 </p>
+              </div>
+              <div className="weight-card full-row settings-toggle-card">
+                <div className="settings-toggle-row">
+                  <div className="settings-toggle-copy">
+                    <span>Paragraph chunking</span>
+                    <p className="setting-help-text">
+                      When on, Spark scores article paragraphs, averages the related paragraph scores, and hides articles with no related paragraphs.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className={`settings-switch-button ${useChunking ? 'active' : ''}`}
+                    aria-pressed={useChunking}
+                    onClick={() => {
+                      if (!canUseChunking) return
+                      setUseChunking(current => {
+                        const nextValue = !current
+                        if (nextValue) {
+                          setStanceMethod('llm')
+                        }
+                        return nextValue
+                      })
+                    }}
+                    disabled={!canUseChunking}
+                  >
+                    <span className="settings-switch-label">
+                      {useChunking ? 'Chunked' : 'Article-level'}
+                    </span>
+                    <span className="retrieval-toggle-switch" aria-hidden="true">
+                      <span className="retrieval-toggle-thumb" />
+                    </span>
+                  </button>
+                </div>
               </div>
               <div className="weight-card full-row settings-toggle-card">
                 <div className="settings-toggle-row">

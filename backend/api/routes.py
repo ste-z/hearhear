@@ -119,11 +119,19 @@ def _extract_request_context():
         payload.get("normalize_topic_scores"),
         DEFAULT_NORMALIZE_TOPIC_SCORES,
     )
+    use_chunking = _coerce_bool(
+        payload.get("use_chunking")
+        if "use_chunking" in payload
+        else payload.get("paragraph_chunking"),
+        False,
+    )
     stance_method = normalize_stance_method(
         payload.get("stance_method")
         or payload.get("agreement_method")
         or DEFAULT_STANCE_METHOD
     )
+    if use_chunking:
+        stance_method = "llm"
     retrieval_model = normalize_retrieval_model(
         payload.get("retrieval_model")
         or payload.get("search_backend")
@@ -168,6 +176,7 @@ def _extract_request_context():
         "rerank_top_k": rerank_top_k,
         "candidate_top_n": candidate_top_n,
         "normalize_topic_scores": normalize_topic_scores,
+        "use_chunking": use_chunking,
         "stance_method": stance_method,
         "retrieval_model": retrieval_model,
         "rerank_selection_mode": rerank_selection_mode,
@@ -215,6 +224,7 @@ def register_routes(app):
             "default_normalize_topic_scores": DEFAULT_NORMALIZE_TOPIC_SCORES,
             "default_stance_method": DEFAULT_STANCE_METHOD,
             "supported_stance_methods": list(SUPPORTED_STANCE_METHODS),
+            "default_use_chunking": False,
             "llm_agreement_available": bool(
                 (os.getenv("SPARK_API_KEY") or os.getenv("API_KEY") or "").strip()
             ),
@@ -241,6 +251,7 @@ def register_routes(app):
                 opinion_chars=len(context["opinion"]),
                 rerank_top_k=context["rerank_top_k"],
                 normalize_topic_scores=context["normalize_topic_scores"],
+                use_chunking=context["use_chunking"],
                 stance_method=context["stance_method"],
                 rerank_selection_mode=context["rerank_selection_mode"],
                 rerank_threshold=context["rerank_threshold"],
@@ -259,6 +270,7 @@ def register_routes(app):
                     year_end=context["year_end"],
                     normalize_topic_scores=context["normalize_topic_scores"],
                     stance_method=context["stance_method"],
+                    use_chunking=context["use_chunking"],
                     rerank_selection_mode=context["rerank_selection_mode"],
                     rerank_threshold=context["rerank_threshold"],
                 )
@@ -276,6 +288,7 @@ def register_routes(app):
                     year_end=context["year_end"],
                     normalize_topic_scores=context["normalize_topic_scores"],
                     stance_method=context["stance_method"],
+                    use_chunking=context["use_chunking"],
                     rerank_selection_mode=context["rerank_selection_mode"],
                     rerank_threshold=context["rerank_threshold"],
                 )

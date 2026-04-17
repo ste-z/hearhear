@@ -35,6 +35,10 @@ export type Article = {
   stance_contradiction_prob?: number | null
   llm_agreement_score?: number | null
   llm_irrelevant?: boolean | null
+  llm_chunking_enabled?: boolean | null
+  llm_chunk_count?: number | null
+  llm_related_chunk_count?: number | null
+  llm_relevant_paragraphs?: LlmRelevantParagraph[] | null
   thesis_sentence?: string | null
   support_sentences?: string[] | null
   svd_query_chart_dimensions?: SvdLatentDimension[] | null
@@ -42,6 +46,13 @@ export type Article = {
   svd_positive_dimensions?: SvdLatentDimension[] | null
   svd_negative_dimensions?: SvdLatentDimension[] | null
   svd_dimensions?: SvdLatentDimension[] | null
+}
+
+export type LlmRelevantParagraph = {
+  paragraph_id?: string | null
+  paragraph_index?: number | null
+  text: string
+  agreement_score?: number | null
 }
 
 export type ArticleSearchResponse = {
