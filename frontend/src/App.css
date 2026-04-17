@@ -1007,6 +1007,23 @@
   gap: 14px;
 }
 
+.irrelevant-results-disclosure {
+  margin-top: 8px;
+}
+
+.irrelevant-results-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.irrelevant-article-item {
+  background: rgba(248, 250, 252, 0.94);
+  border-style: dashed;
+  box-shadow: none;
+}
+
 .article-title {
   font-size: 1.3rem;
   color: #1a73e8;

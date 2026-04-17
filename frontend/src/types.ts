@@ -34,6 +34,7 @@ export type Article = {
   stance_neutral_prob?: number | null
   stance_contradiction_prob?: number | null
   llm_agreement_score?: number | null
+  llm_irrelevant?: boolean | null
   thesis_sentence?: string | null
   support_sentences?: string[] | null
   svd_query_chart_dimensions?: SvdLatentDimension[] | null

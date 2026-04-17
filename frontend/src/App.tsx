@@ -1657,6 +1657,12 @@ function App(): JSX.Element {
     article.stance_neutral_prob != null ||
     article.stance_contradiction_prob != null
   )
+  const isLlmIrrelevantArticle = (article: Article): boolean => (
+    article.stance_method === 'llm' && article.llm_irrelevant === true
+  )
+  const visibleArticles = articles.filter(article => !isLlmIrrelevantArticle(article))
+  const llmIrrelevantArticles = articles.filter(isLlmIrrelevantArticle)
+
   const getMatchSummary = (article: Article): string => {
     const hasWeightedRecency = (article.recency_weight ?? recencyWeight) > 0
 
@@ -1749,11 +1755,24 @@ function App(): JSX.Element {
       )
     }
 
+    const hiddenCopy = llmIrrelevantArticles.length > 0
+      ? ` ${llmIrrelevantArticles.length} ${llmIrrelevantArticles.length === 1 ? 'article is' : 'articles are'} hidden as unrelated.`
+      : ''
     return (
-      `${articles.length} Guardian opinion ${articles.length === 1 ? 'piece' : 'pieces'}`
-      + `${yearRangeSummary} ranked with your current search settings.`
+      `${visibleArticles.length} Guardian opinion ${visibleArticles.length === 1 ? 'piece' : 'pieces'}`
+      + `${yearRangeSummary} ranked with your current search settings.${hiddenCopy}`
     )
-  }, [articles.length, emptyResultsMessage, error, hasSubmittedSearch, inputMode, loading, yearRangeSummary])
+  }, [
+    articles.length,
+    emptyResultsMessage,
+    error,
+    hasSubmittedSearch,
+    inputMode,
+    llmIrrelevantArticles.length,
+    loading,
+    visibleArticles.length,
+    yearRangeSummary,
+  ])
 
   return (
     <div className="experience-shell">
@@ -2232,7 +2251,7 @@ function App(): JSX.Element {
 
             {!loading && !error && articles.length > 0 && (
               <div id="answer-box">
-                {articles.map((article) => {
+                {visibleArticles.map((article) => {
                   const articleTooltipBase = String(article.id).replace(/[^a-zA-Z0-9_-]/g, '-')
                   const articleRecencyWeight = article.recency_weight ?? recencyWeight
 
@@ -2511,6 +2530,43 @@ function App(): JSX.Element {
                     </article>
                   )
                 })}
+
+                {llmIrrelevantArticles.length > 0 && (
+                  <details className="content-disclosure irrelevant-results-disclosure">
+                    <summary className="content-disclosure-summary">
+                      <span className="content-disclosure-copy">
+                        <span className="content-disclosure-title">Hidden as unrelated</span>
+                        <span className="content-disclosure-hint">
+                          {`${llmIrrelevantArticles.length} ${llmIrrelevantArticles.length === 1 ? 'article was' : 'articles were'} marked completely unrelated by the LLM. Expand to inspect.`}
+                        </span>
+                      </span>
+                      <span className="content-disclosure-status" aria-hidden="true" />
+                    </summary>
+
+                    <div className="irrelevant-results-list">
+                      {llmIrrelevantArticles.map((article) => (
+                        <article key={`${article.id}-irrelevant`} className="article-item irrelevant-article-item">
+                          <p className="article-meta">
+                            {article.author_display || article.author_raw || 'Unknown author'} | {formatDate(article.date)}
+                          </p>
+
+                          <h3 className="article-title">
+                            <a href={article.url} target="_blank" rel="noreferrer">{article.title}</a>
+                          </h3>
+
+                          <p className="article-summary">{article.summary}</p>
+
+                          {article.central_claim_summary && (
+                            <div className="claim-band">
+                              <span className="claim-band-label">Author&apos;s claim</span>
+                              <p>{article.central_claim_summary}</p>
+                            </div>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </div>
             )}
 

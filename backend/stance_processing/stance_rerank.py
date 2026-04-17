@@ -255,6 +255,7 @@ def rerank_article_matches_by_statement(
             neutral_prob = None
             contradiction_prob = None
             stance_label = None
+            llm_irrelevant = None
         else:
             if resolved_stance_method == "llm":
                 entailment_prob = None
@@ -263,6 +264,7 @@ def rerank_article_matches_by_statement(
                 stance_score = stance_row["stance_score"]
                 stance_score_normalized = stance_row["agreement_score"]
                 stance_label = None
+                llm_irrelevant = bool(stance_row.get("llm_irrelevant"))
             else:
                 entailment_prob = stance_row["entailment_prob"]
                 neutral_prob = stance_row["neutral_prob"]
@@ -274,6 +276,7 @@ def rerank_article_matches_by_statement(
                     neutral_prob=neutral_prob,
                     contradiction_prob=contradiction_prob,
                 )
+                llm_irrelevant = None
 
         match["query_statement"] = query_statement
         match["topic_statement"] = query_statement
@@ -292,6 +295,7 @@ def rerank_article_matches_by_statement(
         match["llm_agreement_score"] = (
             stance_score_normalized if resolved_stance_method == "llm" else None
         )
+        match["llm_irrelevant"] = llm_irrelevant
         match["combined_score"] = _combined_score(
             topic_score=topic_score_display,
             stance_score=stance_score_normalized,
@@ -307,6 +311,7 @@ def rerank_article_matches_by_statement(
 
     reranked.sort(
         key=lambda match: (
+            not bool(match.get("llm_irrelevant")),
             _safe_float(match.get("combined_score")),
             _safe_float(match.get("stance_score_normalized"), -1.0),
             _safe_float(match.get("topic_score_display")),

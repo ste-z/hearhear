@@ -5,8 +5,8 @@ import re
 from backend.runtime.runtime_debug import log_runtime_event
 
 
-DEFAULT_LLM_BATCH_SIZE = 8
-DEFAULT_MAX_ARTICLE_CHARS = 1800
+DEFAULT_LLM_BATCH_SIZE = 20
+DEFAULT_MAX_ARTICLE_CHARS = 10000
 SPARK_API_KEY_ENV_NAMES = ("SPARK_API_KEY", "API_KEY")
 
 LLM_AGREEMENT_SYSTEM_PROMPT = """
@@ -25,9 +25,16 @@ For each article, assign an agreement score from 0 to 1:
 - 0.25 means the article mostly disagrees with the thesis, with qualifications.
 - 0.00 means the article's central claim strongly contradicts the thesis.
 
-Return valid JSON only: a single array of numbers in the exact same order as
-the article_ids list. Do not return article IDs, labels, rationale, markdown,
-comments, or prose. Example: [0.9, 0.5, 0.1]
+Also assign an irrelevant flag:
+- 1 means the article is completely unrelated to the user's topic/thesis.
+- 0 means the article is related or even broadly related.
+Be conservative. When in doubt, use 0. Energy policy is related to climate
+change. An article about free buses is not related to free speech.
+
+Return valid JSON only: a single array in the exact same order as the
+article_ids list. Each item must be [agreement_score, irrelevant_flag]. Do not
+return article IDs, labels, rationale, markdown, comments, or prose. Example:
+[[0.9, 0], [0.5, 0], [0.5, 1]]
 """.strip()
 
 
@@ -148,7 +155,7 @@ def build_llm_agreement_messages(
         f"{json.dumps(article_ids, ensure_ascii=False)}\n\n"
         "Retrieved articles in the same order:\n"
         f"{json.dumps(article_payload, ensure_ascii=False, indent=2)}\n\n"
-        f"Return exactly {len(article_ids)} scores as a JSON array in the article_ids order."
+        f"Return exactly {len(article_ids)} [score, irrelevant] pairs as a JSON array in the article_ids order."
     )
     return [
         {"role": "system", "content": LLM_AGREEMENT_SYSTEM_PROMPT},
@@ -217,12 +224,48 @@ def _coerce_unit_score(value, default=0.5):
     return max(0.0, min(1.0, score))
 
 
+def _coerce_irrelevant_flag(value):
+    if isinstance(value, bool):
+        return bool(value)
+    if isinstance(value, (int, float)):
+        return int(value) == 1
+
+    text = _clean_text(value).lower()
+    if text in {"1", "true", "yes", "y", "irrelevant", "unrelated"}:
+        return True
+    return False
+
+
+def _score_pair(value):
+    if isinstance(value, (list, tuple)):
+        score_value = value[0] if value else 0.5
+        irrelevant_value = value[1] if len(value) > 1 else 0
+        return score_value, irrelevant_value
+
+    if isinstance(value, dict):
+        score_value = (
+            value.get("agreement_score")
+            if "agreement_score" in value
+            else value.get("score", 0.5)
+        )
+        irrelevant_value = (
+            value.get("irrelevant")
+            if "irrelevant" in value
+            else value.get("is_irrelevant", 0)
+        )
+        return score_value, irrelevant_value
+
+    return value, 0
+
+
 def _score_row(article_id, score_value):
+    score_value, irrelevant_value = _score_pair(score_value)
     score = _coerce_unit_score(score_value, default=0.5)
     return {
         "article_id": article_id,
         "agreement_score": score,
         "stance_score": (score * 2.0) - 1.0,
+        "llm_irrelevant": _coerce_irrelevant_flag(irrelevant_value),
     }
 
 
