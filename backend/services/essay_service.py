@@ -46,6 +46,7 @@ def essay_search(
     rerank_selection_mode=DEFAULT_RERANK_SELECTION_MODE,
     rerank_threshold=None,
     stance_method="nli",
+    use_chunking=False,
 ):
     resolved_essay = str(essay_text or "").strip()
     resolved_thesis = str(selected_thesis_sentence or "").strip()
@@ -103,6 +104,7 @@ def essay_search(
         rerank_selection_mode=resolved_selection_mode,
         rerank_threshold=candidate_payload.get("rerank_threshold"),
         stance_method=stance_method,
+        use_chunking=bool(use_chunking),
     )
     reranked = rerank_article_matches_by_statement(
         article_matches=topic_matches,
@@ -113,6 +115,7 @@ def essay_search(
         top_n=len(topic_matches),
         normalize_topic_scores=normalize_topic_scores,
         stance_method=stance_method,
+        use_chunking=use_chunking,
     )
     for match in reranked:
         match["selected_thesis_sentence"] = resolved_thesis
