@@ -1119,6 +1119,44 @@
   background: transparent;
 }
 
+
+.ranking-explanation-shell{
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.94rem;
+  line-height: 1.5;
+  color: #3c4043;
+  max-width: 72ch;
+}
+
+.ranking-explanation-error {
+  color: #d93025;
+}
+
+.ranking-explanation-text p {
+  margin: 0;
+}
+
+.explain-ranking-button{
+  border: 1px solid #d7dbe3;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #4b5563;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.explain-ranking-button:hover {
+  border-color: #bfc8d8;
+  background: #f8fafc;
+  color: #202124;
+}
+
+
+
 .match-panel-header {
   display: flex;
   flex-direction: column;
@@ -4939,6 +4977,10 @@
 
   .match-panel {
     gap: 8px;
+  }
+
+  .match-panel-actions{
+    color: black;
   }
 
   .match-input-grid {

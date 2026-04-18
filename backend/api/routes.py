@@ -38,7 +38,7 @@ from backend.stance_processing.stance_rerank import (
 )
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
-USE_LLM = False
+USE_LLM = True
 # USE_LLM = True
 # ─────────────────────────────────────────────────────────────────────────────
 

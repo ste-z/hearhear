@@ -42,6 +42,50 @@ def _coerce_bool(value, default=False):
     return bool(default)
 
 
+def _format_svd_dimensions(dimensions):
+    if not isinstance(dimensions, list) or not dimensions:
+        return "None"
+
+    lines = []
+    for dimension in dimensions:
+        try:
+            index = int(dimension.get("dimension_index", -1))
+        except (TypeError, ValueError):
+            index = -1
+
+        label = str(dimension.get("label_text") or dimension.get("dimension_label") or index)
+        value_raw = dimension.get("value")
+        try:
+            value = float(value_raw)
+            value_text = f"{value:.3f}"
+        except (TypeError, ValueError):
+            value_text = str(value_raw)
+
+        magnitude_raw = dimension.get("magnitude")
+        magnitude_text = None
+        try:
+            magnitude = float(magnitude_raw)
+            magnitude_text = f"{magnitude:.3f}"
+        except (TypeError, ValueError):
+            magnitude_text = str(magnitude_raw) if magnitude_raw is not None else None
+
+        pole = dimension.get("pole")
+        label_terms = [str(term).strip() for term in dimension.get("label_terms") or [] if str(term).strip()]
+        term_text = f"terms: {', '.join(label_terms)}" if label_terms else None
+
+        parts = [f"Dimension {index}", f"label: {label}", f"value: {value_text}"]
+        if magnitude_text:
+            parts.append(f"magnitude: {magnitude_text}")
+        if pole:
+            parts.append(f"pole: {pole}")
+        if term_text:
+            parts.append(term_text)
+
+        lines.append("; ".join(parts))
+
+    return "\n".join(lines) if lines else "None"
+
+
 def llm_search_decision(client, user_message):
     """Ask the LLM whether to search the DB and which word to use."""
     messages = [
@@ -173,3 +217,89 @@ def register_chat_route(app, json_search):
             return jsonify({"error": "LLM agreement scoring failed"}), 500
 
         return jsonify({"scores": scores})
+
+    @app.route("/api/llm/explain-ranking", methods=["POST"])
+    def explain_ranking():
+        payload = request.get_json(silent=True) or {}
+        query = str(payload.get("query") or "").strip()
+        position = payload.get("position")
+        article = payload.get("article") or {}
+        query_svd_dimensions = payload.get("query_svd_dimensions") or []
+
+        if not query:
+            return jsonify({"error": "Query text is required."}), 400
+        if not isinstance(article, dict) or not article:
+            return jsonify({"error": "Article payload is required."}), 400
+
+        api_key = os.getenv("SPARK_API_KEY") or os.getenv("API_KEY")
+        if not api_key:
+            return jsonify({"error": "SPARK_API_KEY or API_KEY not set — add it to your .env file"}), 500
+
+        try:
+            client = create_spark_client(api_key=api_key)
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 500
+
+        query_svd_text = _format_svd_dimensions(query_svd_dimensions)
+        article_query_chart_text = _format_svd_dimensions(article.get("svd_query_chart_dimensions"))
+        article_chart_text = _format_svd_dimensions(article.get("svd_chart_dimensions"))
+        article_dimensions_text = _format_svd_dimensions(article.get("svd_dimensions"))
+
+        article_title = str(article.get("title") or "").strip()
+        article_summary = str(article.get("summary") or "").strip()
+        article_claim = str(article.get("central_claim_summary") or "").strip()
+        article_score = (
+            article.get("topic_score_display")
+            or article.get("topic_score")
+            or article.get("combined_score")
+            or article.get("score")
+            or None
+        )
+        if article_score is not None:
+            article_score = str(article_score)
+
+        position_label = str(position) if position is not None else "unknown"
+
+        prompt = (
+            "This retrieval system represents queries and articles in a shared latent semantic space via SVD. "
+            "Articles are ranked based on similarity to the query in this space. "
+            "Given the query, the article metadata, and the available SVD representations, explain why this article is ranked at position "
+            f"{position_label}. Focus on shared themes, concepts, or terminology that likely contributed to high similarity. "
+            "Please keep your response concise, with a maximum of 3 sentences to make it easy for users to get a quick insight into the ranking."
+            "Do not invent unobserved article content beyond the title, summary, claim, and provided SVD dimension metadata. \n\n"
+            f"Query:\n{query}\n\n"
+            "Article:\n"
+            f"Title: {article_title or 'N/A'}\n"
+            f"Summary: {article_summary or 'N/A'}\n"
+        )
+        if article_claim:
+            prompt += f"Claim: {article_claim}\n"
+        if article_score is not None:
+            prompt += f"Similarity score: {article_score}\n"
+
+        prompt += (
+            "\nQuery SVD dimensions:\n"
+            f"{query_svd_text}\n\n"
+            "Article SVD query chart dimensions:\n"
+            f"{article_query_chart_text}\n\n"
+            "Article shared corpus SVD dimensions:\n"
+            f"{article_chart_text}\n\n"
+            "Article top SVD dimensions:\n"
+            f"{article_dimensions_text}\n"
+        )
+
+        messages = [
+            {"role": "system", "content": "You are an expert data analyst explaining search ranking behavior in an SVD-based retrieval system."},
+            {"role": "user", "content": prompt},
+        ]
+
+        try:
+            response = client.chat(messages)
+            explanation = (response.get("content") or "").strip()
+            if not explanation:
+                raise RuntimeError("Received empty explanation from the LLM.")
+        except Exception as exc:
+            logger.exception("Ranking explanation request failed")
+            return jsonify({"error": "LLM ranking explanation failed."}), 500
+
+        return jsonify({"explanation": explanation})

@@ -1094,6 +1094,11 @@ function App(): JSX.Element {
   const [articles, setArticles] = useState<Article[]>([])
   const [querySvdCorpusChartDimensions, setQuerySvdCorpusChartDimensions] = useState<SvdLatentDimension[]>([])
   const [querySvdDimensions, setQuerySvdDimensions] = useState<SvdLatentDimension[]>([])
+  const [svdRankingExplanations, setSvdRankingExplanations] = useState<Record<string, {
+    loading: boolean
+    error: string | null
+    explanation: string | null
+  }>>({})
   const [isImportingPdf, setIsImportingPdf] = useState<boolean>(false)
   const [importedPdfName, setImportedPdfName] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
@@ -2068,6 +2073,7 @@ function App(): JSX.Element {
   )
   const visibleArticles = articles.filter(article => !isLlmIrrelevantArticle(article))
   const llmIrrelevantArticles = articles.filter(isLlmIrrelevantArticle)
+  const canExplainRanking = useLlm === true && retrievalModel === 'svd'
 
   const getMatchSummary = (article: Article): string => {
     const hasWeightedRecency = (article.recency_weight ?? recencyWeight) > 0
@@ -2109,6 +2115,98 @@ function App(): JSX.Element {
       return 'Expand to see the support sentences.'
     }
     return 'Expand to see the article overview.'
+  }
+
+  const getRankingExplanationKey = (article: Article): string => String(article.id)
+
+  const getRankingExplanationState = (article: Article): {
+    loading: boolean
+    error: string | null
+    explanation: string | null
+  } => svdRankingExplanations[getRankingExplanationKey(article)] ?? {
+    loading: false,
+    error: null,
+    explanation: null,
+  }
+
+  const getRankingExplanationQueryText = (): string => {
+    if (inputMode === 'stance') {
+      const trimmedTopic = topic.trim()
+      const trimmedOpinion = opinion.trim()
+      if (trimmedTopic || trimmedOpinion) {
+        return [
+          trimmedTopic ? `Topic: ${trimmedTopic}` : null,
+          trimmedOpinion ? `Opinion: ${trimmedOpinion}` : null,
+        ].filter(Boolean).join('\n')
+      }
+      return ''
+    }
+    return essayPreparedText.trim() || searchTerm.trim()
+  }
+
+  const setRankingExplanationState = (
+    article: Article,
+    nextState: Partial<{ loading: boolean; error: string | null; explanation: string | null }>,
+  ): void => {
+    const key = getRankingExplanationKey(article)
+    setSvdRankingExplanations((prev) => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] ?? {
+          loading: false,
+          error: null,
+          explanation: null,
+        }),
+        ...nextState,
+      },
+    }))
+  }
+
+  const handleExplainRanking = async (article: Article, rank: number): Promise<void> => {
+    setRankingExplanationState(article, {
+      loading: true,
+      error: null,
+      explanation: null,
+    })
+
+    const queryText = getRankingExplanationQueryText()
+    if (!queryText) {
+      setRankingExplanationState(article, {
+        loading: false,
+        error: 'No searchable query is available for this result.',
+      })
+      return
+    }
+
+    try {
+      const response = await fetch('/api/llm/explain-ranking', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: queryText,
+          article,
+          position: rank,
+          query_svd_dimensions: querySvdDimensions,
+        }),
+      })
+
+      const data = await readApiJson<{ explanation?: string }>(response)
+      if (!data || typeof data.explanation !== 'string' || data.explanation.trim() === '') {
+        throw new Error('Invalid response from the ranking explanation API.')
+      }
+
+      setRankingExplanationState(article, {
+        loading: false,
+        explanation: data.explanation.trim(),
+      })
+    } catch (fetchError) {
+      setRankingExplanationState(article, {
+        loading: false,
+        error: fetchError instanceof Error ? fetchError.message : 'Ranking explanation failed.',
+      })
+    }
   }
 
   const getSvdExplainabilityHint = (article: Article): string => {
@@ -2683,9 +2781,44 @@ function App(): JSX.Element {
                       {showScoreGrid(article) && (
                         <div className="match-panel">
                           <div className="match-panel-header">
-                            <div className="match-panel-eyebrow">Why it ranked here</div>
-                            <div className="match-panel-summary">{getMatchSummary(article)}</div>
+                            {!canExplainRanking && (
+                            <div>
+                              <div className="match-panel-eyebrow">Why it ranked here</div>
+                              <div className="match-panel-summary">{getMatchSummary(article)}</div>
+                            </div>
+                            )}
+                           
+
+
+                            {canExplainRanking && (
+                              <div className="match-panel-actions">
+                                <p></p>
+                                <button
+                                  type="button"
+                                  className="explain-ranking-button"
+                                  onClick={() => handleExplainRanking(article, visibleArticles.indexOf(article) + 1)}
+                                  disabled={getRankingExplanationState(article).loading}
+                                >
+                                  {getRankingExplanationState(article).loading ? 'Explaining…' : 'Explain ranking'}
+                                </button>
+                              </div>
+                            )}
                           </div>
+
+                          {canExplainRanking && (
+                            <div className="ranking-explanation-shell" aria-live="polite">
+                              {getRankingExplanationState(article).error && (
+                                <div className="ranking-explanation-error">
+                                  {getRankingExplanationState(article).error}
+                                </div>
+                              )}
+                              {getRankingExplanationState(article).explanation && (
+                                <div className="ranking-explanation-text">
+                                  <p>{getRankingExplanationState(article).explanation}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
 
                           <div className="match-score-stack">
                           <div className="match-metric-card overall">
