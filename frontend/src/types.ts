@@ -65,6 +65,12 @@ export type ArticleSearchResponse = {
   empty_results_message?: string | null
 }
 
+export type ResultsOverview = {
+  overview: string
+  key_points?: string[] | null
+  caveat?: string | null
+}
+
 export type RetrievalModel = 'tfidf' | 'svd'
 
 export type EssayClaimCandidate = {

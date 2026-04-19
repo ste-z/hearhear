@@ -15,6 +15,7 @@ import {
   EssayClaimCandidateResponse,
   EssayTextExtractionResponse,
   LlmRelevantParagraph,
+  ResultsOverview,
   RetrievalModel,
   SvdLatentDimension,
 } from './types'
@@ -474,46 +475,47 @@ function SvdConceptBarChart(
           const widthPercent = `${clampSvdMagnitude(dimension.magnitude) * 100}%`
 
           return (
-          <div
-            key={`concept-bar-${dimension.dimension_index}`}
-            className="svd-concept-bar-row"
-          >
-            <div className="svd-concept-bar-copy">
-              <div className="svd-dimension-title">
-                Concept {dimension.dimension_label}
+            <div
+              key={`concept-bar-${dimension.dimension_index}`}
+              className="svd-concept-bar-row"
+            >
+              <div className="svd-concept-bar-copy">
+                <div className="svd-dimension-title">
+                  Concept {dimension.dimension_label}
+                </div>
+                <div className="svd-dimension-terms">
+                  {dimension.label_text}
+                </div>
               </div>
-              <div className="svd-dimension-terms">
-                {dimension.label_text}
-              </div>
-            </div>
 
-            <div className="svd-concept-bar-track" aria-hidden="true">
-              <div className="svd-concept-bar-half negative">
-                {dimension.value < 0 && (
-                  <span
-                    className="svd-concept-bar-fill negative"
-                    style={{ width: widthPercent }}
-                  />
-                )}
+              <div className="svd-concept-bar-track" aria-hidden="true">
+                <div className="svd-concept-bar-half negative">
+                  {dimension.value < 0 && (
+                    <span
+                      className="svd-concept-bar-fill negative"
+                      style={{ width: widthPercent }}
+                    />
+                  )}
+                </div>
+                <div className="svd-concept-bar-half positive">
+                  {dimension.value >= 0 && (
+                    <span
+                      className="svd-concept-bar-fill positive"
+                      style={{ width: widthPercent }}
+                    />
+                  )}
+                </div>
+                <span className="svd-concept-bar-zero" />
               </div>
-              <div className="svd-concept-bar-half positive">
-                {dimension.value >= 0 && (
-                  <span
-                    className="svd-concept-bar-fill positive"
-                    style={{ width: widthPercent }}
-                  />
-                )}
-              </div>
-              <span className="svd-concept-bar-zero" />
-            </div>
 
-            <div className="svd-concept-bar-value-block">
-              <span className="svd-dimension-value">
-                {formatSvdValue(dimension.value)}
-              </span>
+              <div className="svd-concept-bar-value-block">
+                <span className="svd-dimension-value">
+                  {formatSvdValue(dimension.value)}
+                </span>
+              </div>
             </div>
-          </div>
-        )})}
+          )
+        })}
       </div>
     </div>
   )
@@ -1092,6 +1094,9 @@ function App(): JSX.Element {
     defaultSupportedRetrievalModels,
   )
   const [articles, setArticles] = useState<Article[]>([])
+  const [resultsOverview, setResultsOverview] = useState<ResultsOverview | null>(null)
+  const [resultsOverviewLoading, setResultsOverviewLoading] = useState<boolean>(false)
+  const [resultsOverviewError, setResultsOverviewError] = useState<string | null>(null)
   const [querySvdCorpusChartDimensions, setQuerySvdCorpusChartDimensions] = useState<SvdLatentDimension[]>([])
   const [querySvdDimensions, setQuerySvdDimensions] = useState<SvdLatentDimension[]>([])
   const [svdRankingExplanations, setSvdRankingExplanations] = useState<Record<string, {
@@ -1117,6 +1122,7 @@ function App(): JSX.Element {
   const essayOptionsRef = useRef<HTMLDivElement | null>(null)
   const resultsSectionRef = useRef<HTMLDivElement | null>(null)
   const touchStartYRef = useRef<number | null>(null)
+  const resultsOverviewRequestIdRef = useRef<number>(0)
   const lastAppliedYearRangeRef = useRef<{ yearStart: number | null, yearEnd: number | null } | null>(null)
   const [isSearchStageVisible, setIsSearchStageVisible] = useState<boolean>(hasSeenLandingRef.current)
   const [hasSubmittedSearch, setHasSubmittedSearch] = useState<boolean>(false)
@@ -1726,6 +1732,84 @@ function App(): JSX.Element {
     })
   }
 
+  const resetResultsOverview = (): void => {
+    resultsOverviewRequestIdRef.current += 1
+    setResultsOverview(null)
+    setResultsOverviewError(null)
+    setResultsOverviewLoading(false)
+  }
+
+  const requestResultsOverview = async (
+    query: string,
+    nextArticles: Article[],
+    mode: InputMode,
+  ): Promise<void> => {
+    if (!query.trim() || nextArticles.length === 0) {
+      setResultsOverview(null)
+      setResultsOverviewError(null)
+      setResultsOverviewLoading(false)
+      return
+    }
+
+    if (useLlm !== true) {
+      setResultsOverview(null)
+      setResultsOverviewError('AI overview is turned off in the backend config.')
+      setResultsOverviewLoading(false)
+      return
+    }
+
+    if (!llmAgreementAvailable) {
+      setResultsOverview(null)
+      setResultsOverviewError('AI overview needs SPARK_API_KEY or API_KEY in your backend environment.')
+      setResultsOverviewLoading(false)
+      return
+    }
+
+    const requestId = resultsOverviewRequestIdRef.current + 1
+    resultsOverviewRequestIdRef.current = requestId
+    setResultsOverview(null)
+    setResultsOverviewError(null)
+    setResultsOverviewLoading(true)
+
+    try {
+      const response = await fetch('/api/llm/results-overview', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query,
+          mode,
+          articles: nextArticles.slice(0, 10),
+        }),
+      })
+
+      const data = await readApiJson<ResultsOverview>(response)
+      if (resultsOverviewRequestIdRef.current !== requestId) return
+      if (!data || typeof data.overview !== 'string' || data.overview.trim() === '') {
+        throw new Error('Invalid response from the results overview API.')
+      }
+
+      setResultsOverview({
+        overview: data.overview.trim(),
+        key_points: Array.isArray(data.key_points)
+          ? data.key_points.map(point => String(point).trim()).filter(Boolean).slice(0, 4)
+          : [],
+        caveat: typeof data.caveat === 'string' ? data.caveat.trim() : '',
+      })
+      setResultsOverviewError(null)
+    } catch (fetchError) {
+      if (resultsOverviewRequestIdRef.current !== requestId) return
+      console.error('Results overview failed:', fetchError)
+      setResultsOverview(null)
+      setResultsOverviewError(fetchError instanceof Error ? fetchError.message : 'Results overview failed.')
+    } finally {
+      if (resultsOverviewRequestIdRef.current === requestId) {
+        setResultsOverviewLoading(false)
+      }
+    }
+  }
+
   const handleEssaySearch = (value: string): void => {
     setInputMode('essay')
     setImportedPdfName(null)
@@ -1747,6 +1831,7 @@ function App(): JSX.Element {
     setIsImportingPdf(true)
     setError(null)
     setArticles([])
+    resetResultsOverview()
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setHasSubmittedSearch(false)
@@ -1797,6 +1882,7 @@ function App(): JSX.Element {
     setLoading(true)
     setError(null)
     setArticles([])
+    resetResultsOverview()
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
@@ -1833,9 +1919,18 @@ function App(): JSX.Element {
       setQuerySvdCorpusChartDimensions(normalized.querySvdCorpusChartDimensions)
       setQuerySvdDimensions(normalized.querySvdDimensions)
       setEmptyResultsMessage(normalized.emptyResultsMessage)
+      void requestResultsOverview(
+        [
+          trimmedTopic ? `Topic: ${trimmedTopic}` : null,
+          trimmedOpinion ? `Stance: ${trimmedOpinion}` : null,
+        ].filter(Boolean).join('\n'),
+        normalized.articles,
+        'stance',
+      )
     } catch (fetchError) {
       console.error('Search request failed:', fetchError)
       setArticles([])
+      resetResultsOverview()
       setQuerySvdCorpusChartDimensions([])
       setQuerySvdDimensions([])
       setEmptyResultsMessage(null)
@@ -1851,6 +1946,7 @@ function App(): JSX.Element {
     setLoading(true)
     setError(null)
     setArticles([])
+    resetResultsOverview()
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
@@ -1914,6 +2010,7 @@ function App(): JSX.Element {
     setLoading(true)
     setError(null)
     setArticles([])
+    resetResultsOverview()
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
@@ -1951,9 +2048,18 @@ function App(): JSX.Element {
       setQuerySvdCorpusChartDimensions(normalized.querySvdCorpusChartDimensions)
       setQuerySvdDimensions(normalized.querySvdDimensions)
       setEmptyResultsMessage(normalized.emptyResultsMessage)
+      void requestResultsOverview(
+        [
+          resolvedEssayThesis ? `Thesis: ${resolvedEssayThesis}` : null,
+          essayPreparedText ? `Essay: ${essayPreparedText}` : null,
+        ].filter(Boolean).join('\n'),
+        normalized.articles,
+        'essay',
+      )
     } catch (fetchError) {
       console.error('Essay search failed:', fetchError)
       setArticles([])
+      resetResultsOverview()
       setQuerySvdCorpusChartDimensions([])
       setQuerySvdDimensions([])
       setEmptyResultsMessage(null)
@@ -2359,11 +2465,10 @@ function App(): JSX.Element {
 
                     <button
                       type="button"
-                      className={`essay-progress-step ${
-                        essayWorkflowStep === 2
+                      className={`essay-progress-step ${essayWorkflowStep === 2
                           ? 'active'
                           : (isEssayStepTwoAvailable ? 'available' : 'disabled')
-                      }`}
+                        }`}
                       onClick={() => {
                         if (isEssayStepTwoAvailable) {
                           setEssayActiveStep(2)
@@ -2754,7 +2859,47 @@ function App(): JSX.Element {
             )}
 
             {!loading && !error && articles.length > 0 && (
-              <div id="answer-box">
+              <>
+                {(resultsOverviewLoading || resultsOverview || resultsOverviewError) && (
+                  <section className="results-overview-card" aria-live="polite">
+                    <div className="results-overview-header">
+                      <p className="results-overview-eyebrow">AI overview</p>
+                      {resultsOverviewLoading && (
+                        <div className="results-overview-spinner" aria-hidden="true">
+                          <span />
+                          <span />
+                          <span />
+                        </div>
+                      )}
+                    </div>
+
+                    {resultsOverviewLoading && (
+                      <p className="results-overview-copy">Reading the result set for agreement patterns, shared claims, and differences.</p>
+                    )}
+
+                    {!resultsOverviewLoading && resultsOverview && (
+                      <>
+                        <p className="results-overview-copy">{resultsOverview.overview}</p>
+                        {Array.isArray(resultsOverview.key_points) && resultsOverview.key_points.length > 0 && (
+                          <ul className="results-overview-list">
+                            {resultsOverview.key_points.map((point) => (
+                              <li key={point}>{point}</li>
+                            ))}
+                          </ul>
+                        )}
+                        {resultsOverview.caveat && (
+                          <p className="results-overview-caveat">{resultsOverview.caveat}</p>
+                        )}
+                      </>
+                    )}
+
+                    {!resultsOverviewLoading && !resultsOverview && resultsOverviewError && (
+                      <p className="results-overview-error">{resultsOverviewError}</p>
+                    )}
+                  </section>
+                )}
+
+                <div id="answer-box">
                 {visibleArticles.map((article) => {
                   const articleTooltipBase = String(article.id).replace(/[^a-zA-Z0-9_-]/g, '-')
                   const articleRecencyWeight = article.recency_weight ?? recencyWeight
@@ -2782,12 +2927,12 @@ function App(): JSX.Element {
                         <div className="match-panel">
                           <div className="match-panel-header">
                             {!canExplainRanking && (
-                            <div>
-                              <div className="match-panel-eyebrow">Why it ranked here</div>
-                              <div className="match-panel-summary">{getMatchSummary(article)}</div>
-                            </div>
+                              <div>
+                                <div className="match-panel-eyebrow">Why it ranked here</div>
+                                <div className="match-panel-summary">{getMatchSummary(article)}</div>
+                              </div>
                             )}
-                           
+
 
 
                             {canExplainRanking && (
@@ -2821,275 +2966,275 @@ function App(): JSX.Element {
                           )}
 
                           <div className="match-score-stack">
-                          <div className="match-metric-card overall">
-                            <div className="match-metric-header">
-                              <div className="match-metric-heading">
-                                <div className="match-metric-label">Overall match</div>
-                                {renderMetricInfo(
-                                  'Overall match',
-                                  `${articleTooltipBase}-overall-help`,
-                                  articleRecencyWeight > 0
-                                    ? 'Final ranking after combining topic match, agreement, and recency.'
-                                    : 'Final ranking after combining topic match and agreement.',
-                                )}
-                              </div>
-                              <div className="match-metric-value">{formatPercent(article.combined_score)}</div>
-                            </div>
-                            <div className="match-meter" aria-hidden="true">
-                              <span
-                                className="match-meter-fill overall"
-                                style={{ width: getMeterWidth(article.combined_score) }}
-                              />
-                            </div>
-                          </div>
-
-                          <div className="match-input-grid">
-                            <div className="match-metric-card source">
+                            <div className="match-metric-card overall">
                               <div className="match-metric-header">
                                 <div className="match-metric-heading">
-                                  <div className="match-metric-label">Topic match</div>
+                                  <div className="match-metric-label">Overall match</div>
                                   {renderMetricInfo(
-                                    'Topic match',
-                                    `${articleTooltipBase}-topic-help`,
-                                    'How closely the article matches your subject in the first text pass. This can use either raw retrieval similarity or within-result normalization from Settings.',
+                                    'Overall match',
+                                    `${articleTooltipBase}-overall-help`,
+                                    articleRecencyWeight > 0
+                                      ? 'Final ranking after combining topic match, agreement, and recency.'
+                                      : 'Final ranking after combining topic match and agreement.',
                                   )}
                                 </div>
-                                <div className="match-metric-value">{formatPercent(getTopicMatchScore(article))}</div>
+                                <div className="match-metric-value">{formatPercent(article.combined_score)}</div>
                               </div>
                               <div className="match-meter" aria-hidden="true">
                                 <span
-                                  className="match-meter-fill topic"
-                                  style={{ width: getMeterWidth(getTopicMatchScore(article)) }}
+                                  className="match-meter-fill overall"
+                                  style={{ width: getMeterWidth(article.combined_score) }}
                                 />
                               </div>
                             </div>
 
-                            {articleRecencyWeight > 0 && (
+                            <div className="match-input-grid">
                               <div className="match-metric-card source">
                                 <div className="match-metric-header">
                                   <div className="match-metric-heading">
-                                    <div className="match-metric-label">Recency</div>
+                                    <div className="match-metric-label">Topic match</div>
                                     {renderMetricInfo(
-                                      'Recency',
-                                      `${articleTooltipBase}-recency-help`,
-                                      'How strongly the article benefits from being more recently published.',
+                                      'Topic match',
+                                      `${articleTooltipBase}-topic-help`,
+                                      'How closely the article matches your subject in the first text pass. This can use either raw retrieval similarity or within-result normalization from Settings.',
                                     )}
                                   </div>
-                                  <div className="match-metric-value">{formatPercent(article.recency_score_normalized)}</div>
+                                  <div className="match-metric-value">{formatPercent(getTopicMatchScore(article))}</div>
                                 </div>
                                 <div className="match-meter" aria-hidden="true">
                                   <span
-                                    className="match-meter-fill recency"
-                                    style={{ width: getMeterWidth(article.recency_score_normalized) }}
-                                  />
-                                </div>
-                              </div>
-                            )}
-
-                            <div className="agreement-branch" tabIndex={0}>
-                              <div className="match-metric-card source agreement">
-                                <div className="match-metric-header">
-                                  <div className="match-metric-heading">
-                                    <div className="match-metric-label">Agreement</div>
-                                    {renderMetricInfo(
-                                      'Agreement',
-                                      `${articleTooltipBase}-agreement-help`,
-                                      'How closely the article\'s main claim seems to align with your view.',
-                                    )}
-                                  </div>
-                                  <div className="match-metric-value">{formatPercent(article.stance_score_normalized)}</div>
-                                </div>
-                                <div className="match-meter" aria-hidden="true">
-                                  <span
-                                    className="match-meter-fill stance"
-                                    style={{ width: getMeterWidth(article.stance_score_normalized) }}
+                                    className="match-meter-fill topic"
+                                    style={{ width: getMeterWidth(getTopicMatchScore(article)) }}
                                   />
                                 </div>
                               </div>
 
-                              {hasStanceSignals(article) && (
-                                <div className="agreement-hover-panel">
-                                  <div className="agreement-hover-title">Agreement is based on</div>
-                                  <div className="stance-read-panel">
-                                    <div className="stance-read-grid">
-                                      <div className="stance-read-row">
-                                        <div className="stance-read-label">Supports your view</div>
-                                        <div className="stance-read-bar" aria-hidden="true">
-                                          <span
-                                            className="stance-read-fill support"
-                                            style={{ width: getMeterWidth(article.stance_entailment_prob) }}
-                                          />
-                                        </div>
-                                        <div className="stance-read-value">{formatPercent(article.stance_entailment_prob)}</div>
-                                      </div>
-
-                                      <div className="stance-read-row">
-                                        <div className="stance-read-label">Mixed or unclear</div>
-                                        <div className="stance-read-bar" aria-hidden="true">
-                                          <span
-                                            className="stance-read-fill neutral"
-                                            style={{ width: getMeterWidth(article.stance_neutral_prob) }}
-                                          />
-                                        </div>
-                                        <div className="stance-read-value">{formatPercent(article.stance_neutral_prob)}</div>
-                                      </div>
-
-                                      <div className="stance-read-row">
-                                        <div className="stance-read-label">Pushes back</div>
-                                        <div className="stance-read-bar" aria-hidden="true">
-                                          <span
-                                            className="stance-read-fill contradict"
-                                            style={{ width: getMeterWidth(article.stance_contradiction_prob) }}
-                                          />
-                                        </div>
-                                        <div className="stance-read-value">{formatPercent(article.stance_contradiction_prob)}</div>
-                                      </div>
+                              {articleRecencyWeight > 0 && (
+                                <div className="match-metric-card source">
+                                  <div className="match-metric-header">
+                                    <div className="match-metric-heading">
+                                      <div className="match-metric-label">Recency</div>
+                                      {renderMetricInfo(
+                                        'Recency',
+                                        `${articleTooltipBase}-recency-help`,
+                                        'How strongly the article benefits from being more recently published.',
+                                      )}
                                     </div>
+                                    <div className="match-metric-value">{formatPercent(article.recency_score_normalized)}</div>
+                                  </div>
+                                  <div className="match-meter" aria-hidden="true">
+                                    <span
+                                      className="match-meter-fill recency"
+                                      style={{ width: getMeterWidth(article.recency_score_normalized) }}
+                                    />
                                   </div>
                                 </div>
                               )}
+
+                              <div className="agreement-branch" tabIndex={0}>
+                                <div className="match-metric-card source agreement">
+                                  <div className="match-metric-header">
+                                    <div className="match-metric-heading">
+                                      <div className="match-metric-label">Agreement</div>
+                                      {renderMetricInfo(
+                                        'Agreement',
+                                        `${articleTooltipBase}-agreement-help`,
+                                        'How closely the article\'s main claim seems to align with your view.',
+                                      )}
+                                    </div>
+                                    <div className="match-metric-value">{formatPercent(article.stance_score_normalized)}</div>
+                                  </div>
+                                  <div className="match-meter" aria-hidden="true">
+                                    <span
+                                      className="match-meter-fill stance"
+                                      style={{ width: getMeterWidth(article.stance_score_normalized) }}
+                                    />
+                                  </div>
+                                </div>
+
+                                {hasStanceSignals(article) && (
+                                  <div className="agreement-hover-panel">
+                                    <div className="agreement-hover-title">Agreement is based on</div>
+                                    <div className="stance-read-panel">
+                                      <div className="stance-read-grid">
+                                        <div className="stance-read-row">
+                                          <div className="stance-read-label">Supports your view</div>
+                                          <div className="stance-read-bar" aria-hidden="true">
+                                            <span
+                                              className="stance-read-fill support"
+                                              style={{ width: getMeterWidth(article.stance_entailment_prob) }}
+                                            />
+                                          </div>
+                                          <div className="stance-read-value">{formatPercent(article.stance_entailment_prob)}</div>
+                                        </div>
+
+                                        <div className="stance-read-row">
+                                          <div className="stance-read-label">Mixed or unclear</div>
+                                          <div className="stance-read-bar" aria-hidden="true">
+                                            <span
+                                              className="stance-read-fill neutral"
+                                              style={{ width: getMeterWidth(article.stance_neutral_prob) }}
+                                            />
+                                          </div>
+                                          <div className="stance-read-value">{formatPercent(article.stance_neutral_prob)}</div>
+                                        </div>
+
+                                        <div className="stance-read-row">
+                                          <div className="stance-read-label">Pushes back</div>
+                                          <div className="stance-read-bar" aria-hidden="true">
+                                            <span
+                                              className="stance-read-fill contradict"
+                                              style={{ width: getMeterWidth(article.stance_contradiction_prob) }}
+                                            />
+                                          </div>
+                                          <div className="stance-read-value">{formatPercent(article.stance_contradiction_prob)}</div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {hasLlmRelevantParagraphs(article) && (
-                      <details className="content-disclosure paragraph-evidence-disclosure">
-                        <summary className="content-disclosure-summary">
-                          <span className="content-disclosure-copy">
-                            <span className="content-disclosure-title">{`Relevant ${getLlmChunkNoun(article)}`}</span>
-                            <span className="content-disclosure-hint">{getParagraphEvidenceHint(article)}</span>
-                          </span>
-                          <span className="content-disclosure-status" aria-hidden="true" />
-                        </summary>
+                      {hasLlmRelevantParagraphs(article) && (
+                        <details className="content-disclosure paragraph-evidence-disclosure">
+                          <summary className="content-disclosure-summary">
+                            <span className="content-disclosure-copy">
+                              <span className="content-disclosure-title">{`Relevant ${getLlmChunkNoun(article)}`}</span>
+                              <span className="content-disclosure-hint">{getParagraphEvidenceHint(article)}</span>
+                            </span>
+                            <span className="content-disclosure-status" aria-hidden="true" />
+                          </summary>
 
-                        <div className="paragraph-evidence-list">
-                          {(article.llm_relevant_paragraphs ?? []).map((paragraph, index) => (
-                            <div key={paragraphKey(article, paragraph, index)} className="paragraph-evidence-item">
-                              <div className="paragraph-evidence-header">
-                                <span>{`${getLlmChunkNoun(article, false)} ${(paragraph.paragraph_index ?? index) + 1}`}</span>
-                                <strong>{formatPercent(paragraph.agreement_score)}</strong>
+                          <div className="paragraph-evidence-list">
+                            {(article.llm_relevant_paragraphs ?? []).map((paragraph, index) => (
+                              <div key={paragraphKey(article, paragraph, index)} className="paragraph-evidence-item">
+                                <div className="paragraph-evidence-header">
+                                  <span>{`${getLlmChunkNoun(article, false)} ${(paragraph.paragraph_index ?? index) + 1}`}</span>
+                                  <strong>{formatPercent(paragraph.agreement_score)}</strong>
+                                </div>
+                                <p>{paragraph.text}</p>
                               </div>
-                              <p>{paragraph.text}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </details>
-                    )}
-
-                    {hasSvdExplainability(article) && (
-                      <details className="content-disclosure svd-explainability-disclosure">
-                        <summary className="content-disclosure-summary">
-                          <span className="content-disclosure-copy">
-                            <span className="content-disclosure-title">Latent concepts</span>
-                            <span className="content-disclosure-hint">{getSvdExplainabilityHint(article)}</span>
-                          </span>
-                          <span className="content-disclosure-status" aria-hidden="true" />
-                        </summary>
-
-                        <div className="svd-explainability-panel">
-                          {Array.isArray(article.svd_query_chart_dimensions) && article.svd_query_chart_dimensions.length > 0 && (
-                            <div className="svd-chart-section">
-                              <div className="svd-section-copy-block">
-                                <div className="svd-section-title">Query top 10 concepts</div>
-                                <p className="svd-section-copy">
-                                  This radar reuses the query&apos;s top 10 concepts and shows how strongly this article loads on those same axes.
-                                </p>
-                              </div>
-                              <SvdRadarChart
-                                dimensions={article.svd_query_chart_dimensions}
-                                ariaLabel="Radar chart of this article measured on the query's top 10 SVD concepts"
-                                caption="These axes come from the query, not the article. Radius shows this article's loading on the same 10 concepts activated by the query."
-                                emptyCopy="No query-anchored SVD concepts are available for this article yet."
-                              />
-                            </div>
-                          )}
-
-                          {Array.isArray(article.svd_chart_dimensions) && article.svd_chart_dimensions.length > 0 && (
-                            <div className="svd-chart-section">
-                              <div className="svd-section-copy-block">
-                                <div className="svd-section-title">Shared top 10 corpus concepts</div>
-                                <p className="svd-section-copy">
-                                  This radar uses the same first 10 corpus-level SVD concepts for every result, so you can compare article shapes on a fixed corpus frame.
-                                </p>
-                              </div>
-                              <SvdRadarChart
-                                dimensions={article.svd_chart_dimensions}
-                                ariaLabel="Radar chart of this article across the shared top 10 corpus-level SVD concepts"
-                                caption="These axes stay fixed to the same first 10 corpus-level SVD concepts on every article card. Radius shows absolute loading while labels and colors preserve the sign."
-                                emptyCopy="No shared corpus-level SVD concepts are available for this article yet."
-                              />
-                            </div>
-                          )}
-
-                          {(
-                            Array.isArray(article.svd_dimensions) && article.svd_dimensions.length > 0
-                          ) && (
-                            <div className="svd-dimension-section">
-                              <div className="svd-section-copy-block">
-                                <div className="svd-section-title">Top concepts for this article</div>
-                                <p className="svd-section-copy">
-                                  These bars show the article&apos;s top 10 concepts overall. Concepts extend left for negative loadings and right for positive loadings.
-                                </p>
-                              </div>
-
-                              <SvdConceptBarChart dimensions={article.svd_dimensions ?? []} />
-                            </div>
-                          )}
-                        </div>
-                      </details>
-                    )}
-
-                    {(article.thesis_sentence || (article.support_sentences && article.support_sentences.length > 0)) && (
-                      <details className="content-disclosure">
-                        <summary className="content-disclosure-summary">
-                          <span className="content-disclosure-copy">
-                            <span className="content-disclosure-title">Overview</span>
-                            <span className="content-disclosure-hint">{getOverviewHint(article)}</span>
-                          </span>
-                          <span className="content-disclosure-status" aria-hidden="true" />
-                        </summary>
-                        <div className="sentence-block">
-                          {article.thesis_sentence && (
-                            <div className="overview-group">
-                              <div className="overview-label">Thesis sentence</div>
-                              <p>{article.thesis_sentence}</p>
-                            </div>
-                          )}
-
-                          {article.support_sentences && article.support_sentences.length > 0 && (
-                            <div className="overview-group">
-                              <div className="overview-label">Support sentences</div>
-                              <ul className="sentence-list">
-                                {article.support_sentences.map((sentence, index) => (
-                                  <li key={`${article.id}-support-${index}`}>{sentence}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      </details>
-                    )}
-
-                    {showScoreGrid(article) && !article.central_claim_summary && (
-                      <p className="claim-missing">
-                        No extracted central claim is available for this article yet, so it stayed in the ranking based on topic or essay relevance alone.
-                      </p>
-                    )}
-
-                    {article.keywords && article.keywords.length > 0 && (
-                      <div className="article-footer-row">
-                        <div className="keyword-block">
-                          <p>Keywords</p>
-                          <div className="keyword-list">
-                            {article.keywords.map((kw, index) => (
-                              <span key={`${article.id}-keyword-${index}`} className="keyword-chip">{kw}</span>
                             ))}
                           </div>
+                        </details>
+                      )}
+
+                      {hasSvdExplainability(article) && (
+                        <details className="content-disclosure svd-explainability-disclosure">
+                          <summary className="content-disclosure-summary">
+                            <span className="content-disclosure-copy">
+                              <span className="content-disclosure-title">Latent concepts</span>
+                              <span className="content-disclosure-hint">{getSvdExplainabilityHint(article)}</span>
+                            </span>
+                            <span className="content-disclosure-status" aria-hidden="true" />
+                          </summary>
+
+                          <div className="svd-explainability-panel">
+                            {Array.isArray(article.svd_query_chart_dimensions) && article.svd_query_chart_dimensions.length > 0 && (
+                              <div className="svd-chart-section">
+                                <div className="svd-section-copy-block">
+                                  <div className="svd-section-title">Query top 10 concepts</div>
+                                  <p className="svd-section-copy">
+                                    This radar reuses the query&apos;s top 10 concepts and shows how strongly this article loads on those same axes.
+                                  </p>
+                                </div>
+                                <SvdRadarChart
+                                  dimensions={article.svd_query_chart_dimensions}
+                                  ariaLabel="Radar chart of this article measured on the query's top 10 SVD concepts"
+                                  caption="These axes come from the query, not the article. Radius shows this article's loading on the same 10 concepts activated by the query."
+                                  emptyCopy="No query-anchored SVD concepts are available for this article yet."
+                                />
+                              </div>
+                            )}
+
+                            {Array.isArray(article.svd_chart_dimensions) && article.svd_chart_dimensions.length > 0 && (
+                              <div className="svd-chart-section">
+                                <div className="svd-section-copy-block">
+                                  <div className="svd-section-title">Shared top 10 corpus concepts</div>
+                                  <p className="svd-section-copy">
+                                    This radar uses the same first 10 corpus-level SVD concepts for every result, so you can compare article shapes on a fixed corpus frame.
+                                  </p>
+                                </div>
+                                <SvdRadarChart
+                                  dimensions={article.svd_chart_dimensions}
+                                  ariaLabel="Radar chart of this article across the shared top 10 corpus-level SVD concepts"
+                                  caption="These axes stay fixed to the same first 10 corpus-level SVD concepts on every article card. Radius shows absolute loading while labels and colors preserve the sign."
+                                  emptyCopy="No shared corpus-level SVD concepts are available for this article yet."
+                                />
+                              </div>
+                            )}
+
+                            {(
+                              Array.isArray(article.svd_dimensions) && article.svd_dimensions.length > 0
+                            ) && (
+                                <div className="svd-dimension-section">
+                                  <div className="svd-section-copy-block">
+                                    <div className="svd-section-title">Top concepts for this article</div>
+                                    <p className="svd-section-copy">
+                                      These bars show the article&apos;s top 10 concepts overall. Concepts extend left for negative loadings and right for positive loadings.
+                                    </p>
+                                  </div>
+
+                                  <SvdConceptBarChart dimensions={article.svd_dimensions ?? []} />
+                                </div>
+                              )}
+                          </div>
+                        </details>
+                      )}
+
+                      {(article.thesis_sentence || (article.support_sentences && article.support_sentences.length > 0)) && (
+                        <details className="content-disclosure">
+                          <summary className="content-disclosure-summary">
+                            <span className="content-disclosure-copy">
+                              <span className="content-disclosure-title">Overview</span>
+                              <span className="content-disclosure-hint">{getOverviewHint(article)}</span>
+                            </span>
+                            <span className="content-disclosure-status" aria-hidden="true" />
+                          </summary>
+                          <div className="sentence-block">
+                            {article.thesis_sentence && (
+                              <div className="overview-group">
+                                <div className="overview-label">Thesis sentence</div>
+                                <p>{article.thesis_sentence}</p>
+                              </div>
+                            )}
+
+                            {article.support_sentences && article.support_sentences.length > 0 && (
+                              <div className="overview-group">
+                                <div className="overview-label">Support sentences</div>
+                                <ul className="sentence-list">
+                                  {article.support_sentences.map((sentence, index) => (
+                                    <li key={`${article.id}-support-${index}`}>{sentence}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        </details>
+                      )}
+
+                      {showScoreGrid(article) && !article.central_claim_summary && (
+                        <p className="claim-missing">
+                          No extracted central claim is available for this article yet, so it stayed in the ranking based on topic or essay relevance alone.
+                        </p>
+                      )}
+
+                      {article.keywords && article.keywords.length > 0 && (
+                        <div className="article-footer-row">
+                          <div className="keyword-block">
+                            <p>Keywords</p>
+                            <div className="keyword-list">
+                              {article.keywords.map((kw, index) => (
+                                <span key={`${article.id}-keyword-${index}`} className="keyword-chip">{kw}</span>
+                              ))}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
                     </article>
                   )
                 })}
@@ -3130,7 +3275,8 @@ function App(): JSX.Element {
                     </div>
                   </details>
                 )}
-              </div>
+                </div>
+              </>
             )}
 
             {!loading && !error && articles.length === 0 && (

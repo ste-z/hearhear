@@ -4575,6 +4575,108 @@
   color: #7a2f21;
 }
 
+.results-overview-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 24px;
+  padding: 24px 26px;
+  border-radius: 28px;
+  border: 1px solid rgba(54, 87, 65, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(246, 250, 244, 0.76));
+  color: #1f1811;
+}
+
+.results-overview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.results-overview-eyebrow {
+  margin: 0;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #365741;
+}
+
+.results-overview-copy,
+.results-overview-caveat,
+.results-overview-error {
+  margin: 0;
+  max-width: 74ch;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.98rem;
+  line-height: 1.65;
+  color: #2a2016;
+}
+
+.results-overview-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.results-overview-list li {
+  position: relative;
+  padding-left: 18px;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.94rem;
+  line-height: 1.55;
+  color: #3f3020;
+}
+
+.results-overview-list li::before {
+  content: '';
+  position: absolute;
+  top: 0.72em;
+  left: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #365741;
+}
+
+.results-overview-caveat {
+  padding-top: 2px;
+  color: #6f5a43;
+  font-size: 0.9rem;
+}
+
+.results-overview-error {
+  color: #7a2f21;
+}
+
+.results-overview-spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.results-overview-spinner span {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #365741;
+  animation: results-thinking-bounce 0.9s ease-in-out infinite;
+}
+
+.results-overview-spinner span:nth-child(2) {
+  animation-delay: 0.12s;
+}
+
+.results-overview-spinner span:nth-child(3) {
+  animation-delay: 0.24s;
+}
+
 .results-thinking-label {
   font-family: 'Kanit', sans-serif;
   font-size: 1.35rem;

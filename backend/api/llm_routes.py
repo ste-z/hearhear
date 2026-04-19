@@ -86,6 +86,83 @@ def _format_svd_dimensions(dimensions):
     return "\n".join(lines) if lines else "None"
 
 
+def _clean_overview_text(value, max_chars=500):
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars - 3].rstrip()}..."
+
+
+def _format_article_for_results_overview(article, index):
+    title = _clean_overview_text(article.get("title"), 240)
+    summary = _clean_overview_text(article.get("summary"), 700)
+    claim = _clean_overview_text(article.get("central_claim_summary"), 500)
+    stance = _clean_overview_text(article.get("stance_label"), 80)
+    agreement = article.get("llm_agreement_score")
+    score = (
+        article.get("combined_score")
+        or article.get("topic_score_display")
+        or article.get("topic_score")
+        or article.get("score")
+    )
+
+    lines = [f"Result {index + 1}: {title or 'Untitled'}"]
+    if summary:
+        lines.append(f"Summary: {summary}")
+    if claim:
+        lines.append(f"Central claim: {claim}")
+    if stance:
+        lines.append(f"Agreement label: {stance}")
+    if agreement is not None:
+        lines.append(f"LLM agreement score: {agreement}")
+    if score is not None:
+        lines.append(f"Ranking score: {score}")
+    return "\n".join(lines)
+
+
+def _parse_results_overview_response(raw_content):
+    text = str(raw_content or "").strip()
+    if not text:
+        raise ValueError("Empty results overview response")
+
+    fence_match = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    candidate = fence_match.group(1).strip() if fence_match else text
+
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return {
+            "overview": text,
+            "key_points": [],
+            "caveat": "",
+        }
+
+    if not isinstance(parsed, dict):
+        raise ValueError("Results overview response must be a JSON object")
+
+    overview = _clean_overview_text(parsed.get("overview"), 1200)
+    key_points = []
+    raw_key_points = parsed.get("key_points")
+    if isinstance(raw_key_points, list):
+        for item in raw_key_points[:4]:
+            point = _clean_overview_text(item, 320)
+            if point:
+                key_points.append(point)
+
+    caveat = _clean_overview_text(parsed.get("caveat"), 400)
+    if not overview and key_points:
+        overview = key_points[0]
+        key_points = key_points[1:]
+    if not overview:
+        raise ValueError("Results overview response is missing an overview")
+
+    return {
+        "overview": overview,
+        "key_points": key_points,
+        "caveat": caveat,
+    }
+
+
 def llm_search_decision(client, user_message):
     """Ask the LLM whether to search the DB and which word to use."""
     messages = [
@@ -303,3 +380,68 @@ def register_chat_route(app, json_search):
             return jsonify({"error": "LLM ranking explanation failed."}), 500
 
         return jsonify({"explanation": explanation})
+
+    @app.route("/api/llm/results-overview", methods=["POST"])
+    def results_overview():
+        payload = request.get_json(silent=True) or {}
+        query = str(payload.get("query") or "").strip()
+        articles = payload.get("articles") or payload.get("results") or []
+        mode = str(payload.get("mode") or "search").strip().lower()
+
+        if not query:
+            return jsonify({"error": "Query text is required."}), 400
+        if not isinstance(articles, list) or not articles:
+            return jsonify({"error": "A non-empty articles list is required."}), 400
+
+        api_key = os.getenv("SPARK_API_KEY") or os.getenv("API_KEY")
+        if not api_key:
+            return jsonify({"error": "SPARK_API_KEY or API_KEY not set — add it to your .env file"}), 500
+
+        try:
+            client = create_spark_client(api_key=api_key)
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 500
+
+        usable_articles = [
+            article for article in articles
+            if isinstance(article, dict) and not bool(article.get("llm_irrelevant"))
+        ][:10]
+        if not usable_articles:
+            return jsonify({"error": "No relevant articles are available to summarize."}), 400
+
+        context_text = "\n\n---\n\n".join(
+            _format_article_for_results_overview(article, index)
+            for index, article in enumerate(usable_articles)
+        )
+
+        system_prompt = (
+            "You write a concise AI overview for a Guardian opinion article results page. "
+            "Summarize the retrieved results as a collection, not one article at a time. "
+            "Use only the supplied search query and article result snippets. Do not add outside facts. "
+            "Focus on the overall pattern: whether the results mostly support, oppose, complicate, or split on the user's view; "
+            "what central claims repeat across articles; and where the retrieved articles differ from each other. "
+            "Do not write a bullet per article, do not list titles, and do not make claims about articles not shown. "
+            "Be careful about uncertainty: describe patterns in the retrieved results, not the whole news landscape. "
+            "Return valid JSON only with keys: overview, key_points, caveat. "
+            "overview must be 2-3 short sentences about the overall result set. "
+            "key_points must be an array of 2-4 short strings covering shared themes, differences, or agreement patterns. "
+            "caveat must be one short sentence about limits of the retrieved results."
+        )
+        user_prompt = (
+            f"Search mode: {mode}\n"
+            f"Search query:\n{query}\n\n"
+            f"Top retrieved article snippets:\n\n{context_text}"
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        try:
+            response = client.chat(messages)
+            overview = _parse_results_overview_response(response.get("content"))
+        except Exception:
+            logger.exception("Results overview request failed")
+            return jsonify({"error": "LLM results overview failed"}), 500
+
+        return jsonify(overview)
