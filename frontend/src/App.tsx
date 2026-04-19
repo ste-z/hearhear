@@ -6,6 +6,7 @@ import {
   type ChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type SyntheticEvent,
 } from 'react'
 import './App.css'
 import {
@@ -15,7 +16,6 @@ import {
   EssayClaimCandidateResponse,
   EssayTextExtractionResponse,
   LlmRelevantParagraph,
-  ResultsOverview,
   RetrievalModel,
   SvdLatentDimension,
 } from './types'
@@ -29,6 +29,7 @@ type RerankSelectionMode = 'manual' | 'automatic'
 type StanceMethod = 'nli' | 'llm'
 type ChunkingMode = 'none' | 'paragraph' | 'semantic'
 type FrontendChunkingMode = Exclude<ChunkingMode, 'paragraph'>
+type SvdDimensionLabelMap = Record<number, string>
 
 type ConfigResponse = {
   use_llm: boolean
@@ -327,14 +328,30 @@ const buildSvdLabelLines = (dimension: SvdLatentDimension): string[] => {
   ].filter(Boolean)
 }
 
+const buildSvdDisplayLabelLines = (
+  dimension: SvdLatentDimension,
+  dimensionLabels?: SvdDimensionLabelMap | null,
+): string[] => {
+  const llmLabel = dimensionLabels?.[dimension.dimension_index]?.trim()
+  if (!llmLabel) return buildSvdLabelLines(dimension)
+
+  const firstTerms = dimension.label_terms.slice(0, 3).join(' · ')
+  return [
+    llmLabel,
+    firstTerms,
+  ].filter(Boolean)
+}
+
 function SvdRadarChart(
   {
     dimensions,
+    dimensionLabels = null,
     ariaLabel = 'Radar chart of SVD concepts',
     caption = 'Radius shows absolute loading, while labels and colors preserve the signed concept direction.',
     emptyCopy = 'No SVD concepts are available yet.',
   }: {
     dimensions: SvdLatentDimension[]
+    dimensionLabels?: SvdDimensionLabelMap | null
     ariaLabel?: string
     caption?: string
     emptyCopy?: string
@@ -394,7 +411,7 @@ function SvdRadarChart(
           const labelPoint = getSvdPoint(index, chartDimensions.length, SVD_RADAR_RADIUS + 30)
           const pointRadius = clampSvdMagnitude(dimension.magnitude) * SVD_RADAR_RADIUS
           const point = getSvdPoint(index, chartDimensions.length, pointRadius)
-          const labelLines = buildSvdLabelLines(dimension)
+          const labelLines = buildSvdDisplayLabelLines(dimension, dimensionLabels)
           const anchor = getSvdAnchor(labelPoint.x)
           const labelStartY = labelPoint.y - ((labelLines.length - 1) * 9)
 
@@ -442,8 +459,10 @@ function SvdRadarChart(
 function SvdConceptBarChart(
   {
     dimensions,
+    dimensionLabels = null,
   }: {
     dimensions: SvdLatentDimension[]
+    dimensionLabels?: SvdDimensionLabelMap | null
   },
 ): JSX.Element {
   const chartDimensions = dimensions.slice(0, 10)
@@ -481,7 +500,7 @@ function SvdConceptBarChart(
             >
               <div className="svd-concept-bar-copy">
                 <div className="svd-dimension-title">
-                  Concept {dimension.dimension_label}
+                  {dimensionLabels?.[dimension.dimension_index]?.trim() || `Concept ${dimension.dimension_label}`}
                 </div>
                 <div className="svd-dimension-terms">
                   {dimension.label_text}
@@ -1094,15 +1113,17 @@ function App(): JSX.Element {
     defaultSupportedRetrievalModels,
   )
   const [articles, setArticles] = useState<Article[]>([])
-  const [resultsOverview, setResultsOverview] = useState<ResultsOverview | null>(null)
-  const [resultsOverviewLoading, setResultsOverviewLoading] = useState<boolean>(false)
-  const [resultsOverviewError, setResultsOverviewError] = useState<string | null>(null)
   const [querySvdCorpusChartDimensions, setQuerySvdCorpusChartDimensions] = useState<SvdLatentDimension[]>([])
   const [querySvdDimensions, setQuerySvdDimensions] = useState<SvdLatentDimension[]>([])
   const [svdRankingExplanations, setSvdRankingExplanations] = useState<Record<string, {
     loading: boolean
     error: string | null
     explanation: string | null
+  }>>({})
+  const [svdDimensionLabelStates, setSvdDimensionLabelStates] = useState<Record<string, {
+    loading: boolean
+    error: string | null
+    labels: SvdDimensionLabelMap
   }>>({})
   const [isImportingPdf, setIsImportingPdf] = useState<boolean>(false)
   const [importedPdfName, setImportedPdfName] = useState<string | null>(null)
@@ -1120,10 +1141,8 @@ function App(): JSX.Element {
   const [essayThesisMode, setEssayThesisMode] = useState<EssayThesisMode>('candidate')
   const [essayActiveStep, setEssayActiveStep] = useState<EssayStep>(1)
   const essayOptionsRef = useRef<HTMLDivElement | null>(null)
-  const opinionInputRef = useRef<HTMLInputElement | null>(null)
   const resultsSectionRef = useRef<HTMLDivElement | null>(null)
   const touchStartYRef = useRef<number | null>(null)
-  const resultsOverviewRequestIdRef = useRef<number>(0)
   const lastAppliedYearRangeRef = useRef<{ yearStart: number | null, yearEnd: number | null } | null>(null)
   const [isSearchStageVisible, setIsSearchStageVisible] = useState<boolean>(hasSeenLandingRef.current)
   const [hasSubmittedSearch, setHasSubmittedSearch] = useState<boolean>(false)
@@ -1733,84 +1752,6 @@ function App(): JSX.Element {
     })
   }
 
-  const resetResultsOverview = (): void => {
-    resultsOverviewRequestIdRef.current += 1
-    setResultsOverview(null)
-    setResultsOverviewError(null)
-    setResultsOverviewLoading(false)
-  }
-
-  const requestResultsOverview = async (
-    query: string,
-    nextArticles: Article[],
-    mode: InputMode,
-  ): Promise<void> => {
-    if (!query.trim() || nextArticles.length === 0) {
-      setResultsOverview(null)
-      setResultsOverviewError(null)
-      setResultsOverviewLoading(false)
-      return
-    }
-
-    if (useLlm !== true) {
-      setResultsOverview(null)
-      setResultsOverviewError('AI overview is turned off in the backend config.')
-      setResultsOverviewLoading(false)
-      return
-    }
-
-    if (!llmAgreementAvailable) {
-      setResultsOverview(null)
-      setResultsOverviewError('AI overview needs SPARK_API_KEY or API_KEY in your backend environment.')
-      setResultsOverviewLoading(false)
-      return
-    }
-
-    const requestId = resultsOverviewRequestIdRef.current + 1
-    resultsOverviewRequestIdRef.current = requestId
-    setResultsOverview(null)
-    setResultsOverviewError(null)
-    setResultsOverviewLoading(true)
-
-    try {
-      const response = await fetch('/api/llm/results-overview', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query,
-          mode,
-          articles: nextArticles.slice(0, 10),
-        }),
-      })
-
-      const data = await readApiJson<ResultsOverview>(response)
-      if (resultsOverviewRequestIdRef.current !== requestId) return
-      if (!data || typeof data.overview !== 'string' || data.overview.trim() === '') {
-        throw new Error('Invalid response from the results overview API.')
-      }
-
-      setResultsOverview({
-        overview: data.overview.trim(),
-        key_points: Array.isArray(data.key_points)
-          ? data.key_points.map(point => String(point).trim()).filter(Boolean).slice(0, 4)
-          : [],
-        caveat: typeof data.caveat === 'string' ? data.caveat.trim() : '',
-      })
-      setResultsOverviewError(null)
-    } catch (fetchError) {
-      if (resultsOverviewRequestIdRef.current !== requestId) return
-      console.error('Results overview failed:', fetchError)
-      setResultsOverview(null)
-      setResultsOverviewError(fetchError instanceof Error ? fetchError.message : 'Results overview failed.')
-    } finally {
-      if (resultsOverviewRequestIdRef.current === requestId) {
-        setResultsOverviewLoading(false)
-      }
-    }
-  }
-
   const handleEssaySearch = (value: string): void => {
     setInputMode('essay')
     setImportedPdfName(null)
@@ -1832,7 +1773,6 @@ function App(): JSX.Element {
     setIsImportingPdf(true)
     setError(null)
     setArticles([])
-    resetResultsOverview()
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setHasSubmittedSearch(false)
@@ -1883,7 +1823,6 @@ function App(): JSX.Element {
     setLoading(true)
     setError(null)
     setArticles([])
-    resetResultsOverview()
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
@@ -1920,18 +1859,9 @@ function App(): JSX.Element {
       setQuerySvdCorpusChartDimensions(normalized.querySvdCorpusChartDimensions)
       setQuerySvdDimensions(normalized.querySvdDimensions)
       setEmptyResultsMessage(normalized.emptyResultsMessage)
-      void requestResultsOverview(
-        [
-          trimmedTopic ? `Topic: ${trimmedTopic}` : null,
-          trimmedOpinion ? `Stance: ${trimmedOpinion}` : null,
-        ].filter(Boolean).join('\n'),
-        normalized.articles,
-        'stance',
-      )
     } catch (fetchError) {
       console.error('Search request failed:', fetchError)
       setArticles([])
-      resetResultsOverview()
       setQuerySvdCorpusChartDimensions([])
       setQuerySvdDimensions([])
       setEmptyResultsMessage(null)
@@ -1941,27 +1871,12 @@ function App(): JSX.Element {
     }
   }
 
-  const handleOpinionKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
-    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
-    event.preventDefault()
-    if (!canSearchStance || loading) return
-    void handleSubmitStance()
-  }
-
-  const handleTopicKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
-    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
-    if (trimmedOpinion !== '') return
-    event.preventDefault()
-    opinionInputRef.current?.focus()
-  }
-
   const handleAnalyzeEssay = async (): Promise<void> => {
     if (!canAnalyzeEssay || loading) return
 
     setLoading(true)
     setError(null)
     setArticles([])
-    resetResultsOverview()
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
@@ -2025,7 +1940,6 @@ function App(): JSX.Element {
     setLoading(true)
     setError(null)
     setArticles([])
-    resetResultsOverview()
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
@@ -2063,18 +1977,9 @@ function App(): JSX.Element {
       setQuerySvdCorpusChartDimensions(normalized.querySvdCorpusChartDimensions)
       setQuerySvdDimensions(normalized.querySvdDimensions)
       setEmptyResultsMessage(normalized.emptyResultsMessage)
-      void requestResultsOverview(
-        [
-          resolvedEssayThesis ? `Thesis: ${resolvedEssayThesis}` : null,
-          essayPreparedText ? `Essay: ${essayPreparedText}` : null,
-        ].filter(Boolean).join('\n'),
-        normalized.articles,
-        'essay',
-      )
     } catch (fetchError) {
       console.error('Essay search failed:', fetchError)
       setArticles([])
-      resetResultsOverview()
       setQuerySvdCorpusChartDimensions([])
       setQuerySvdDimensions([])
       setEmptyResultsMessage(null)
@@ -2158,6 +2063,20 @@ function App(): JSX.Element {
     (Array.isArray(article.svd_chart_dimensions) && article.svd_chart_dimensions.length > 0) ||
     (Array.isArray(article.svd_dimensions) && article.svd_dimensions.length > 0)
   )
+  const getSvdDimensionsForLabeling = (article: Article): SvdLatentDimension[] => {
+    const seen = new Set<number>()
+    const dimensions = [
+      ...(article.svd_query_chart_dimensions ?? []),
+      ...(article.svd_chart_dimensions ?? []),
+      ...(article.svd_dimensions ?? []),
+    ]
+
+    return dimensions.filter((dimension) => {
+      if (seen.has(dimension.dimension_index)) return false
+      seen.add(dimension.dimension_index)
+      return true
+    })
+  }
   const hasStanceSignals = (article: Article): boolean => (
     article.stance_entailment_prob != null ||
     article.stance_neutral_prob != null ||
@@ -2250,6 +2169,16 @@ function App(): JSX.Element {
     explanation: null,
   }
 
+  const getSvdDimensionLabelState = (article: Article): {
+    loading: boolean
+    error: string | null
+    labels: SvdDimensionLabelMap
+  } => svdDimensionLabelStates[getRankingExplanationKey(article)] ?? {
+    loading: false,
+    error: null,
+    labels: {},
+  }
+
   const getRankingExplanationQueryText = (): string => {
     if (inputMode === 'stance') {
       const trimmedTopic = topic.trim()
@@ -2281,6 +2210,88 @@ function App(): JSX.Element {
         ...nextState,
       },
     }))
+  }
+
+  const setSvdDimensionLabelState = (
+    article: Article,
+    nextState: Partial<{ loading: boolean; error: string | null; labels: SvdDimensionLabelMap }>,
+  ): void => {
+    const key = getRankingExplanationKey(article)
+    setSvdDimensionLabelStates((prev) => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] ?? {
+          loading: false,
+          error: null,
+          labels: {},
+        }),
+        ...nextState,
+      },
+    }))
+  }
+
+  const requestSvdDimensionLabels = async (article: Article): Promise<void> => {
+    const currentState = getSvdDimensionLabelState(article)
+    if (currentState.loading || Object.keys(currentState.labels).length > 0) return
+
+    const dimensions = getSvdDimensionsForLabeling(article)
+    if (dimensions.length === 0) return
+
+    if (useLlm !== true) {
+      setSvdDimensionLabelState(article, {
+        error: 'LLM labels are turned off in the backend config.',
+      })
+      return
+    }
+
+    setSvdDimensionLabelState(article, {
+      loading: true,
+      error: null,
+    })
+
+    try {
+      const response = await fetch('/api/llm/svd-dimension-labels', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          dimensions,
+        }),
+      })
+
+      const data = await readApiJson<{ labels?: Array<{ dimension_index?: number; label?: string }> }>(response)
+      const nextLabels: SvdDimensionLabelMap = {}
+      for (const item of data.labels ?? []) {
+        if (typeof item.dimension_index !== 'number') continue
+        const label = String(item.label || '').trim()
+        if (label) {
+          nextLabels[item.dimension_index] = label
+        }
+      }
+      if (Object.keys(nextLabels).length === 0) {
+        throw new Error('No concept labels were returned.')
+      }
+
+      setSvdDimensionLabelState(article, {
+        loading: false,
+        error: null,
+        labels: nextLabels,
+      })
+    } catch (fetchError) {
+      setSvdDimensionLabelState(article, {
+        loading: false,
+        error: fetchError instanceof Error ? fetchError.message : 'SVD concept labeling failed.',
+      })
+    }
+  }
+
+  const handleSvdDisclosureToggle = (
+    article: Article,
+    event: SyntheticEvent<HTMLDetailsElement>,
+  ): void => {
+    if (!event.currentTarget.open) return
+    void requestSvdDimensionLabels(article)
   }
 
   const handleExplainRanking = async (article: Article, rank: number): Promise<void> => {
@@ -2481,8 +2492,8 @@ function App(): JSX.Element {
                     <button
                       type="button"
                       className={`essay-progress-step ${essayWorkflowStep === 2
-                          ? 'active'
-                          : (isEssayStepTwoAvailable ? 'available' : 'disabled')
+                        ? 'active'
+                        : (isEssayStepTwoAvailable ? 'available' : 'disabled')
                         }`}
                       onClick={() => {
                         if (isEssayStepTwoAvailable) {
@@ -2522,7 +2533,6 @@ function App(): JSX.Element {
                       type="text"
                       value={topic}
                       onChange={(event) => setTopic(event.target.value)}
-                      onKeyDown={handleTopicKeyDown}
                       placeholder="type your topic"
                       aria-label="Topic"
                     />
@@ -2549,11 +2559,9 @@ function App(): JSX.Element {
                 <span className="intro-inline-form-slot">
                   <span className="intro-inline-input-wrap">
                     <input
-                      ref={opinionInputRef}
                       type="text"
                       value={opinion}
                       onChange={(event) => setOpinion(event.target.value)}
-                      onKeyDown={handleOpinionKeyDown}
                       placeholder="type your stance"
                       aria-label="Opinion"
                     />
@@ -2877,50 +2885,11 @@ function App(): JSX.Element {
             )}
 
             {!loading && !error && articles.length > 0 && (
-              <>
-                {(resultsOverviewLoading || resultsOverview || resultsOverviewError) && (
-                  <section className="results-overview-card" aria-live="polite">
-                    <div className="results-overview-header">
-                      <p className="results-overview-eyebrow">AI overview</p>
-                      {resultsOverviewLoading && (
-                        <div className="results-overview-spinner" aria-hidden="true">
-                          <span />
-                          <span />
-                          <span />
-                        </div>
-                      )}
-                    </div>
-
-                    {resultsOverviewLoading && (
-                      <p className="results-overview-copy">Reading the result set for agreement patterns, shared claims, and differences.</p>
-                    )}
-
-                    {!resultsOverviewLoading && resultsOverview && (
-                      <>
-                        <p className="results-overview-copy">{resultsOverview.overview}</p>
-                        {Array.isArray(resultsOverview.key_points) && resultsOverview.key_points.length > 0 && (
-                          <ul className="results-overview-list">
-                            {resultsOverview.key_points.map((point) => (
-                              <li key={point}>{point}</li>
-                            ))}
-                          </ul>
-                        )}
-                        {resultsOverview.caveat && (
-                          <p className="results-overview-caveat">{resultsOverview.caveat}</p>
-                        )}
-                      </>
-                    )}
-
-                    {!resultsOverviewLoading && !resultsOverview && resultsOverviewError && (
-                      <p className="results-overview-error">{resultsOverviewError}</p>
-                    )}
-                  </section>
-                )}
-
-                <div id="answer-box">
+              <div id="answer-box">
                 {visibleArticles.map((article) => {
                   const articleTooltipBase = String(article.id).replace(/[^a-zA-Z0-9_-]/g, '-')
                   const articleRecencyWeight = article.recency_weight ?? recencyWeight
+                  const svdDimensionLabelState = getSvdDimensionLabelState(article)
 
                   return (
                     <article key={article.id} className="article-item">
@@ -3142,7 +3111,10 @@ function App(): JSX.Element {
                       )}
 
                       {hasSvdExplainability(article) && (
-                        <details className="content-disclosure svd-explainability-disclosure">
+                        <details
+                          className="content-disclosure svd-explainability-disclosure"
+                          onToggle={(event) => handleSvdDisclosureToggle(article, event)}
+                        >
                           <summary className="content-disclosure-summary">
                             <span className="content-disclosure-copy">
                               <span className="content-disclosure-title">Latent concepts</span>
@@ -3152,18 +3124,30 @@ function App(): JSX.Element {
                           </summary>
 
                           <div className="svd-explainability-panel">
+                            {(svdDimensionLabelState.loading || svdDimensionLabelState.error) && (
+                              <p
+                                className={`svd-section-copy ${svdDimensionLabelState.loading ? 'svd-label-loading' : ''}`}
+                                data-text={svdDimensionLabelState.loading ? 'Labeling latent concepts with the LLM...' : undefined}
+                              >
+                                {svdDimensionLabelState.loading
+                                  ? 'Labeling latent concepts with the LLM...'
+                                  : svdDimensionLabelState.error}
+                              </p>
+                            )}
+
                             {Array.isArray(article.svd_query_chart_dimensions) && article.svd_query_chart_dimensions.length > 0 && (
                               <div className="svd-chart-section">
                                 <div className="svd-section-copy-block">
                                   <div className="svd-section-title">Query top 10 concepts</div>
                                   <p className="svd-section-copy">
-                                    This radar reuses the query&apos;s top 10 concepts and shows how strongly this article loads on those same axes.
+                                    This radar uses the 10 concepts most activated by the query, then shows how strongly this article aligns with each one.
                                   </p>
                                 </div>
                                 <SvdRadarChart
                                   dimensions={article.svd_query_chart_dimensions}
+                                  dimensionLabels={svdDimensionLabelState.labels}
                                   ariaLabel="Radar chart of this article measured on the query's top 10 SVD concepts"
-                                  caption="These axes come from the query, not the article. Radius shows this article's loading on the same 10 concepts activated by the query."
+                                  caption="The axes are the 10 concepts most strongly activated by your query. Each point shows how strongly this article aligns with those same concepts."
                                   emptyCopy="No query-anchored SVD concepts are available for this article yet."
                                 />
                               </div>
@@ -3174,13 +3158,14 @@ function App(): JSX.Element {
                                 <div className="svd-section-copy-block">
                                   <div className="svd-section-title">Shared top 10 corpus concepts</div>
                                   <p className="svd-section-copy">
-                                    This radar uses the same first 10 corpus-level SVD concepts for every result, so you can compare article shapes on a fixed corpus frame.
+                                    This radar plots every article against the same 10 broad corpus concepts, so differences in shape reflect differences in topic emphasis.
                                   </p>
                                 </div>
                                 <SvdRadarChart
                                   dimensions={article.svd_chart_dimensions}
+                                  dimensionLabels={svdDimensionLabelState.labels}
                                   ariaLabel="Radar chart of this article across the shared top 10 corpus-level SVD concepts"
-                                  caption="These axes stay fixed to the same first 10 corpus-level SVD concepts on every article card. Radius shows absolute loading while labels and colors preserve the sign."
+                                  caption="Each article uses the same 10 broad concept axes. Points farther from the center show stronger connections, and color shows the direction of that connection."
                                   emptyCopy="No shared corpus-level SVD concepts are available for this article yet."
                                 />
                               </div>
@@ -3197,7 +3182,10 @@ function App(): JSX.Element {
                                     </p>
                                   </div>
 
-                                  <SvdConceptBarChart dimensions={article.svd_dimensions ?? []} />
+                                  <SvdConceptBarChart
+                                    dimensions={article.svd_dimensions ?? []}
+                                    dimensionLabels={svdDimensionLabelState.labels}
+                                  />
                                 </div>
                               )}
                           </div>
@@ -3293,8 +3281,7 @@ function App(): JSX.Element {
                     </div>
                   </details>
                 )}
-                </div>
-              </>
+              </div>
             )}
 
             {!loading && !error && articles.length === 0 && (

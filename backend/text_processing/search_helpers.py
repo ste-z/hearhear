@@ -8,7 +8,8 @@ from flask import current_app, has_app_context
 
 DEFAULT_RETRIEVAL_MODEL = "svd"
 SUPPORTED_RETRIEVAL_MODELS = ("tfidf", "svd")
-DEFAULT_SVD_EXPLAINABILITY_TOP_N = 10
+DEFAULT_SVD_EXPLAINABILITY_TOP_N = 15
+DEFAULT_SVD_CHART_TOP_N = 10
 DEFAULT_SVD_POLE_TOP_N = 5
 DEFAULT_SVD_DIMENSION_LABEL_TOP_N = 5
 
@@ -197,7 +198,7 @@ def _svd_chart_dimension_payload(
     processor,
     doc_id,
     dimension_cache,
-    top_n_dimensions=DEFAULT_SVD_EXPLAINABILITY_TOP_N,
+    top_n_dimensions=DEFAULT_SVD_CHART_TOP_N,
     top_n_terms=DEFAULT_SVD_DIMENSION_LABEL_TOP_N,
 ):
     if processor is None or not doc_id:
@@ -389,7 +390,7 @@ def query_svd_corpus_chart_dimensions(
     query,
     retrieval_model=DEFAULT_RETRIEVAL_MODEL,
     processor=None,
-    top_n_dimensions=DEFAULT_SVD_EXPLAINABILITY_TOP_N,
+    top_n_dimensions=DEFAULT_SVD_CHART_TOP_N,
     top_n_terms=DEFAULT_SVD_DIMENSION_LABEL_TOP_N,
 ):
     resolved_model = normalize_retrieval_model(retrieval_model)
@@ -467,7 +468,7 @@ def _svd_query_chart_dimension_payload(
         return []
 
     payload = []
-    for query_dimension in list(query_dimensions)[:DEFAULT_SVD_EXPLAINABILITY_TOP_N]:
+    for query_dimension in list(query_dimensions)[:DEFAULT_SVD_CHART_TOP_N]:
         try:
             dim = int(query_dimension.get("dimension_index"))
         except (AttributeError, TypeError, ValueError):

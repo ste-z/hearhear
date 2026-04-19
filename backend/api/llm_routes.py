@@ -163,6 +163,71 @@ def _parse_results_overview_response(raw_content):
     }
 
 
+def _format_dimension_for_labeling(dimension):
+    try:
+        index = int(dimension.get("dimension_index"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+    terms = [
+        str(term).strip()
+        for term in list(dimension.get("label_terms") or [])[:8]
+        if str(term).strip()
+    ]
+    if not terms:
+        label_text = _clean_overview_text(dimension.get("label_text"), 240)
+        terms = [term.strip() for term in label_text.split(",") if term.strip()][:8]
+
+    value = dimension.get("value")
+    pole = _clean_overview_text(dimension.get("pole"), 40)
+    return {
+        "dimension_index": index,
+        "terms": terms,
+        "value": value,
+        "pole": pole,
+    }
+
+
+def _parse_svd_dimension_labels(raw_content, requested_indices):
+    text = str(raw_content or "").strip()
+    if not text:
+        raise ValueError("Empty SVD label response")
+
+    fence_match = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    candidate = fence_match.group(1).strip() if fence_match else text
+    parsed = json.loads(candidate)
+
+    raw_labels = parsed.get("labels") if isinstance(parsed, dict) else parsed
+    if not isinstance(raw_labels, list):
+        raise ValueError("SVD label response must contain a labels array")
+
+    requested = {int(index) for index in requested_indices}
+    labels = []
+    seen = set()
+    for item in raw_labels:
+        if not isinstance(item, dict):
+            continue
+        try:
+            index = int(item.get("dimension_index"))
+        except (TypeError, ValueError):
+            continue
+        if index not in requested or index in seen:
+            continue
+        label = _clean_overview_text(item.get("label"), 80)
+        label = re.sub(r"^(concept|dimension)\s+\d+\s*[:\-]\s*", "", label, flags=re.IGNORECASE).strip()
+        if not label:
+            continue
+        labels.append({
+            "dimension_index": index,
+            "label": label,
+        })
+        seen.add(index)
+
+    if not labels:
+        raise ValueError("SVD label response did not include usable labels")
+    return labels
+
+
 def llm_search_decision(client, user_message):
     """Ask the LLM whether to search the DB and which word to use."""
     messages = [
@@ -380,6 +445,60 @@ def register_chat_route(app, json_search):
             return jsonify({"error": "LLM ranking explanation failed."}), 500
 
         return jsonify({"explanation": explanation})
+
+    @app.route("/api/llm/svd-dimension-labels", methods=["POST"])
+    def svd_dimension_labels():
+        payload = request.get_json(silent=True) or {}
+        dimensions = payload.get("dimensions") or []
+        if not isinstance(dimensions, list) or not dimensions:
+            return jsonify({"error": "A non-empty dimensions list is required."}), 400
+
+        api_key = os.getenv("SPARK_API_KEY") or os.getenv("API_KEY")
+        if not api_key:
+            return jsonify({"error": "SPARK_API_KEY or API_KEY not set — add it to your .env file"}), 500
+
+        label_inputs = []
+        for dimension in dimensions[:24]:
+            if not isinstance(dimension, dict):
+                continue
+            formatted = _format_dimension_for_labeling(dimension)
+            if formatted is not None:
+                label_inputs.append(formatted)
+
+        if not label_inputs:
+            return jsonify({"error": "No usable SVD dimensions were provided."}), 400
+
+        try:
+            client = create_spark_client(api_key=api_key)
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 500
+
+        system_prompt = (
+            "You label latent SVD dimensions for a news opinion search interface. "
+            "Each dimension is represented by its top terms and may include a signed loading value. "
+            "Write a short human-readable topic label for each dimension, 2 to 6 words long. "
+            "Use broad topic language such as 'Immigration and asylum policy' or 'Climate and energy politics'. "
+            "Do not include the words Concept or Dimension, do not include numbers, and do not explain. "
+            "Return valid JSON only with this shape: "
+            "{\"labels\":[{\"dimension_index\":0,\"label\":\"Example topic\"}]}"
+        )
+        user_prompt = json.dumps({"dimensions": label_inputs}, ensure_ascii=False)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        try:
+            response = client.chat(messages)
+            labels = _parse_svd_dimension_labels(
+                response.get("content"),
+                requested_indices=[item["dimension_index"] for item in label_inputs],
+            )
+        except Exception:
+            logger.exception("SVD dimension labeling request failed")
+            return jsonify({"error": "LLM SVD dimension labeling failed"}), 500
+
+        return jsonify({"labels": labels})
 
     @app.route("/api/llm/results-overview", methods=["POST"])
     def results_overview():
