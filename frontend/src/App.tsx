@@ -1120,6 +1120,7 @@ function App(): JSX.Element {
   const [essayThesisMode, setEssayThesisMode] = useState<EssayThesisMode>('candidate')
   const [essayActiveStep, setEssayActiveStep] = useState<EssayStep>(1)
   const essayOptionsRef = useRef<HTMLDivElement | null>(null)
+  const opinionInputRef = useRef<HTMLInputElement | null>(null)
   const resultsSectionRef = useRef<HTMLDivElement | null>(null)
   const touchStartYRef = useRef<number | null>(null)
   const resultsOverviewRequestIdRef = useRef<number>(0)
@@ -1940,6 +1941,20 @@ function App(): JSX.Element {
     }
   }
 
+  const handleOpinionKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    if (!canSearchStance || loading) return
+    void handleSubmitStance()
+  }
+
+  const handleTopicKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+    if (trimmedOpinion !== '') return
+    event.preventDefault()
+    opinionInputRef.current?.focus()
+  }
+
   const handleAnalyzeEssay = async (): Promise<void> => {
     if (!canAnalyzeEssay || loading) return
 
@@ -2507,6 +2522,7 @@ function App(): JSX.Element {
                       type="text"
                       value={topic}
                       onChange={(event) => setTopic(event.target.value)}
+                      onKeyDown={handleTopicKeyDown}
                       placeholder="type your topic"
                       aria-label="Topic"
                     />
@@ -2533,9 +2549,11 @@ function App(): JSX.Element {
                 <span className="intro-inline-form-slot">
                   <span className="intro-inline-input-wrap">
                     <input
+                      ref={opinionInputRef}
                       type="text"
                       value={opinion}
                       onChange={(event) => setOpinion(event.target.value)}
+                      onKeyDown={handleOpinionKeyDown}
                       placeholder="type your stance"
                       aria-label="Opinion"
                     />
