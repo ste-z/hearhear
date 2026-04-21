@@ -29,6 +29,7 @@ type RerankSelectionMode = 'manual' | 'automatic'
 type StanceMethod = 'nli' | 'llm'
 type ChunkingMode = 'none' | 'paragraph' | 'semantic'
 type FrontendChunkingMode = Exclude<ChunkingMode, 'paragraph'>
+type SettingsFocusTarget = 'topic-relevance' | 'agreement-scorer'
 type SvdDimensionLabelMap = Record<number, string>
 
 type ConfigResponse = {
@@ -1134,6 +1135,7 @@ function App(): JSX.Element {
   const [activeAboutTab, setActiveAboutTab] = useState<InputMode>('stance')
   const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
+  const [settingsFocusTarget, setSettingsFocusTarget] = useState<SettingsFocusTarget | null>(null)
   const [essayCandidates, setEssayCandidates] = useState<EssayClaimCandidate[]>([])
   const [essayPreparedText, setEssayPreparedText] = useState<string>('')
   const [selectedEssayCandidateId, setSelectedEssayCandidateId] = useState<string | null>(null)
@@ -1141,6 +1143,9 @@ function App(): JSX.Element {
   const [essayThesisMode, setEssayThesisMode] = useState<EssayThesisMode>('candidate')
   const [essayActiveStep, setEssayActiveStep] = useState<EssayStep>(1)
   const essayOptionsRef = useRef<HTMLDivElement | null>(null)
+  const settingsScrollPaneRef = useRef<HTMLDivElement | null>(null)
+  const topicSettingsRef = useRef<HTMLDivElement | null>(null)
+  const agreementSettingsRef = useRef<HTMLDivElement | null>(null)
   const resultsSectionRef = useRef<HTMLDivElement | null>(null)
   const touchStartYRef = useRef<number | null>(null)
   const lastAppliedYearRangeRef = useRef<{ yearStart: number | null, yearEnd: number | null } | null>(null)
@@ -1431,11 +1436,36 @@ function App(): JSX.Element {
       setIsAboutOpen(false)
       setIsFilterOpen(false)
       setIsSettingsOpen(false)
+      setSettingsFocusTarget(null)
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
+
+  useEffect(() => {
+    if (!isSettingsOpen || settingsFocusTarget === null || typeof window === 'undefined') {
+      return
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const target = settingsFocusTarget === 'topic-relevance'
+        ? topicSettingsRef.current
+        : agreementSettingsRef.current
+      const pane = settingsScrollPaneRef.current
+      if (!target || !pane) return
+
+      const paneRect = pane.getBoundingClientRect()
+      const targetRect = target.getBoundingClientRect()
+      pane.scrollTo({
+        top: pane.scrollTop + targetRect.top - paneRect.top - 6,
+        behavior: 'smooth',
+      })
+      target.focus({ preventScroll: true })
+    })
+
+    return () => window.cancelAnimationFrame(frameId)
+  }, [isSettingsOpen, settingsFocusTarget])
 
   const activateSearchStage = (scrollTop = false): void => {
     if (scrollTop && typeof window !== 'undefined') {
@@ -1569,16 +1599,20 @@ function App(): JSX.Element {
   const resolvedEssayThesisId = essayThesisMode === 'candidate'
     ? selectedEssayCandidate?.sentence_id ?? null
     : null
-  const canSubmitEssay = Boolean(essayPreparedText && resolvedEssayThesis)
+  const effectiveStanceMethod: StanceMethod = useChunking ? 'llm' : stanceMethod
+  const isLlmAgreementSelected = effectiveStanceMethod === 'llm'
+  const shouldUseEssayThesisStep = !isLlmAgreementSelected
+  const canSubmitEssay = Boolean(
+    essayPreparedText.trim() && (isLlmAgreementSelected || resolvedEssayThesis),
+  )
   const isEssayStepTwoAvailable = essayPreparedText.trim() !== ''
   const isUsingCustomEssayThesis = essayThesisMode === 'custom'
-  const essayWorkflowStep = isEssayStepTwoAvailable ? essayActiveStep : 1
+  const essayWorkflowStep = shouldUseEssayThesisStep && isEssayStepTwoAvailable ? essayActiveStep : 1
   const canUseSvd = supportedRetrievalModels.includes('svd')
   const canUseTfidf = supportedRetrievalModels.includes('tfidf')
   const canUseNliAgreement = supportedStanceMethods.includes('nli')
   const canUseLlmAgreement = supportedStanceMethods.includes('llm') && llmAgreementAvailable
   const canUseChunking = canUseLlmAgreement && supportedChunkingModes.includes('semantic')
-  const isSvdEnabled = retrievalModel === 'svd'
   const canToggleSvd = canUseSvd && canUseTfidf
   const currentAutoRerankThreshold = autoRerankThresholds[retrievalModel]
   const availableYears = useMemo(() => {
@@ -1926,8 +1960,15 @@ function App(): JSX.Element {
     }
   }
 
-  const handleSubmitEssay = async (): Promise<void> => {
-    if (!canSubmitEssay || loading || !resolvedEssayThesis) return
+  const submitEssaySearch = async (
+    essayText: string,
+    thesisSentence: string,
+    thesisId: string | null,
+  ): Promise<void> => {
+    const nextEssayText = essayText.trim()
+    const nextThesisSentence = thesisSentence.trim()
+    if (!nextEssayText || loading) return
+    if (!isLlmAgreementSelected && !nextThesisSentence) return
 
     lastAppliedYearRangeRef.current = {
       yearStart: resolvedYearStart,
@@ -1952,9 +1993,9 @@ function App(): JSX.Element {
         },
         body: JSON.stringify({
           mode: 'essay',
-          q: essayPreparedText,
-          selected_thesis_id: resolvedEssayThesisId,
-          selected_thesis_sentence: resolvedEssayThesis,
+          q: nextEssayText,
+          selected_thesis_id: thesisId,
+          selected_thesis_sentence: nextThesisSentence,
           topic_weight: topicWeight,
           stance_weight: stanceWeight,
           recency_weight: recencyWeight,
@@ -1987,6 +2028,28 @@ function App(): JSX.Element {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleSubmitEssay = async (): Promise<void> => {
+    if (!canSubmitEssay || loading) return
+    await submitEssaySearch(
+      essayPreparedText,
+      resolvedEssayThesis,
+      resolvedEssayThesisId,
+    )
+  }
+
+  const handleSubmitEssayFromDraft = async (): Promise<void> => {
+    if (!canAnalyzeEssay || loading || !isLlmAgreementSelected) return
+
+    const nextEssayText = trimmedEssayText
+    setEssayPreparedText(nextEssayText)
+    setEssayCandidates([])
+    setSelectedEssayCandidateId(null)
+    setEssayCustomThesis('')
+    setEssayThesisMode('candidate')
+    setEssayActiveStep(1)
+    await submitEssaySearch(nextEssayText, '', null)
   }
 
   useEffect(() => {
@@ -2038,6 +2101,39 @@ function App(): JSX.Element {
       left: direction === 'left' ? -amount : amount,
       behavior: 'smooth',
     })
+  }
+
+  const openSettings = (): void => {
+    setSettingsFocusTarget(null)
+    setIsSettingsOpen(true)
+  }
+
+  const closeSettings = (): void => {
+    setIsSettingsOpen(false)
+    setSettingsFocusTarget(null)
+  }
+
+  const openSettingsAt = (target: SettingsFocusTarget): void => {
+    setSettingsFocusTarget(target)
+    setIsSettingsOpen(true)
+  }
+
+  const handleTopicSearchModeChange = (nextModel: RetrievalModel): void => {
+    if (!supportedRetrievalModels.includes(nextModel)) return
+    setRetrievalModel(nextModel)
+  }
+
+  const handleAgreementSearchModeChange = (nextMethod: StanceMethod): void => {
+    if (!supportedStanceMethods.includes(nextMethod)) return
+    if (nextMethod === 'llm') {
+      if (!canUseLlmAgreement) return
+      setStanceMethod('llm')
+      return
+    }
+
+    if (!canUseNliAgreement) return
+    setChunkingMode('none')
+    setStanceMethod('nli')
   }
 
   const openAbout = (tab: InputMode = inputMode): void => {
@@ -2114,6 +2210,7 @@ function App(): JSX.Element {
   const visibleArticles = articles.filter(article => !isLlmIrrelevantArticle(article))
   const llmIrrelevantArticles = articles.filter(isLlmIrrelevantArticle)
   const canExplainRanking = useLlm === true && retrievalModel === 'svd'
+  const shouldShowEssayShortcut = useLlm && !(inputMode === 'essay' && isSearchStageVisible)
 
   const getMatchSummary = (article: Article): string => {
     const hasWeightedRecency = (article.recency_weight ?? recencyWeight) > 0
@@ -2378,7 +2475,9 @@ function App(): JSX.Element {
     if (!hasSubmittedSearch) {
       return inputMode === 'stance'
         ? 'Submit a topic and stance above to open a page of supporting, opposing, and neutral perspectives.'
-        : 'Paste an essay, choose or write its thesis, and your ranked Guardian matches will appear here.'
+        : (isLlmAgreementSelected
+          ? 'Paste an essay, and your ranked Guardian matches will appear here.'
+          : 'Paste an essay, choose or write its thesis, and your ranked Guardian matches will appear here.')
     }
 
     if (articles.length === 0) {
@@ -2404,6 +2503,7 @@ function App(): JSX.Element {
     error,
     hasSubmittedSearch,
     inputMode,
+    isLlmAgreementSelected,
     llmIrrelevantArticles.length,
     loading,
     visibleArticles.length,
@@ -2465,7 +2565,77 @@ function App(): JSX.Element {
                 </button>
               </div>
 
-              {inputMode === 'essay' && isSearchStageVisible && (
+              <div className="top-search-mode-toolbar" aria-label="Search scoring modes">
+                <div className="top-search-mode-group">
+                  <div className="top-search-mode-heading">
+                    <span>Topic Relevance Search Mode</span>
+                    <button
+                      type="button"
+                      className="top-search-mode-help"
+                      onClick={() => openSettingsAt('topic-relevance')}
+                      aria-label="Open topic relevance mode settings"
+                    >
+                      ?
+                    </button>
+                  </div>
+                  <div className="top-search-mode-segments" role="group" aria-label="Topic relevance search mode">
+                    <button
+                      type="button"
+                      className={`top-search-mode-segment ${retrievalModel === 'tfidf' ? 'active' : ''}`}
+                      aria-pressed={retrievalModel === 'tfidf'}
+                      onClick={() => handleTopicSearchModeChange('tfidf')}
+                      disabled={!canUseTfidf}
+                    >
+                      Lexical
+                    </button>
+                    <button
+                      type="button"
+                      className={`top-search-mode-segment ${retrievalModel === 'svd' ? 'active' : ''}`}
+                      aria-pressed={retrievalModel === 'svd'}
+                      onClick={() => handleTopicSearchModeChange('svd')}
+                      disabled={!canUseSvd}
+                    >
+                      Semantic
+                    </button>
+                  </div>
+                </div>
+
+                <div className="top-search-mode-group">
+                  <div className="top-search-mode-heading">
+                    <span>Stance Agreement Search Mode</span>
+                    <button
+                      type="button"
+                      className="top-search-mode-help"
+                      onClick={() => openSettingsAt('agreement-scorer')}
+                      aria-label="Open stance agreement mode settings"
+                    >
+                      ?
+                    </button>
+                  </div>
+                  <div className="top-search-mode-segments" role="group" aria-label="Stance agreement search mode">
+                    <button
+                      type="button"
+                      className={`top-search-mode-segment ${effectiveStanceMethod === 'nli' ? 'active' : ''}`}
+                      aria-pressed={effectiveStanceMethod === 'nli'}
+                      onClick={() => handleAgreementSearchModeChange('nli')}
+                      disabled={!canUseNliAgreement}
+                    >
+                      NLI
+                    </button>
+                    <button
+                      type="button"
+                      className={`top-search-mode-segment ${effectiveStanceMethod === 'llm' ? 'active' : ''}`}
+                      aria-pressed={effectiveStanceMethod === 'llm'}
+                      onClick={() => handleAgreementSearchModeChange('llm')}
+                      disabled={!canUseLlmAgreement}
+                    >
+                      LLM
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {inputMode === 'essay' && isSearchStageVisible && shouldUseEssayThesisStep && (
                 <div
                   className="essay-progress-shell"
                   aria-label={`Essay workflow step ${essayWorkflowStep} of 2`}
@@ -2598,7 +2768,7 @@ function App(): JSX.Element {
                     <div className="essay-intake-tools">
                       <p className="essay-upload-hint">
                         {importedPdfName
-                          ? `Text imported from ${importedPdfName}. You can keep editing it here before extracting thesis options.`
+                          ? `Text imported from ${importedPdfName}. You can keep editing it here before ${isLlmAgreementSelected ? 'searching' : 'extracting thesis options'}.`
                           : 'Have a PDF already? Upload it and we’ll drop the extracted text into this editor so you can revise it.'}
                       </p>
                       <label
@@ -2623,10 +2793,12 @@ function App(): JSX.Element {
                     <button
                       type="button"
                       className="primary-action-button"
-                      onClick={handleAnalyzeEssay}
+                      onClick={isLlmAgreementSelected ? handleSubmitEssayFromDraft : handleAnalyzeEssay}
                       disabled={!canAnalyzeEssay || loading}
                     >
-                      {(loading && essayWorkflowStep === 1) ? 'Extracting thesis...' : 'Extract thesis options'}
+                      {isLlmAgreementSelected
+                        ? (loading ? 'Searching...' : 'Search')
+                        : ((loading && essayWorkflowStep === 1) ? 'Extracting thesis...' : 'Extract thesis options')}
                     </button>
                   </div>
                 </>
@@ -2761,24 +2933,6 @@ function App(): JSX.Element {
                 Search
               </button>
             )}
-            {canUseSvd && (
-              <button
-                type="button"
-                className={`retrieval-toggle-pill ${isSvdEnabled ? 'active' : ''}`}
-                aria-pressed={isSvdEnabled}
-                aria-label={isSvdEnabled ? 'Switch to lexical topic relevance' : 'Switch to semantic topic relevance'}
-                onClick={() => {
-                  if (!canToggleSvd) return
-                  setRetrievalModel(currentModel => (currentModel === 'svd' ? 'tfidf' : 'svd'))
-                }}
-                disabled={!canToggleSvd}
-              >
-                <span className="retrieval-toggle-label">{isSvdEnabled ? 'Semantic mode' : 'Lexical mode'}</span>
-                <span className="retrieval-toggle-switch" aria-hidden="true">
-                  <span className="retrieval-toggle-thumb" />
-                </span>
-              </button>
-            )}
             <button
               type="button"
               className="utility-pill"
@@ -2789,7 +2943,7 @@ function App(): JSX.Element {
             <button
               type="button"
               className="utility-pill"
-              onClick={() => setIsSettingsOpen(true)}
+              onClick={openSettings}
             >
               Settings
             </button>
@@ -3295,7 +3449,7 @@ function App(): JSX.Element {
         </div>
       )}
 
-      {useLlm && <Chat onSearchTerm={handleEssaySearch} />}
+      {shouldShowEssayShortcut && <Chat onSearchTerm={handleEssaySearch} />}
 
       {isAboutOpen && (
         <div
@@ -3383,13 +3537,15 @@ function App(): JSX.Element {
                       each sentence a claimness score, and we present the top options so you can
                       choose the sentence that best represents your essay&apos;s central thesis, or
                       enter your own thesis wording when you want to override the suggestions.
+                      When the LLM Agreement scorer is selected, this step is skipped and the
+                      full essay is used for agreement scoring.
                     </p>
                   </section>
                   <section className="about-section">
                     <p className="about-section-label">Stage 2</p>
                     <p className="modal-copy">
-                      <strong>Stage 2: Topic relevance.</strong> After you select the best thesis
-                      sentence, we identify articles that are relevant to your essay as a whole. To
+                      <strong>Stage 2: Topic relevance.</strong> We identify articles that are relevant
+                      to your essay as a whole. To
                       do this, we compute the similarity between your full essay and each Guardian
                       article using the retrieval representation selected in topic relevance mode:
                       either Lexical TF-IDF term vectors or Semantic truncated-SVD latent dimensions,
@@ -3400,11 +3556,12 @@ function App(): JSX.Element {
                   <section className="about-section">
                     <p className="about-section-label">Stage 3</p>
                     <p className="modal-copy">
-                      <strong>Stage 3: Thesis relevance.</strong> From the candidate articles identified
-                      in Stage 2, we then rank them based on how they relate to your selected thesis.
+                      <strong>Stage 3: Agreement relevance.</strong> From the candidate articles identified
+                      in Stage 2, we then rank them based on how they relate to your selected thesis
+                      for NLI or your full essay for LLM.
                       The Agreement scorer in Settings can use either DeBERTa NLI over each
                       extracted article claim or Spark LLM scoring over retrieved article context.
-                      The model estimates whether each article supports, contradicts, or is neutral toward your thesis.
+                      The model estimates whether each article supports, contradicts, or is neutral toward your position.
                       If you raise the recency weight in Settings, newer publication dates also
                       contribute to the final ranking.
                     </p>
@@ -3511,7 +3668,7 @@ function App(): JSX.Element {
       {isSettingsOpen && (
         <div
           className="modal-backdrop"
-          onClick={() => setIsSettingsOpen(false)}
+          onClick={closeSettings}
           role="presentation"
         >
           <div
@@ -3529,20 +3686,24 @@ function App(): JSX.Element {
               <button
                 type="button"
                 className="modal-close"
-                onClick={() => setIsSettingsOpen(false)}
+                onClick={closeSettings}
                 aria-label="Close settings popup"
               >
                 Close
               </button>
             </div>
-            <div className="settings-scroll-pane">
+            <div className="settings-scroll-pane" ref={settingsScrollPaneRef}>
               <section className="settings-stage-section">
                 <div className="settings-stage-heading">
                   <span>Stage 1</span>
                   <h4>Topic retrieval</h4>
                 </div>
                 <div className="modal-settings-grid">
-                  <div className="weight-card full-row settings-selection-card">
+                  <div
+                    className="weight-card full-row settings-selection-card settings-scroll-target"
+                    ref={topicSettingsRef}
+                    tabIndex={-1}
+                  >
                     <span>Topic relevance mode</span>
                     <div className="retrieval-model-grid">
                       {canUseTfidf && (
@@ -3710,7 +3871,11 @@ function App(): JSX.Element {
                     )}
                   </div>
 
-                  <div className="weight-card full-row settings-selection-card">
+                  <div
+                    className="weight-card full-row settings-selection-card settings-scroll-target"
+                    ref={agreementSettingsRef}
+                    tabIndex={-1}
+                  >
                     <span>Agreement scorer</span>
                     <div className="retrieval-model-grid">
                       {canUseNliAgreement && (
@@ -3725,7 +3890,7 @@ function App(): JSX.Element {
                           disabled={useChunking}
                         >
                           <strong>NLI</strong>
-                          <p>{useChunking ? 'Disabled while chunking is on.' : 'Compare the thesis against each extracted article claim with DeBERTa.'}</p>
+                          <p>{useChunking ? 'Disabled while chunking is on.' : 'Compare the selected thesis or stance against each extracted article claim with DeBERTa.'}</p>
                         </button>
                       )}
                       {supportedStanceMethods.includes('llm') && (
@@ -3740,7 +3905,7 @@ function App(): JSX.Element {
                           disabled={!canUseLlmAgreement}
                         >
                           <strong>LLM RAG</strong>
-                          <p>Send retrieved article context to Spark for a 0-1 agreement score.</p>
+                          <p>Send retrieved article context and your stance or full essay to Spark for a 0-1 agreement score.</p>
                         </button>
                       )}
                     </div>
@@ -3748,7 +3913,7 @@ function App(): JSX.Element {
                       {stanceMethod === 'llm'
                         ? (useChunking
                           ? 'The final agreement meter averages Spark scores across semantic chunks the LLM marks relevant.'
-                          : 'The final agreement meter comes from Spark scoring the retrieved articles against your thesis.')
+                          : 'The final agreement meter comes from Spark scoring the retrieved articles against your stance, thesis, or full essay.')
                         : 'The final agreement meter comes from local NLI over extracted article claims.'}
                       {!llmAgreementAvailable && supportedStanceMethods.includes('llm')
                         ? ' Add SPARK_API_KEY or API_KEY to enable the LLM scorer.'
@@ -3781,7 +3946,7 @@ function App(): JSX.Element {
                         <strong>Topic weight:</strong> how much the final score prioritizes whole-text topical similarity.
                       </p>
                       <p className="parameter-help-item">
-                        <strong>Agreement weight:</strong> how much the final score prioritizes whether the article aligns with your thesis.
+                        <strong>Agreement weight:</strong> how much the final score prioritizes whether the article aligns with your stance, thesis, or essay.
                       </p>
                       <p className="parameter-help-item">
                         <strong>Recency weight:</strong> how much the final score rewards newer publication dates.

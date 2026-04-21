@@ -25,23 +25,23 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_GUARDIAN_RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw" / "guardian_by_year"
 
 LLM_ARTICLE_AGREEMENT_SYSTEM_PROMPT = """
-You evaluate how much retrieved news opinion articles agree with a user's thesis.
+You evaluate how much retrieved news opinion articles agree with a user's thesis or essay.
 
 Use only the article context supplied by the application. Do not rely on outside
 knowledge of the publication, author, topic, or article. Treat topical relevance
 and agreement as different signals: an article can be very relevant while
-strongly disagreeing with the thesis.
+strongly disagreeing with the user's position.
 
 For each article, assign an agreement score from 0 to 1:
-- 1.00 means the article's central claim strongly supports the user's thesis.
-- 0.75 means the article mostly supports the thesis, with qualifications.
+- 1.00 means the article's central claim strongly supports the user's position.
+- 0.75 means the article mostly supports the user's position, with qualifications.
 - 0.50 means the article is neutral, mixed, unclear, or does not provide enough
   evidence about agreement.
-- 0.25 means the article mostly disagrees with the thesis, with qualifications.
-- 0.00 means the article's central claim strongly contradicts the thesis.
+- 0.25 means the article mostly disagrees with the user's position, with qualifications.
+- 0.00 means the article's central claim strongly contradicts the user's position.
 
 Also assign an irrelevant flag:
-- 1 means the article is completely unrelated to the user's topic/thesis.
+- 1 means the article is completely unrelated to the user's topic or position.
 - 0 means the article is related or even broadly related.
 Be conservative. When in doubt, use 0. Energy policy is related to climate
 change. An article about free buses is not related to free speech.
@@ -53,7 +53,7 @@ return article IDs, labels, rationale, markdown, comments, or prose. Example:
 """.strip()
 
 LLM_PARAGRAPH_AGREEMENT_SYSTEM_PROMPT = """
-You evaluate retrieved article chunks against a user's thesis. A chunk may be a
+You evaluate retrieved article chunks against a user's thesis or essay. A chunk may be a
 paragraph or a semantic group of adjacent sentences.
 
 Use only the chunk context supplied by the application. Do not rely on
@@ -61,16 +61,16 @@ outside knowledge of the publication, author, topic, or article. Judge each
 chunk independently, not whether the whole article agrees.
 
 For each chunk, assign an agreement score from 0 to 1:
-- 1.00 means the chunk directly supports the user's thesis.
-- 0.75 means the chunk mostly supports the thesis, with qualifications.
+- 1.00 means the chunk directly supports the user's position.
+- 0.75 means the chunk mostly supports the user's position, with qualifications.
 - 0.50 means the chunk is related but neutral, descriptive, background,
   mixed, unclear, or not stance-bearing.
-- 0.25 means the chunk mostly pushes against the thesis, with qualifications.
-- 0.00 means the chunk directly contradicts the thesis.
+- 0.25 means the chunk mostly pushes against the user's position, with qualifications.
+- 0.00 means the chunk directly contradicts the user's position.
 
 Also assign an irrelevant flag:
 - 1 means the chunk is completely unrelated to the broad topic, issue,
-  actors, policy area, cause, consequence, or debate in the user's thesis.
+  actors, policy area, cause, consequence, or debate in the user's position.
 - 0 means the chunk is related or even broadly related.
 Be conservative. When in doubt, use 0. Background, evidence, context,
 counterarguments, nearby subtopics, causes, consequences, and policy details are
@@ -361,7 +361,7 @@ def build_llm_agreement_messages(
     ]
     article_ids = [article["article_id"] for article in article_payload]
     user_prompt = (
-        "User thesis:\n"
+        "User thesis or essay:\n"
         f"{_clean_text(thesis)}\n\n"
         "article_ids in scoring order:\n"
         f"{json.dumps(article_ids, ensure_ascii=False)}\n\n"
@@ -497,7 +497,7 @@ def build_llm_paragraph_agreement_messages(thesis, paragraph_rows):
     ]
     paragraph_ids = [row["chunk_id"] for row in paragraph_payload]
     user_prompt = (
-        "User thesis:\n"
+        "User thesis or essay:\n"
         f"{_clean_text(thesis)}\n\n"
         "chunk_ids in scoring order:\n"
         f"{json.dumps(paragraph_ids, ensure_ascii=False)}\n\n"

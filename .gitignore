@@ -46,3 +46,4 @@ backend/data/processed/vector_index/guardian_tfidf_term_doc_matrix.npz
 backend/data/processed/vector_index/guardian_tfidf_terms.json
 backend/data/processed/vector_index/guardian_tfidf_vectorizer.pkl
 backend/data/processed/vector_index/tmp*.npy
+frontend/vite.config.ts.timestamp-1776567717940-06b0bc43b397d.mjs

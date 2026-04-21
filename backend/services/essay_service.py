@@ -8,6 +8,8 @@ from backend.services.retrieval_service import (
 )
 from backend.stance_processing.nli_processor import score_claim_sentences
 from backend.stance_processing.stance_rerank import (
+    normalize_chunking_mode,
+    normalize_stance_method,
     rerank_article_matches_by_statement,
 )
 from backend.text_processing.sentence_splitter import sentence_rows_from_text
@@ -82,7 +84,21 @@ def essay_search(
             "empty_results_message": candidate_payload.get("empty_results_message"),
         }
 
-    if not resolved_thesis:
+    resolved_chunking_mode = normalize_chunking_mode(chunking_mode)
+    if use_chunking and resolved_chunking_mode == "none":
+        resolved_chunking_mode = "paragraph"
+    resolved_use_chunking = resolved_chunking_mode != "none"
+    resolved_stance_method = (
+        "llm" if resolved_use_chunking else normalize_stance_method(stance_method)
+    )
+    agreement_statement = (
+        resolved_essay if resolved_stance_method == "llm" else resolved_thesis
+    )
+    agreement_statement_source = (
+        "essay" if resolved_stance_method == "llm" else "selected_thesis_sentence"
+    )
+
+    if not agreement_statement:
         log_runtime_event(
             "essay_search.return_topic_matches",
             retrieval_model=resolved_model,
@@ -100,25 +116,27 @@ def essay_search(
         retrieval_model=resolved_model,
         essay_chars=len(resolved_essay),
         thesis_chars=len(resolved_thesis),
+        agreement_statement_chars=len(agreement_statement),
+        agreement_statement_source=agreement_statement_source,
         top_n=len(topic_matches),
         normalize_topic_scores=bool(normalize_topic_scores),
         rerank_selection_mode=resolved_selection_mode,
         rerank_threshold=candidate_payload.get("rerank_threshold"),
-        stance_method=stance_method,
-        use_chunking=bool(use_chunking),
-        chunking_mode=chunking_mode,
+        stance_method=resolved_stance_method,
+        use_chunking=bool(resolved_use_chunking),
+        chunking_mode=resolved_chunking_mode,
     )
     reranked = rerank_article_matches_by_statement(
         article_matches=topic_matches,
-        statement=resolved_thesis,
+        statement=agreement_statement,
         topic_weight=topic_weight,
         stance_weight=stance_weight,
         recency_weight=recency_weight,
         top_n=len(topic_matches),
         normalize_topic_scores=normalize_topic_scores,
-        stance_method=stance_method,
-        use_chunking=use_chunking,
-        chunking_mode=chunking_mode,
+        stance_method=resolved_stance_method,
+        use_chunking=resolved_use_chunking,
+        chunking_mode=resolved_chunking_mode,
     )
     for match in reranked:
         match["selected_thesis_sentence"] = resolved_thesis
