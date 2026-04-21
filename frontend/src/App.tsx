@@ -302,6 +302,39 @@ const clampSvdMagnitude = (value: number): number => (
   Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
 )
 
+const getSvdMagnitude = (dimension?: SvdLatentDimension | null): number => {
+  if (!dimension) return 0
+  const magnitude = Math.abs(Number(dimension.magnitude))
+  const valueMagnitude = Math.abs(Number(dimension.value))
+  return Math.max(
+    Number.isFinite(magnitude) ? magnitude : 0,
+    Number.isFinite(valueMagnitude) ? valueMagnitude : 0,
+  )
+}
+
+const getMaxSvdMagnitude = (
+  dimensionGroups: Array<SvdLatentDimension[] | null | undefined>,
+): number | null => {
+  let maxMagnitude = 0
+  for (const dimensions of dimensionGroups) {
+    for (const dimension of dimensions ?? []) {
+      maxMagnitude = Math.max(maxMagnitude, getSvdMagnitude(dimension))
+    }
+  }
+  return maxMagnitude > 0 ? maxMagnitude : null
+}
+
+const scaleSvdMagnitude = (
+  dimension: SvdLatentDimension,
+  maxMagnitude?: number | null,
+): number => {
+  const magnitude = getSvdMagnitude(dimension)
+  if (!maxMagnitude || !Number.isFinite(maxMagnitude) || maxMagnitude <= 0) {
+    return clampSvdMagnitude(magnitude)
+  }
+  return clampSvdMagnitude(magnitude / maxMagnitude)
+}
+
 const formatSvdValue = (value: number): string => (
   `${value >= 0 ? '+' : ''}${value.toFixed(3)}`
 )
@@ -370,6 +403,7 @@ function SvdRadarChart(
     primaryLabel = 'Article',
     primaryRole = 'article',
     comparisonLabel = 'Query',
+    maxMagnitude = null,
     ariaLabel = 'Radar chart of SVD concepts',
     caption = 'Radius shows absolute loading, while filled and hollow points preserve the signed concept direction.',
     emptyCopy = 'No SVD concepts are available yet.',
@@ -380,6 +414,7 @@ function SvdRadarChart(
     primaryLabel?: string
     primaryRole?: SvdChartSeriesRole
     comparisonLabel?: string
+    maxMagnitude?: number | null
     ariaLabel?: string
     caption?: string
     emptyCopy?: string
@@ -401,7 +436,7 @@ function SvdRadarChart(
 
   const areaPoints = chartDimensions
     .map((dimension, index) => {
-      const radius = clampSvdMagnitude(dimension.magnitude) * SVD_RADAR_RADIUS
+      const radius = scaleSvdMagnitude(dimension, maxMagnitude) * SVD_RADAR_RADIUS
       const point = getSvdPoint(index, chartDimensions.length, radius)
       return `${point.x},${point.y}`
     })
@@ -410,7 +445,9 @@ function SvdRadarChart(
     ? chartDimensions
       .map((dimension, index) => {
         const comparisonDimension = comparisonByDimension.get(dimension.dimension_index)
-        const radius = clampSvdMagnitude(comparisonDimension?.magnitude ?? 0) * SVD_RADAR_RADIUS
+        const radius = comparisonDimension
+          ? scaleSvdMagnitude(comparisonDimension, maxMagnitude) * SVD_RADAR_RADIUS
+          : 0
         const point = getSvdPoint(index, chartDimensions.length, radius)
         return `${point.x},${point.y}`
       })
@@ -422,7 +459,7 @@ function SvdRadarChart(
     index: number,
     role: SvdChartSeriesRole,
   ): JSX.Element => {
-    const pointRadius = clampSvdMagnitude(dimension.magnitude) * SVD_RADAR_RADIUS
+    const pointRadius = scaleSvdMagnitude(dimension, maxMagnitude) * SVD_RADAR_RADIUS
     const point = getSvdPoint(index, chartDimensions.length, pointRadius)
     return (
       <circle
@@ -542,8 +579,9 @@ function SvdRadarChart(
 const renderSvdConceptBarTrack = (
   dimension: SvdLatentDimension,
   role: SvdChartSeriesRole,
+  maxMagnitude?: number | null,
 ): JSX.Element => {
-  const widthPercent = `${clampSvdMagnitude(dimension.magnitude) * 100}%`
+  const widthPercent = `${scaleSvdMagnitude(dimension, maxMagnitude) * 100}%`
 
   return (
     <div className={`svd-concept-bar-track ${role}`} aria-hidden="true">
@@ -576,6 +614,7 @@ function SvdConceptBarChart(
     primaryLabel = 'Article',
     primaryRole = 'article',
     comparisonLabel = 'Query',
+    maxMagnitude = null,
     emptyCopy = 'No article-specific SVD concepts are available yet.',
   }: {
     dimensions: SvdLatentDimension[]
@@ -584,6 +623,7 @@ function SvdConceptBarChart(
     primaryLabel?: string
     primaryRole?: SvdChartSeriesRole
     comparisonLabel?: string
+    maxMagnitude?: number | null
     emptyCopy?: string
   },
 ): JSX.Element {
@@ -646,10 +686,10 @@ function SvdConceptBarChart(
               </div>
 
               <div className="svd-concept-bar-track-stack">
-                {renderSvdConceptBarTrack(dimension, primaryRole)}
+                {renderSvdConceptBarTrack(dimension, primaryRole, maxMagnitude)}
                 {hasComparisonSeries && (
                   comparisonDimension
-                    ? renderSvdConceptBarTrack(comparisonDimension, 'query')
+                    ? renderSvdConceptBarTrack(comparisonDimension, 'query', maxMagnitude)
                     : <div className="svd-concept-bar-track missing" aria-hidden="true" />
                 )}
               </div>
@@ -2383,6 +2423,19 @@ function App(): JSX.Element {
   const visibleArticles = articles.filter(article => !isLlmIrrelevantArticle(article))
   const topicFeedbackIrrelevantArticles = visibleArticles.filter(isTopicFeedbackIrrelevantArticle)
   const activeVisibleArticles = visibleArticles.filter(article => !isTopicFeedbackIrrelevantArticle(article))
+  const queryTopRadarMaxMagnitude = getMaxSvdMagnitude([
+    querySvdDimensions,
+    ...activeVisibleArticles.map(article => article.svd_query_chart_dimensions),
+  ])
+  const sharedCorpusRadarMaxMagnitude = getMaxSvdMagnitude([
+    querySvdCorpusChartDimensions,
+    ...activeVisibleArticles.map(article => article.svd_chart_dimensions),
+  ])
+  const articleConceptBarMaxMagnitude = getMaxSvdMagnitude([
+    ...activeVisibleArticles.map(article => article.svd_dimensions),
+    ...activeVisibleArticles.map(article => article.svd_article_query_dimensions),
+  ])
+  const queryConceptBarMaxMagnitude = getMaxSvdMagnitude([querySvdDimensions])
   const llmIrrelevantArticles = articles.filter(isLlmIrrelevantArticle)
   const canExplainRanking = useLlm === true && retrievalModel === 'svd'
   const shouldShowEssayShortcut = useLlm && inputMode === 'essay' && !isSearchStageVisible
@@ -3218,6 +3271,7 @@ function App(): JSX.Element {
                       dimensions={querySvdCorpusChartDimensions}
                       primaryLabel="Query"
                       primaryRole="query"
+                      maxMagnitude={sharedCorpusRadarMaxMagnitude}
                       ariaLabel="Radar chart of your query across the top 10 corpus-level SVD concepts"
                       caption="These axes are fixed to the first 10 corpus-level concepts, so this gives a corpus-frame view of the query before you compare it with individual articles."
                       emptyCopy="No corpus-level SVD concept view is available for this query yet."
@@ -3235,6 +3289,7 @@ function App(): JSX.Element {
                           dimensions={querySvdDimensions}
                           primaryLabel="Query"
                           primaryRole="query"
+                          maxMagnitude={queryConceptBarMaxMagnitude}
                           emptyCopy="No query-specific SVD concepts are available yet."
                         />
                       </div>
@@ -3580,6 +3635,7 @@ function App(): JSX.Element {
                                   dimensionLabels={svdDimensionLabelState.labels}
                                   primaryLabel="Article"
                                   comparisonLabel="Query"
+                                  maxMagnitude={queryTopRadarMaxMagnitude}
                                   ariaLabel="Radar chart of this article measured on the query's top 10 SVD concepts"
                                   caption="The axes are the 10 concepts most strongly activated by your query. Article and query lines show their loadings on those same concepts."
                                   emptyCopy="No query-anchored SVD concepts are available for this article yet."
@@ -3601,6 +3657,7 @@ function App(): JSX.Element {
                                   dimensionLabels={svdDimensionLabelState.labels}
                                   primaryLabel="Article"
                                   comparisonLabel="Query"
+                                  maxMagnitude={sharedCorpusRadarMaxMagnitude}
                                   ariaLabel="Radar chart of this article across the shared top 10 corpus-level SVD concepts"
                                   caption="Article and query lines use the same 10 broad concept axes. Points farther from the center show stronger connections; filled points are positive and hollow points are negative."
                                   emptyCopy="No shared corpus-level SVD concepts are available for this article yet."
@@ -3625,6 +3682,7 @@ function App(): JSX.Element {
                                     dimensionLabels={svdDimensionLabelState.labels}
                                     primaryLabel="Article"
                                     comparisonLabel="Query"
+                                    maxMagnitude={articleConceptBarMaxMagnitude}
                                   />
                                 </div>
                               )}
