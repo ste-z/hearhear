@@ -16,6 +16,7 @@ import {
   EssayClaimCandidateResponse,
   EssayTextExtractionResponse,
   LlmRelevantParagraph,
+  ResultsOverview,
   RetrievalModel,
   SimilarArticlesResponse,
   SvdLatentDimension,
@@ -1414,6 +1415,9 @@ function App(): JSX.Element {
     defaultSupportedRetrievalModels,
   )
   const [articles, setArticles] = useState<Article[]>([])
+  const [resultsOverview, setResultsOverview] = useState<ResultsOverview | null>(null)
+  const [resultsOverviewLoading, setResultsOverviewLoading] = useState<boolean>(false)
+  const [resultsOverviewError, setResultsOverviewError] = useState<string | null>(null)
   const [topicFeedbackIrrelevantArticleIds, setTopicFeedbackIrrelevantArticleIds] = useState<string[]>([])
   const [appliedTopicFeedbackArticleIds, setAppliedTopicFeedbackArticleIds] = useState<string[]>([])
   const [querySvdCorpusChartDimensions, setQuerySvdCorpusChartDimensions] = useState<SvdLatentDimension[]>([])
@@ -1457,6 +1461,7 @@ function App(): JSX.Element {
   const agreementSettingsRef = useRef<HTMLDivElement | null>(null)
   const resultsSectionRef = useRef<HTMLDivElement | null>(null)
   const touchStartYRef = useRef<number | null>(null)
+  const resultsOverviewRequestIdRef = useRef<number>(0)
   const lastAppliedFiltersRef = useRef<{
     yearStart: number | null
     yearEnd: number | null
@@ -1771,6 +1776,7 @@ function App(): JSX.Element {
       return
     }
     setArticles([])
+    resetResultsOverview()
     setTopicFeedbackIrrelevantArticleIds([])
     setAppliedTopicFeedbackArticleIds([])
     setQuerySvdCorpusChartDimensions([])
@@ -1783,6 +1789,7 @@ function App(): JSX.Element {
 
   useEffect(() => {
     setArticles([])
+    resetResultsOverview()
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setTopicFeedbackIrrelevantArticleIds([])
@@ -1815,6 +1822,7 @@ function App(): JSX.Element {
     setEssayThesisMode('candidate')
     setEssayActiveStep(1)
     setArticles([])
+    resetResultsOverview()
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setTopicFeedbackIrrelevantArticleIds([])
@@ -2521,6 +2529,82 @@ function App(): JSX.Element {
     })
   }
 
+  const resetResultsOverview = (): void => {
+    resultsOverviewRequestIdRef.current += 1
+    setResultsOverview(null)
+    setResultsOverviewError(null)
+    setResultsOverviewLoading(false)
+  }
+
+  const requestResultsOverview = async (
+    query: string,
+    nextArticles: Article[],
+    mode: InputMode,
+  ): Promise<void> => {
+    if (!query.trim() || nextArticles.length === 0) {
+      resetResultsOverview()
+      return
+    }
+
+    if (useLlm !== true) {
+      setResultsOverview(null)
+      setResultsOverviewError('AI overview is turned off in the backend config.')
+      setResultsOverviewLoading(false)
+      return
+    }
+
+    if (!llmAgreementAvailable) {
+      setResultsOverview(null)
+      setResultsOverviewError('AI overview needs SPARK_API_KEY or API_KEY in your backend environment.')
+      setResultsOverviewLoading(false)
+      return
+    }
+
+    const requestId = resultsOverviewRequestIdRef.current + 1
+    resultsOverviewRequestIdRef.current = requestId
+    setResultsOverview(null)
+    setResultsOverviewError(null)
+    setResultsOverviewLoading(true)
+
+    try {
+      const response = await fetch('/api/llm/results-overview', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query,
+          mode,
+          articles: nextArticles.slice(0, 10),
+        }),
+      })
+
+      const data = await readApiJson<ResultsOverview>(response)
+      if (resultsOverviewRequestIdRef.current !== requestId) return
+      if (!data || typeof data.overview !== 'string' || data.overview.trim() === '') {
+        throw new Error('Invalid response from the results overview API.')
+      }
+
+      setResultsOverview({
+        overview: data.overview.trim(),
+        key_points: Array.isArray(data.key_points)
+          ? data.key_points.map(point => String(point).trim()).filter(Boolean).slice(0, 4)
+          : [],
+        caveat: typeof data.caveat === 'string' ? data.caveat.trim() : '',
+      })
+      setResultsOverviewError(null)
+    } catch (fetchError) {
+      if (resultsOverviewRequestIdRef.current !== requestId) return
+      console.error('Results overview failed:', fetchError)
+      setResultsOverview(null)
+      setResultsOverviewError(fetchError instanceof Error ? fetchError.message : 'Results overview failed.')
+    } finally {
+      if (resultsOverviewRequestIdRef.current === requestId) {
+        setResultsOverviewLoading(false)
+      }
+    }
+  }
+
   const handleEssaySearch = (value: string): void => {
     setInputMode('essay')
     setImportedPdfName(null)
@@ -2545,6 +2629,7 @@ function App(): JSX.Element {
     setIsImportingPdf(true)
     setError(null)
     setArticles([])
+    resetResultsOverview()
     setTopicFeedbackIrrelevantArticleIds([])
     setAppliedTopicFeedbackArticleIds([])
     setQuerySvdCorpusChartDimensions([])
@@ -2611,6 +2696,7 @@ function App(): JSX.Element {
     setLoading(true)
     setError(null)
     setArticles([])
+    resetResultsOverview()
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
@@ -2662,9 +2748,18 @@ function App(): JSX.Element {
       if (options.markTopicFeedbackApplied) {
         setAppliedTopicFeedbackArticleIds(feedbackArticleIds)
       }
+      void requestResultsOverview(
+        [
+          nextTopic ? `Topic: ${nextTopic}` : null,
+          trimmedOpinion ? `Stance: ${trimmedOpinion}` : null,
+        ].filter(Boolean).join('\n'),
+        normalized.articles,
+        'stance',
+      )
     } catch (fetchError) {
       console.error('Search request failed:', fetchError)
       setArticles([])
+      resetResultsOverview()
       setQuerySvdCorpusChartDimensions([])
       setQuerySvdDimensions([])
       setEmptyResultsMessage(null)
@@ -2682,6 +2777,7 @@ function App(): JSX.Element {
     setLoading(true)
     setError(null)
     setArticles([])
+    resetResultsOverview()
     setTopicFeedbackIrrelevantArticleIds([])
     setAppliedTopicFeedbackArticleIds([])
     setQuerySvdCorpusChartDimensions([])
@@ -2767,6 +2863,7 @@ function App(): JSX.Element {
     setLoading(true)
     setError(null)
     setArticles([])
+    resetResultsOverview()
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
@@ -2817,9 +2914,18 @@ function App(): JSX.Element {
       if (options.markTopicFeedbackApplied) {
         setAppliedTopicFeedbackArticleIds(feedbackArticleIds)
       }
+      void requestResultsOverview(
+        [
+          nextThesisSentence ? `Thesis: ${nextThesisSentence}` : null,
+          nextEssayText ? `Essay: ${nextEssayText}` : null,
+        ].filter(Boolean).join('\n'),
+        normalized.articles,
+        'essay',
+      )
     } catch (fetchError) {
       console.error('Essay search failed:', fetchError)
       setArticles([])
+      resetResultsOverview()
       setQuerySvdCorpusChartDimensions([])
       setQuerySvdDimensions([])
       setEmptyResultsMessage(null)
@@ -4104,8 +4210,48 @@ function App(): JSX.Element {
             )}
 
             {!loading && !error && articles.length > 0 && (
-              <div id="answer-box">
-                {visibleArticles.map((article) => {
+              <>
+                {(resultsOverviewLoading || resultsOverview || resultsOverviewError) && (
+                  <section className="results-overview-card" aria-live="polite">
+                    <div className="results-overview-header">
+                      <p className="results-overview-eyebrow">AI overview</p>
+                      {resultsOverviewLoading && (
+                        <div className="results-overview-spinner" aria-hidden="true">
+                          <span />
+                          <span />
+                          <span />
+                        </div>
+                      )}
+                    </div>
+
+                    {resultsOverviewLoading && (
+                      <p className="results-overview-copy">Reading the result set for agreement patterns, shared claims, and differences.</p>
+                    )}
+
+                    {!resultsOverviewLoading && resultsOverview && (
+                      <>
+                        <p className="results-overview-copy">{resultsOverview.overview}</p>
+                        {Array.isArray(resultsOverview.key_points) && resultsOverview.key_points.length > 0 && (
+                          <ul className="results-overview-list">
+                            {resultsOverview.key_points.map((point) => (
+                              <li key={point}>{point}</li>
+                            ))}
+                          </ul>
+                        )}
+                        {resultsOverview.caveat && (
+                          <p className="results-overview-caveat">{resultsOverview.caveat}</p>
+                        )}
+                      </>
+                    )}
+
+                    {!resultsOverviewLoading && !resultsOverview && resultsOverviewError && (
+                      <p className="results-overview-error">{resultsOverviewError}</p>
+                    )}
+                  </section>
+                )}
+
+                <div id="answer-box">
+                  {visibleArticles.map((article) => {
                   const articleTooltipBase = String(article.id).replace(/[^a-zA-Z0-9_-]/g, '-')
                   const articleRecencyWeight = article.recency_weight ?? recencyWeight
                   const svdDimensionLabelState = getSvdDimensionLabelState(article)
@@ -4523,7 +4669,7 @@ function App(): JSX.Element {
                       </div>
                     </article>
                   )
-                })}
+                  })}
 
                 {llmIrrelevantArticles.length > 0 && (
                   <details className="content-disclosure irrelevant-results-disclosure">
@@ -4561,7 +4707,8 @@ function App(): JSX.Element {
                     </div>
                   </details>
                 )}
-              </div>
+                </div>
+              </>
             )}
 
             {!loading && !error && articles.length === 0 && (
