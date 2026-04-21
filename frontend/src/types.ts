@@ -64,6 +64,33 @@ export type ArticleSearchResponse = {
   query_svd_corpus_chart_dimensions?: SvdLatentDimension[] | null
   query_svd_dimensions?: SvdLatentDimension[] | null
   empty_results_message?: string | null
+  typo_suggestion?: TypoCorrectionSuggestion | null
+}
+
+export type TypoCorrectionCandidate = {
+  term: string
+  distance: number
+  df: number
+}
+
+export type TypoCorrection = {
+  term: string
+  options: TypoCorrectionCandidate[]
+}
+
+export type TypoCorrectionOption = {
+  query: string
+  label?: string | null
+  replacements?: Record<string, string> | null
+  distance?: number | null
+  df?: number | null
+}
+
+export type TypoCorrectionSuggestion = {
+  query: string
+  highlighted_terms: string[]
+  options: TypoCorrectionOption[]
+  corrections?: TypoCorrection[] | null
 }
 
 export type SimilarArticlesResponse = {

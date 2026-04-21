@@ -18,6 +18,7 @@ from backend.text_processing.search_helpers import (
     query_svd_dimensions,
     serialize_article,
 )
+from backend.text_processing.typo_correction import build_query_typo_suggestion
 
 
 SUPPORTED_RETRIEVAL_MODELS = _SUPPORTED_RETRIEVAL_MODELS
@@ -572,6 +573,20 @@ def retrieval_query_svd_corpus_chart_dimensions(
         retrieval_model=resolved_model,
         processor=processor,
     )
+
+
+def retrieval_query_typo_suggestion(query, retrieval_model=DEFAULT_RETRIEVAL_MODEL):
+    resolved_query = str(query or "").strip()
+    if len(resolved_query) < 2:
+        return None
+
+    resolved_model = normalize_retrieval_model(retrieval_model)
+    try:
+        processor = build_retrieval_processor(retrieval_model=resolved_model)
+    except RuntimeError:
+        return None
+
+    return build_query_typo_suggestion(resolved_query, processor)
 
 
 def attach_query_svd_chart_dimensions(

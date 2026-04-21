@@ -5064,6 +5064,75 @@
   color: #7a2f21;
 }
 
+.typo-suggestion-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -8px 0 26px;
+  padding: 14px 16px;
+  border: 1px solid rgba(65, 77, 111, 0.18);
+  border-radius: 8px;
+  background: rgba(244, 247, 255, 0.78);
+  color: #1f1811;
+}
+
+.typo-suggestion-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.typo-suggestion-query {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #2a2016;
+}
+
+.typo-incorrect-word {
+  text-decoration: underline;
+  text-decoration-color: #6f4ea1;
+  text-decoration-thickness: 0.12em;
+  text-underline-offset: 0.16em;
+}
+
+.typo-suggestion-label {
+  color: #5a4a6d;
+}
+
+.typo-suggestion-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.typo-suggestion-option {
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid rgba(65, 77, 111, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.74);
+  color: #26365f;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.typo-suggestion-option:hover:not(:disabled) {
+  border-color: rgba(65, 77, 111, 0.36);
+  background: rgba(255, 255, 255, 0.94);
+  transform: translateY(-1px);
+}
+
 .topic-feedback-refresh-bar {
   display: flex;
   align-items: center;

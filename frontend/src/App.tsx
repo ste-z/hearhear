@@ -19,6 +19,7 @@ import {
   RetrievalModel,
   SimilarArticlesResponse,
   SvdLatentDimension,
+  TypoCorrectionSuggestion,
 } from './types'
 import Chat from './Chat'
 
@@ -36,6 +37,7 @@ type SvdChartSeriesRole = 'article' | 'query'
 type TopicFeedbackSearchOptions = {
   topicFeedbackIrrelevantArticleIds?: string[]
   markTopicFeedbackApplied?: boolean
+  topicOverride?: string
 }
 
 type ConfigResponse = {
@@ -208,6 +210,45 @@ const summarizeApiText = (value: string, maxLength = 180): string => (
 )
 
 const getArticleIdKey = (article: Pick<Article, 'id'>): string => String(article.id)
+const typoTokenPattern = /[\p{L}]+(?:[-'][\p{L}]+)*/gu
+
+const normalizeTypoTerm = (value: string): string => value.trim().toLocaleLowerCase()
+
+const normalizeTypoCorrection = (value: unknown): TypoCorrectionSuggestion | null => {
+  if (!value || typeof value !== 'object') return null
+
+  const rawSuggestion = value as Partial<TypoCorrectionSuggestion>
+  const query = typeof rawSuggestion.query === 'string' ? rawSuggestion.query : ''
+  const highlightedTerms = Array.isArray(rawSuggestion.highlighted_terms)
+    ? rawSuggestion.highlighted_terms
+      .filter((term): term is string => typeof term === 'string' && term.trim() !== '')
+      .map(normalizeTypoTerm)
+    : []
+  const options = Array.isArray(rawSuggestion.options)
+    ? rawSuggestion.options
+      .filter(option => option && typeof option.query === 'string' && option.query.trim() !== '')
+      .map(option => ({
+        query: option.query.trim(),
+        label: typeof option.label === 'string' && option.label.trim() !== ''
+          ? option.label.trim()
+          : option.query.trim(),
+        replacements: option.replacements ?? null,
+        distance: typeof option.distance === 'number' ? option.distance : null,
+        df: typeof option.df === 'number' ? option.df : null,
+      }))
+    : []
+
+  if (!query.trim() || highlightedTerms.length === 0 || options.length === 0) {
+    return null
+  }
+
+  return {
+    query,
+    highlighted_terms: Array.from(new Set(highlightedTerms)),
+    options,
+    corrections: Array.isArray(rawSuggestion.corrections) ? rawSuggestion.corrections : null,
+  }
+}
 
 const readApiJson = async <T,>(response: Response): Promise<T> => {
   const rawText = await response.text()
@@ -266,6 +307,7 @@ const normalizeArticleSearchResponse = (
   querySvdCorpusChartDimensions: SvdLatentDimension[]
   querySvdDimensions: SvdLatentDimension[]
   emptyResultsMessage: string | null
+  typoCorrection: TypoCorrectionSuggestion | null
 } => {
   if (Array.isArray(payload)) {
     return {
@@ -273,6 +315,7 @@ const normalizeArticleSearchResponse = (
       querySvdCorpusChartDimensions: [],
       querySvdDimensions: [],
       emptyResultsMessage: null,
+      typoCorrection: null,
     }
   }
 
@@ -286,12 +329,14 @@ const normalizeArticleSearchResponse = (
   const emptyResultsMessage = typeof payload?.empty_results_message === 'string'
     ? payload.empty_results_message
     : null
+  const typoCorrection = normalizeTypoCorrection(payload?.typo_suggestion)
 
   return {
     articles: results,
     querySvdCorpusChartDimensions,
     querySvdDimensions,
     emptyResultsMessage,
+    typoCorrection,
   }
 }
 
@@ -1306,6 +1351,7 @@ function App(): JSX.Element {
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [emptyResultsMessage, setEmptyResultsMessage] = useState<string | null>(null)
+  const [typoCorrection, setTypoCorrection] = useState<TypoCorrectionSuggestion | null>(null)
   const [isAboutOpen, setIsAboutOpen] = useState<boolean>(false)
   const [activeAboutTab, setActiveAboutTab] = useState<InputMode>('stance')
   const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false)
@@ -1571,6 +1617,7 @@ function App(): JSX.Element {
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
+    setTypoCorrection(null)
     setError(null)
     setHasSubmittedSearch(false)
   }, [chunkingMode, inputMode, opinion, recencyWeight, rerankTopK, stanceMethod, stanceWeight, topic, topicWeight])
@@ -1582,6 +1629,7 @@ function App(): JSX.Element {
     setTopicFeedbackIrrelevantArticleIds([])
     setAppliedTopicFeedbackArticleIds([])
     setEmptyResultsMessage(null)
+    setTypoCorrection(null)
     setError(null)
     setHasSubmittedSearch(false)
   }, [
@@ -1613,6 +1661,7 @@ function App(): JSX.Element {
     setTopicFeedbackIrrelevantArticleIds([])
     setAppliedTopicFeedbackArticleIds([])
     setEmptyResultsMessage(null)
+    setTypoCorrection(null)
     setError(null)
     setHasSubmittedSearch(false)
   }, [inputMode, searchTerm])
@@ -1903,6 +1952,39 @@ function App(): JSX.Element {
     }))
   }
 
+  const renderTypoHighlightedQuery = (suggestion: TypoCorrectionSuggestion): Array<string | JSX.Element> => {
+    const highlightedTerms = new Set(suggestion.highlighted_terms.map(normalizeTypoTerm))
+    const nodes: Array<string | JSX.Element> = []
+    let lastIndex = 0
+    let tokenIndex = 0
+
+    for (const match of suggestion.query.matchAll(typoTokenPattern)) {
+      const token = match[0]
+      const index = match.index ?? 0
+      if (index > lastIndex) {
+        nodes.push(suggestion.query.slice(lastIndex, index))
+      }
+
+      if (highlightedTerms.has(normalizeTypoTerm(token))) {
+        nodes.push(
+          <span key={`typo-${tokenIndex}`} className="typo-incorrect-word">
+            {token}
+          </span>,
+        )
+      } else {
+        nodes.push(token)
+      }
+      lastIndex = index + token.length
+      tokenIndex += 1
+    }
+
+    if (lastIndex < suggestion.query.length) {
+      nodes.push(suggestion.query.slice(lastIndex))
+    }
+
+    return nodes.length > 0 ? nodes : [suggestion.query]
+  }
+
   const handleYearStartChange = (value: string): void => {
     const nextStart = Number(value)
     if (Number.isNaN(nextStart)) return
@@ -1984,6 +2066,7 @@ function App(): JSX.Element {
     setSearchTerm(value)
     setTopicFeedbackIrrelevantArticleIds([])
     setAppliedTopicFeedbackArticleIds([])
+    setTypoCorrection(null)
     setEssayActiveStep(1)
     activateSearchStage(true)
   }
@@ -2000,6 +2083,7 @@ function App(): JSX.Element {
     setAppliedTopicFeedbackArticleIds([])
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
+    setTypoCorrection(null)
     setHasSubmittedSearch(false)
     setEssayCandidates([])
     setSelectedEssayCandidateId(null)
@@ -2037,7 +2121,8 @@ function App(): JSX.Element {
   const handleSubmitStance = async (
     options: TopicFeedbackSearchOptions = {},
   ): Promise<void> => {
-    if (!canSearchStance || loading) return
+    const nextTopic = (options.topicOverride ?? trimmedTopic).trim()
+    if (inputMode !== 'stance' || !nextTopic || !trimmedOpinion || loading) return
     const feedbackArticleIds = options.topicFeedbackIrrelevantArticleIds ?? topicFeedbackIrrelevantArticleIds
 
     lastAppliedYearRangeRef.current = {
@@ -2054,6 +2139,7 @@ function App(): JSX.Element {
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
+    setTypoCorrection(null)
 
     try {
       const response = await fetch('/api/articles', {
@@ -2063,7 +2149,7 @@ function App(): JSX.Element {
         },
         body: JSON.stringify({
           mode: 'stance',
-          topic: trimmedTopic,
+          topic: nextTopic,
           opinion: trimmedOpinion,
           topic_weight: topicWeight,
           stance_weight: stanceWeight,
@@ -2088,6 +2174,7 @@ function App(): JSX.Element {
       setQuerySvdCorpusChartDimensions(normalized.querySvdCorpusChartDimensions)
       setQuerySvdDimensions(normalized.querySvdDimensions)
       setEmptyResultsMessage(normalized.emptyResultsMessage)
+      setTypoCorrection(normalized.typoCorrection)
       if (options.markTopicFeedbackApplied) {
         setAppliedTopicFeedbackArticleIds(feedbackArticleIds)
       }
@@ -2097,6 +2184,7 @@ function App(): JSX.Element {
       setQuerySvdCorpusChartDimensions([])
       setQuerySvdDimensions([])
       setEmptyResultsMessage(null)
+      setTypoCorrection(null)
       setError(fetchError instanceof Error ? fetchError.message : 'Search request failed.')
     } finally {
       setLoading(false)
@@ -2114,6 +2202,7 @@ function App(): JSX.Element {
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
+    setTypoCorrection(null)
 
     try {
       const formData = new FormData()
@@ -2154,6 +2243,7 @@ function App(): JSX.Element {
       setEssayActiveStep(1)
       setQuerySvdCorpusChartDimensions([])
       setQuerySvdDimensions([])
+      setTypoCorrection(null)
       setError(fetchError instanceof Error ? fetchError.message : 'Essay analysis failed.')
     } finally {
       setLoading(false)
@@ -2186,6 +2276,7 @@ function App(): JSX.Element {
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
+    setTypoCorrection(null)
 
     try {
       const response = await fetch('/api/articles', {
@@ -2221,6 +2312,7 @@ function App(): JSX.Element {
       setQuerySvdCorpusChartDimensions(normalized.querySvdCorpusChartDimensions)
       setQuerySvdDimensions(normalized.querySvdDimensions)
       setEmptyResultsMessage(normalized.emptyResultsMessage)
+      setTypoCorrection(normalized.typoCorrection)
       if (options.markTopicFeedbackApplied) {
         setAppliedTopicFeedbackArticleIds(feedbackArticleIds)
       }
@@ -2230,6 +2322,7 @@ function App(): JSX.Element {
       setQuerySvdCorpusChartDimensions([])
       setQuerySvdDimensions([])
       setEmptyResultsMessage(null)
+      setTypoCorrection(null)
       setError(fetchError instanceof Error ? fetchError.message : 'Essay search failed.')
     } finally {
       setLoading(false)
@@ -2256,6 +2349,13 @@ function App(): JSX.Element {
     setEssayThesisMode('candidate')
     setEssayActiveStep(1)
     await submitEssaySearch(nextEssayText, '', null)
+  }
+
+  const handleApplyTypoCorrection = (correctedQuery: string): void => {
+    const nextTopic = correctedQuery.trim()
+    if (!nextTopic || loading) return
+    setTopic(nextTopic)
+    void handleSubmitStance({ topicOverride: nextTopic })
   }
 
   useEffect(() => {
@@ -3384,6 +3484,29 @@ function App(): JSX.Element {
               <h2>Guardian opinion matches</h2>
               <p className="results-paper-copy">{resultsDescription}</p>
             </div>
+
+            {!loading && !error && inputMode === 'stance' && typoCorrection && (
+              <div className="typo-suggestion-bar" role="status" aria-live="polite">
+                <div className="typo-suggestion-copy">
+                  <span className="typo-suggestion-query">
+                    {renderTypoHighlightedQuery(typoCorrection)}
+                  </span>
+                  <span className="typo-suggestion-label">did you mean:</span>
+                </div>
+                <div className="typo-suggestion-options">
+                  {typoCorrection.options.map((option) => (
+                    <button
+                      key={option.query}
+                      type="button"
+                      className="typo-suggestion-option"
+                      onClick={() => handleApplyTypoCorrection(option.query)}
+                    >
+                      {option.label || option.query}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {!loading && !error && pendingTopicFeedbackCount > 0 && (
               <div className="topic-feedback-refresh-bar" role="status" aria-live="polite">

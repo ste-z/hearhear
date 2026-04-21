@@ -22,6 +22,7 @@ from backend.services.retrieval_service import (
     normalize_article_year_range,
     normalize_retrieval_model,
     normalize_rerank_selection_mode,
+    retrieval_query_typo_suggestion,
     retrieval_query_svd_corpus_chart_dimensions,
     retrieval_query_svd_dimensions,
     similar_svd_articles,
@@ -356,6 +357,14 @@ def register_routes(app):
                 query_text = context["topic"]
             else:
                 query_text = context["essay_text"]
+            typo_suggestion = (
+                retrieval_query_typo_suggestion(
+                    query_text,
+                    retrieval_model=context["retrieval_model"],
+                )
+                if context["mode"] == "stance"
+                else None
+            )
             query_svd_dimensions = retrieval_query_svd_dimensions(
                 query=query_text,
                 retrieval_model=context["retrieval_model"],
@@ -382,6 +391,7 @@ def register_routes(app):
                 "query_svd_dimensions": query_svd_dimensions,
                 "query_svd_corpus_chart_dimensions": query_svd_corpus_chart_dimensions,
                 "empty_results_message": empty_results_message,
+                "typo_suggestion": typo_suggestion,
             })
         except Exception as exc:
             app.logger.exception("API request to /api/articles failed")
