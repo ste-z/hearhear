@@ -187,6 +187,11 @@ def _extract_request_context():
         or payload.get("irrelevant_article_ids")
         or payload.get("not_relevant_article_ids")
     )
+    skip_typo_correction = _coerce_bool(
+        payload.get("skip_typo_correction")
+        or payload.get("ignore_typo_correction"),
+        False,
+    )
 
     typed_text = (
         payload.get("q")
@@ -225,6 +230,7 @@ def _extract_request_context():
         "selected_thesis_sentence": selected_thesis_sentence,
         "selected_thesis_id": selected_thesis_id,
         "topic_feedback_irrelevant_article_ids": topic_feedback_irrelevant_article_ids,
+        "skip_typo_correction": skip_typo_correction,
         "essay_text": essay_text,
     }
 
@@ -362,7 +368,7 @@ def register_routes(app):
                     query_text,
                     retrieval_model=context["retrieval_model"],
                 )
-                if context["mode"] == "stance"
+                if context["mode"] == "stance" and not context["skip_typo_correction"]
                 else None
             )
             query_svd_dimensions = retrieval_query_svd_dimensions(

@@ -5072,9 +5072,10 @@
   z-index: 8;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  width: min(100%, 640px);
+  justify-content: flex-start;
+  gap: 6px;
+  width: max-content;
+  max-width: calc(100vw - 48px);
   padding: 12px 14px;
   box-sizing: border-box;
   border: 1px solid rgba(241, 220, 197, 0.26);
@@ -5102,7 +5103,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: 5px;
+  flex: 0 1 auto;
   min-width: 0;
   font-family: 'Montserrat', sans-serif;
   font-size: 0.95rem;
@@ -5129,13 +5131,14 @@
 .typo-suggestion-options {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
+  flex: 0 1 auto;
+  justify-content: flex-start;
+  gap: 4px;
 }
 
 .typo-suggestion-option {
   min-height: 34px;
-  padding: 7px 11px;
+  padding: 7px 10px;
   border: 1px solid rgba(241, 220, 197, 0.3);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.08);
@@ -5144,6 +5147,7 @@
   font-size: 0.86rem;
   font-weight: 800;
   line-height: 1.2;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
@@ -5152,6 +5156,12 @@
   border-color: rgba(241, 220, 197, 0.58);
   background: rgba(241, 220, 197, 0.16);
   transform: translateY(-1px);
+}
+
+.typo-suggestion-option.search-anyway {
+  border-color: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 700;
 }
 
 .topic-feedback-refresh-bar {

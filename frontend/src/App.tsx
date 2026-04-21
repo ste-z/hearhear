@@ -38,6 +38,7 @@ type TopicFeedbackSearchOptions = {
   topicFeedbackIrrelevantArticleIds?: string[]
   markTopicFeedbackApplied?: boolean
   topicOverride?: string
+  skipTypoCorrection?: boolean
 }
 
 type ConfigResponse = {
@@ -2173,6 +2174,7 @@ function App(): JSX.Element {
           year_start: resolvedYearStart,
           year_end: resolvedYearEnd,
           topic_feedback_irrelevant_article_ids: feedbackArticleIds,
+          skip_typo_correction: Boolean(options.skipTypoCorrection),
         }),
       })
 
@@ -2183,7 +2185,7 @@ function App(): JSX.Element {
       setQuerySvdDimensions(normalized.querySvdDimensions)
       setEmptyResultsMessage(normalized.emptyResultsMessage)
       setTypoCorrection(normalized.typoCorrection)
-      setShouldScrollToResults(!normalized.typoCorrection)
+      setShouldScrollToResults(Boolean(options.skipTypoCorrection) || !normalized.typoCorrection)
       if (options.markTopicFeedbackApplied) {
         setAppliedTopicFeedbackArticleIds(feedbackArticleIds)
       }
@@ -2368,6 +2370,11 @@ function App(): JSX.Element {
     skipNextStanceResetRef.current = true
     setTopic(nextTopic)
     void handleSubmitStance({ topicOverride: nextTopic })
+  }
+
+  const handleSearchAnyway = (): void => {
+    if (loading) return
+    void handleSubmitStance({ skipTypoCorrection: true })
   }
 
   useEffect(() => {
@@ -3193,6 +3200,13 @@ function App(): JSX.Element {
                             {option.label || option.query}
                           </button>
                         ))}
+                        <button
+                          type="button"
+                          className="typo-suggestion-option search-anyway"
+                          onClick={handleSearchAnyway}
+                        >
+                          Search anyway
+                        </button>
                       </span>
                     </span>
                   )}
