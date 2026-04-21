@@ -108,6 +108,28 @@ def _coerce_bool(value, default=False):
     return bool(default)
 
 
+def _coerce_string_list(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_values = value.split(",")
+    else:
+        try:
+            raw_values = list(value)
+        except TypeError:
+            raw_values = [value]
+
+    normalized = []
+    seen = set()
+    for raw_value in raw_values:
+        text = str(raw_value or "").strip()
+        if not text or text in seen:
+            continue
+        normalized.append(text)
+        seen.add(text)
+    return normalized
+
+
 def _extract_request_context():
     payload = _request_payload()
     mode = str(payload.get("mode") or "essay").strip().lower()
@@ -157,6 +179,11 @@ def _extract_request_context():
     year_end = _coerce_optional_int(payload.get("year_end"), "End year")
     selected_thesis_sentence = str(payload.get("selected_thesis_sentence") or "").strip()
     selected_thesis_id = str(payload.get("selected_thesis_id") or "").strip() or None
+    topic_feedback_irrelevant_article_ids = _coerce_string_list(
+        payload.get("topic_feedback_irrelevant_article_ids")
+        or payload.get("irrelevant_article_ids")
+        or payload.get("not_relevant_article_ids")
+    )
 
     typed_text = (
         payload.get("q")
@@ -194,6 +221,7 @@ def _extract_request_context():
         "year_end": year_end,
         "selected_thesis_sentence": selected_thesis_sentence,
         "selected_thesis_id": selected_thesis_id,
+        "topic_feedback_irrelevant_article_ids": topic_feedback_irrelevant_article_ids,
         "essay_text": essay_text,
     }
 
@@ -267,6 +295,7 @@ def register_routes(app):
                 stance_method=context["stance_method"],
                 rerank_selection_mode=context["rerank_selection_mode"],
                 rerank_threshold=context["rerank_threshold"],
+                rocchio_irrelevant_count=len(context["topic_feedback_irrelevant_article_ids"]),
             )
             empty_results_message = None
             if context["mode"] == "stance":
@@ -286,6 +315,7 @@ def register_routes(app):
                     chunking_mode=context["chunking_mode"],
                     rerank_selection_mode=context["rerank_selection_mode"],
                     rerank_threshold=context["rerank_threshold"],
+                    topic_feedback_irrelevant_article_ids=context["topic_feedback_irrelevant_article_ids"],
                 )
             elif context["mode"] == "essay":
                 search_payload = essay_search(
@@ -305,6 +335,7 @@ def register_routes(app):
                     chunking_mode=context["chunking_mode"],
                     rerank_selection_mode=context["rerank_selection_mode"],
                     rerank_threshold=context["rerank_threshold"],
+                    topic_feedback_irrelevant_article_ids=context["topic_feedback_irrelevant_article_ids"],
                 )
             else:
                 search_payload = {
@@ -313,6 +344,7 @@ def register_routes(app):
                         retrieval_model=context["retrieval_model"],
                         year_start=context["year_start"],
                         year_end=context["year_end"],
+                        topic_feedback_irrelevant_article_ids=context["topic_feedback_irrelevant_article_ids"],
                     ),
                     "empty_results_message": None,
                 }

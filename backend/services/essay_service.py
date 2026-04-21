@@ -47,6 +47,7 @@ def essay_search(
     normalize_topic_scores=False,
     rerank_selection_mode=DEFAULT_RERANK_SELECTION_MODE,
     rerank_threshold=None,
+    topic_feedback_irrelevant_article_ids=None,
     stance_method="nli",
     use_chunking=False,
     chunking_mode="none",
@@ -69,6 +70,7 @@ def essay_search(
         year_end=year_end,
         rerank_selection_mode=resolved_selection_mode,
         rerank_threshold=rerank_threshold,
+        topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
     )
     topic_matches = candidate_payload["matches"]
     if not topic_matches:

@@ -31,6 +31,10 @@ type ChunkingMode = 'none' | 'paragraph' | 'semantic'
 type FrontendChunkingMode = Exclude<ChunkingMode, 'paragraph'>
 type SettingsFocusTarget = 'topic-relevance' | 'agreement-scorer'
 type SvdDimensionLabelMap = Record<number, string>
+type TopicFeedbackSearchOptions = {
+  topicFeedbackIrrelevantArticleIds?: string[]
+  markTopicFeedbackApplied?: boolean
+}
 
 type ConfigResponse = {
   use_llm: boolean
@@ -199,6 +203,8 @@ const markLandingAsSeen = (): void => {
 const summarizeApiText = (value: string, maxLength = 180): string => (
   value.replace(/\s+/g, ' ').trim().slice(0, maxLength)
 )
+
+const getArticleIdKey = (article: Pick<Article, 'id'>): string => String(article.id)
 
 const readApiJson = async <T,>(response: Response): Promise<T> => {
   const rawText = await response.text()
@@ -1114,6 +1120,8 @@ function App(): JSX.Element {
     defaultSupportedRetrievalModels,
   )
   const [articles, setArticles] = useState<Article[]>([])
+  const [topicFeedbackIrrelevantArticleIds, setTopicFeedbackIrrelevantArticleIds] = useState<string[]>([])
+  const [appliedTopicFeedbackArticleIds, setAppliedTopicFeedbackArticleIds] = useState<string[]>([])
   const [querySvdCorpusChartDimensions, setQuerySvdCorpusChartDimensions] = useState<SvdLatentDimension[]>([])
   const [querySvdDimensions, setQuerySvdDimensions] = useState<SvdLatentDimension[]>([])
   const [svdRankingExplanations, setSvdRankingExplanations] = useState<Record<string, {
@@ -1385,6 +1393,8 @@ function App(): JSX.Element {
       return
     }
     setArticles([])
+    setTopicFeedbackIrrelevantArticleIds([])
+    setAppliedTopicFeedbackArticleIds([])
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
@@ -1396,6 +1406,8 @@ function App(): JSX.Element {
     setArticles([])
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
+    setTopicFeedbackIrrelevantArticleIds([])
+    setAppliedTopicFeedbackArticleIds([])
     setEmptyResultsMessage(null)
     setError(null)
     setHasSubmittedSearch(false)
@@ -1425,6 +1437,8 @@ function App(): JSX.Element {
     setArticles([])
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
+    setTopicFeedbackIrrelevantArticleIds([])
+    setAppliedTopicFeedbackArticleIds([])
     setEmptyResultsMessage(null)
     setError(null)
     setHasSubmittedSearch(false)
@@ -1795,6 +1809,8 @@ function App(): JSX.Element {
     setEssayCustomThesis('')
     setEssayThesisMode('candidate')
     setSearchTerm(value)
+    setTopicFeedbackIrrelevantArticleIds([])
+    setAppliedTopicFeedbackArticleIds([])
     setEssayActiveStep(1)
     activateSearchStage(true)
   }
@@ -1807,6 +1823,8 @@ function App(): JSX.Element {
     setIsImportingPdf(true)
     setError(null)
     setArticles([])
+    setTopicFeedbackIrrelevantArticleIds([])
+    setAppliedTopicFeedbackArticleIds([])
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setHasSubmittedSearch(false)
@@ -1843,8 +1861,11 @@ function App(): JSX.Element {
     }
   }
 
-  const handleSubmitStance = async (): Promise<void> => {
+  const handleSubmitStance = async (
+    options: TopicFeedbackSearchOptions = {},
+  ): Promise<void> => {
     if (!canSearchStance || loading) return
+    const feedbackArticleIds = options.topicFeedbackIrrelevantArticleIds ?? topicFeedbackIrrelevantArticleIds
 
     lastAppliedYearRangeRef.current = {
       yearStart: resolvedYearStart,
@@ -1884,6 +1905,7 @@ function App(): JSX.Element {
           rerank_threshold: currentAutoRerankThreshold,
           year_start: resolvedYearStart,
           year_end: resolvedYearEnd,
+          topic_feedback_irrelevant_article_ids: feedbackArticleIds,
         }),
       })
 
@@ -1893,6 +1915,9 @@ function App(): JSX.Element {
       setQuerySvdCorpusChartDimensions(normalized.querySvdCorpusChartDimensions)
       setQuerySvdDimensions(normalized.querySvdDimensions)
       setEmptyResultsMessage(normalized.emptyResultsMessage)
+      if (options.markTopicFeedbackApplied) {
+        setAppliedTopicFeedbackArticleIds(feedbackArticleIds)
+      }
     } catch (fetchError) {
       console.error('Search request failed:', fetchError)
       setArticles([])
@@ -1911,6 +1936,8 @@ function App(): JSX.Element {
     setLoading(true)
     setError(null)
     setArticles([])
+    setTopicFeedbackIrrelevantArticleIds([])
+    setAppliedTopicFeedbackArticleIds([])
     setQuerySvdCorpusChartDimensions([])
     setQuerySvdDimensions([])
     setEmptyResultsMessage(null)
@@ -1964,11 +1991,13 @@ function App(): JSX.Element {
     essayText: string,
     thesisSentence: string,
     thesisId: string | null,
+    options: TopicFeedbackSearchOptions = {},
   ): Promise<void> => {
     const nextEssayText = essayText.trim()
     const nextThesisSentence = thesisSentence.trim()
     if (!nextEssayText || loading) return
     if (!isLlmAgreementSelected && !nextThesisSentence) return
+    const feedbackArticleIds = options.topicFeedbackIrrelevantArticleIds ?? topicFeedbackIrrelevantArticleIds
 
     lastAppliedYearRangeRef.current = {
       yearStart: resolvedYearStart,
@@ -2009,6 +2038,7 @@ function App(): JSX.Element {
           rerank_threshold: currentAutoRerankThreshold,
           year_start: resolvedYearStart,
           year_end: resolvedYearEnd,
+          topic_feedback_irrelevant_article_ids: feedbackArticleIds,
         }),
       })
 
@@ -2018,6 +2048,9 @@ function App(): JSX.Element {
       setQuerySvdCorpusChartDimensions(normalized.querySvdCorpusChartDimensions)
       setQuerySvdDimensions(normalized.querySvdDimensions)
       setEmptyResultsMessage(normalized.emptyResultsMessage)
+      if (options.markTopicFeedbackApplied) {
+        setAppliedTopicFeedbackArticleIds(feedbackArticleIds)
+      }
     } catch (fetchError) {
       console.error('Essay search failed:', fetchError)
       setArticles([])
@@ -2207,10 +2240,68 @@ function App(): JSX.Element {
   ): string => (
     `${article.id}-paragraph-${paragraph.paragraph_id ?? paragraph.paragraph_index ?? index}`
   )
+  const topicFeedbackIrrelevantIdSet = useMemo(
+    () => new Set(topicFeedbackIrrelevantArticleIds),
+    [topicFeedbackIrrelevantArticleIds],
+  )
+  const appliedTopicFeedbackIdSet = useMemo(
+    () => new Set(appliedTopicFeedbackArticleIds),
+    [appliedTopicFeedbackArticleIds],
+  )
+  const pendingTopicFeedbackArticleIds = useMemo(
+    () => topicFeedbackIrrelevantArticleIds.filter(articleId => !appliedTopicFeedbackIdSet.has(articleId)),
+    [appliedTopicFeedbackIdSet, topicFeedbackIrrelevantArticleIds],
+  )
+  const isTopicFeedbackIrrelevantArticle = (article: Article): boolean => (
+    topicFeedbackIrrelevantIdSet.has(getArticleIdKey(article))
+  )
   const visibleArticles = articles.filter(article => !isLlmIrrelevantArticle(article))
+  const topicFeedbackIrrelevantArticles = visibleArticles.filter(isTopicFeedbackIrrelevantArticle)
+  const activeVisibleArticles = visibleArticles.filter(article => !isTopicFeedbackIrrelevantArticle(article))
   const llmIrrelevantArticles = articles.filter(isLlmIrrelevantArticle)
   const canExplainRanking = useLlm === true && retrievalModel === 'svd'
-  const shouldShowEssayShortcut = useLlm && !(inputMode === 'essay' && isSearchStageVisible)
+  const shouldShowEssayShortcut = useLlm && inputMode === 'essay' && !isSearchStageVisible
+  const pendingTopicFeedbackCount = pendingTopicFeedbackArticleIds.length
+
+  const handleMarkTopicIrrelevant = (article: Article): void => {
+    const articleId = getArticleIdKey(article)
+    setTopicFeedbackIrrelevantArticleIds(currentIds => (
+      currentIds.includes(articleId) ? currentIds : [...currentIds, articleId]
+    ))
+  }
+
+  const handleUndoTopicIrrelevant = (article: Article): void => {
+    const articleId = getArticleIdKey(article)
+    setTopicFeedbackIrrelevantArticleIds(currentIds => (
+      currentIds.filter(currentId => currentId !== articleId)
+    ))
+    setAppliedTopicFeedbackArticleIds(currentIds => (
+      currentIds.filter(currentId => currentId !== articleId)
+    ))
+  }
+
+  const handleRefreshTopicFeedback = async (): Promise<void> => {
+    if (loading || pendingTopicFeedbackCount === 0) return
+    const feedbackArticleIds = [...topicFeedbackIrrelevantArticleIds]
+
+    if (inputMode === 'stance') {
+      await handleSubmitStance({
+        topicFeedbackIrrelevantArticleIds: feedbackArticleIds,
+        markTopicFeedbackApplied: true,
+      })
+      return
+    }
+
+    await submitEssaySearch(
+      essayPreparedText,
+      resolvedEssayThesis,
+      resolvedEssayThesisId,
+      {
+        topicFeedbackIrrelevantArticleIds: feedbackArticleIds,
+        markTopicFeedbackApplied: true,
+      },
+    )
+  }
 
   const getMatchSummary = (article: Article): string => {
     const hasWeightedRecency = (article.recency_weight ?? recencyWeight) > 0
@@ -2493,11 +2584,19 @@ function App(): JSX.Element {
     const hiddenCopy = llmIrrelevantArticles.length > 0
       ? ` ${llmIrrelevantArticles.length} ${llmIrrelevantArticles.length === 1 ? 'article is' : 'articles are'} hidden as unrelated.`
       : ''
+    const feedbackCopy = topicFeedbackIrrelevantArticles.length > 0
+      ? ` ${topicFeedbackIrrelevantArticles.length} ${topicFeedbackIrrelevantArticles.length === 1 ? 'article is' : 'articles are'} collapsed as not relevant.`
+      : ''
+    const appliedFeedbackCopy = appliedTopicFeedbackArticleIds.length > 0
+      ? ` Topic feedback is active for ${appliedTopicFeedbackArticleIds.length} ${appliedTopicFeedbackArticleIds.length === 1 ? 'article' : 'articles'}.`
+      : ''
     return (
-      `${visibleArticles.length} Guardian opinion ${visibleArticles.length === 1 ? 'piece' : 'pieces'}`
-      + `${yearRangeSummary} ranked with your current search settings.${hiddenCopy}`
+      `${activeVisibleArticles.length} Guardian opinion ${activeVisibleArticles.length === 1 ? 'piece' : 'pieces'}`
+      + `${yearRangeSummary} ranked with your current search settings.${hiddenCopy}${feedbackCopy}${appliedFeedbackCopy}`
     )
   }, [
+    activeVisibleArticles.length,
+    appliedTopicFeedbackArticleIds.length,
     articles.length,
     emptyResultsMessage,
     error,
@@ -2506,7 +2605,7 @@ function App(): JSX.Element {
     isLlmAgreementSelected,
     llmIrrelevantArticles.length,
     loading,
-    visibleArticles.length,
+    topicFeedbackIrrelevantArticles.length,
     yearRangeSummary,
   ])
 
@@ -2927,7 +3026,7 @@ function App(): JSX.Element {
               <button
                 type="button"
                 className="primary-action-button"
-                onClick={handleSubmitStance}
+                onClick={() => void handleSubmitStance()}
                 disabled={!canSearchStance || loading}
               >
                 Search
@@ -3021,6 +3120,25 @@ function App(): JSX.Element {
               <p className="results-paper-copy">{resultsDescription}</p>
             </div>
 
+            {!loading && !error && pendingTopicFeedbackCount > 0 && (
+              <div className="topic-feedback-refresh-bar" role="status" aria-live="polite">
+                <div className="topic-feedback-refresh-copy">
+                  <p className="topic-feedback-refresh-eyebrow">Topic feedback</p>
+                  <p>
+                    {`${pendingTopicFeedbackCount} ${pendingTopicFeedbackCount === 1 ? 'article is' : 'articles are'} marked not relevant.`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="topic-feedback-refresh-button"
+                  onClick={handleRefreshTopicFeedback}
+                  disabled={loading}
+                >
+                  Refresh
+                </button>
+              </div>
+            )}
+
             {loading && (
               <div className="results-thinking-card" role="status" aria-live="polite">
                 <p className="results-thinking-label">Thinking</p>
@@ -3044,6 +3162,33 @@ function App(): JSX.Element {
                   const articleTooltipBase = String(article.id).replace(/[^a-zA-Z0-9_-]/g, '-')
                   const articleRecencyWeight = article.recency_weight ?? recencyWeight
                   const svdDimensionLabelState = getSvdDimensionLabelState(article)
+                  const isMarkedNotRelevant = isTopicFeedbackIrrelevantArticle(article)
+                  const activeArticleRank = activeVisibleArticles.findIndex(activeArticle => (
+                    getArticleIdKey(activeArticle) === getArticleIdKey(article)
+                  )) + 1
+
+                  if (isMarkedNotRelevant) {
+                    return (
+                      <article key={article.id} className="article-item topic-feedback-collapsed-article">
+                        <div className="topic-feedback-collapsed-copy">
+                          <p className="topic-feedback-state">Marked not relevant</p>
+                          <h3 className="article-title">
+                            <a href={article.url} target="_blank" rel="noreferrer">{article.title}</a>
+                          </h3>
+                          <p className="article-meta">
+                            {article.author_display || article.author_raw || 'Unknown author'} | {formatDate(article.date)}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="topic-feedback-undo-button"
+                          onClick={() => handleUndoTopicIrrelevant(article)}
+                        >
+                          Undo
+                        </button>
+                      </article>
+                    )
+                  }
 
                   return (
                     <article key={article.id} className="article-item">
@@ -3082,7 +3227,7 @@ function App(): JSX.Element {
                                 <button
                                   type="button"
                                   className="explain-ranking-button"
-                                  onClick={() => handleExplainRanking(article, visibleArticles.indexOf(article) + 1)}
+                                  onClick={() => handleExplainRanking(article, activeArticleRank)}
                                   disabled={getRankingExplanationState(article).loading}
                                 >
                                   {getRankingExplanationState(article).loading ? 'Explaining…' : 'Explain ranking'}
@@ -3395,6 +3540,17 @@ function App(): JSX.Element {
                           </div>
                         </div>
                       )}
+
+                      <div className="topic-feedback-action-row">
+                        <button
+                          type="button"
+                          className="topic-feedback-button"
+                          onClick={() => handleMarkTopicIrrelevant(article)}
+                          aria-label={`Mark ${article.title} as not relevant`}
+                        >
+                          Mark as not relevant
+                        </button>
+                      </div>
                     </article>
                   )
                 })}

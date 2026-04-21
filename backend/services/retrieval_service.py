@@ -2,6 +2,10 @@ from sqlalchemy import func, or_
 
 from backend.db.models import GuardianArticle
 from backend.runtime.runtime_debug import log_runtime_event
+from backend.services.rocchio_feedback import (
+    build_rocchio_processor_searcher,
+    normalize_article_id_list,
+)
 from backend.text_processing.search_helpers import (
     attach_query_svd_chart_dimensions as _attach_query_svd_chart_dimensions,
     DEFAULT_RETRIEVAL_MODEL,
@@ -119,6 +123,17 @@ def _ranked_article_year(article, year_lookup):
     return _coerce_year(getattr(article, "year", None))
 
 
+def _ranked_article_id(article):
+    if isinstance(article, str):
+        return article.strip()
+    if isinstance(article, dict):
+        value = article.get("id")
+    else:
+        value = getattr(article, "id", None)
+    article_id = str(value or "").strip()
+    return article_id or None
+
+
 def _filter_ranked_articles_by_year_range(ranked_articles, year_start=None, year_end=None):
     if year_start is None and year_end is None:
         return list(ranked_articles)
@@ -154,6 +169,18 @@ def _filter_ranked_articles_by_year_range(ranked_articles, year_start=None, year
     return filtered
 
 
+def _filter_ranked_articles_by_excluded_ids(ranked_articles, excluded_article_ids):
+    excluded_ids = set(normalize_article_id_list(excluded_article_ids))
+    if not excluded_ids:
+        return list(ranked_articles)
+
+    return [
+        (article, score)
+        for article, score in ranked_articles
+        if _ranked_article_id(article) not in excluded_ids
+    ]
+
+
 def _filter_matches_by_topic_threshold(article_matches, threshold):
     resolved_threshold = float(threshold)
     return [
@@ -171,6 +198,7 @@ def select_rerank_candidates(
     year_end=None,
     rerank_selection_mode=DEFAULT_RERANK_SELECTION_MODE,
     rerank_threshold=None,
+    topic_feedback_irrelevant_article_ids=None,
 ):
     resolved_model = normalize_retrieval_model(retrieval_model)
     resolved_selection_mode = normalize_rerank_selection_mode(rerank_selection_mode)
@@ -183,6 +211,7 @@ def select_rerank_candidates(
             retrieval_model=resolved_model,
             year_start=year_start,
             year_end=year_end,
+            topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
         )
         log_runtime_event(
             "rerank_candidates.manual_done",
@@ -208,6 +237,7 @@ def select_rerank_candidates(
         retrieval_model=resolved_model,
         year_start=year_start,
         year_end=year_end,
+        topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
     )
     selected_matches = _filter_matches_by_topic_threshold(
         matches,
@@ -238,7 +268,13 @@ def select_rerank_candidates(
     }
 
 
-def keyword_search(query, top_n=100, year_start=None, year_end=None):
+def keyword_search(
+    query,
+    top_n=100,
+    year_start=None,
+    year_end=None,
+    exclude_article_ids=None,
+):
     if not query or not query.strip():
         return []
 
@@ -261,6 +297,9 @@ def keyword_search(query, top_n=100, year_start=None, year_end=None):
         results_query = results_query.filter(GuardianArticle.year >= resolved_year_start)
     if resolved_year_end is not None:
         results_query = results_query.filter(GuardianArticle.year <= resolved_year_end)
+    excluded_ids = normalize_article_id_list(exclude_article_ids)
+    if excluded_ids:
+        results_query = results_query.filter(~GuardianArticle.id.in_(excluded_ids))
 
     results = (
         results_query
@@ -278,6 +317,7 @@ def retrieval_search(
     retrieval_model=DEFAULT_RETRIEVAL_MODEL,
     year_start=None,
     year_end=None,
+    topic_feedback_irrelevant_article_ids=None,
 ):
     if not query or not query.strip():
         return []
@@ -287,6 +327,9 @@ def retrieval_search(
         return []
     resolved_model = normalize_retrieval_model(retrieval_model)
     resolved_top_n = max(1, int(top_n))
+    feedback_article_ids = normalize_article_id_list(
+        topic_feedback_irrelevant_article_ids
+    )
     resolved_year_start, resolved_year_end = normalize_article_year_range(
         year_start,
         year_end,
@@ -299,6 +342,7 @@ def retrieval_search(
         top_n=resolved_top_n,
         year_start=resolved_year_start,
         year_end=resolved_year_end,
+        rocchio_irrelevant_count=len(feedback_article_ids),
     )
     try:
         processor = build_retrieval_processor(retrieval_model=resolved_model)
@@ -315,6 +359,7 @@ def retrieval_search(
             top_n=resolved_top_n,
             year_start=resolved_year_start,
             year_end=resolved_year_end,
+            exclude_article_ids=feedback_article_ids,
         )
 
     if processor is None:
@@ -324,14 +369,29 @@ def retrieval_search(
         )
         return []
 
+    processor_search = build_rocchio_processor_searcher(
+        query=resolved_query,
+        processor=processor,
+        retrieval_model=resolved_model,
+        irrelevant_article_ids=feedback_article_ids,
+    )
+    search_padding = len(feedback_article_ids)
+
     if resolved_year_start is None and resolved_year_end is None:
-        ranked = processor.search(resolved_query, top_n=resolved_top_n)
+        ranked = processor_search(top_n=resolved_top_n + search_padding)
+        ranked = _filter_ranked_articles_by_excluded_ids(
+            ranked,
+            feedback_article_ids,
+        )[:resolved_top_n]
     else:
         max_candidates = max(
             resolved_top_n,
             int(getattr(processor, "n_docs", resolved_top_n)),
         )
-        search_limit = min(max_candidates, max(resolved_top_n * 4, resolved_top_n + 20))
+        search_limit = min(
+            max_candidates,
+            max((resolved_top_n + search_padding) * 4, resolved_top_n + 20),
+        )
         filtered_ranked = []
 
         while True:
@@ -342,11 +402,15 @@ def retrieval_search(
                 year_end=resolved_year_end,
                 search_limit=search_limit,
             )
-            ranked_batch = processor.search(resolved_query, top_n=search_limit)
+            ranked_batch = processor_search(top_n=search_limit)
             filtered_ranked = _filter_ranked_articles_by_year_range(
                 ranked_batch,
                 year_start=resolved_year_start,
                 year_end=resolved_year_end,
+            )
+            filtered_ranked = _filter_ranked_articles_by_excluded_ids(
+                filtered_ranked,
+                feedback_article_ids,
             )
             if (
                 len(filtered_ranked) >= resolved_top_n
@@ -476,6 +540,7 @@ def json_search(
     top_n=100,
     year_start=None,
     year_end=None,
+    topic_feedback_irrelevant_article_ids=None,
 ):
     """
     Primary search used by /api/articles and optional LLM retrieval.
@@ -494,6 +559,7 @@ def json_search(
             retrieval_model=resolved_model,
             year_start=year_start,
             year_end=year_end,
+            topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
         )
     except Exception:
         log_runtime_event(
@@ -505,6 +571,7 @@ def json_search(
             top_n=top_n,
             year_start=year_start,
             year_end=year_end,
+            exclude_article_ids=topic_feedback_irrelevant_article_ids,
         )
 
 
@@ -521,6 +588,7 @@ def stance_search(
     normalize_topic_scores=False,
     rerank_selection_mode=DEFAULT_RERANK_SELECTION_MODE,
     rerank_threshold=None,
+    topic_feedback_irrelevant_article_ids=None,
     stance_method="nli",
     use_chunking=False,
     chunking_mode="none",
@@ -545,6 +613,7 @@ def stance_search(
         year_end=year_end,
         rerank_selection_mode=resolved_selection_mode,
         rerank_threshold=rerank_threshold,
+        topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
     )
     topic_matches = candidate_payload["matches"]
     if not topic_matches:
@@ -569,6 +638,7 @@ def stance_search(
         normalize_topic_scores=bool(normalize_topic_scores),
         rerank_selection_mode=resolved_selection_mode,
         rerank_threshold=candidate_payload.get("rerank_threshold"),
+        rocchio_irrelevant_count=len(normalize_article_id_list(topic_feedback_irrelevant_article_ids)),
         stance_method=stance_method,
         use_chunking=bool(use_chunking),
         chunking_mode=chunking_mode,
