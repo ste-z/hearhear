@@ -514,6 +514,7 @@ def attach_query_svd_chart_dimensions(
     article_matches,
     query_dimensions,
     retrieval_model=DEFAULT_RETRIEVAL_MODEL,
+    query=None,
 ):
     resolved_model = normalize_retrieval_model(retrieval_model)
     if resolved_model != "svd":
@@ -531,6 +532,7 @@ def attach_query_svd_chart_dimensions(
         query_dimensions=query_dimensions,
         retrieval_model=resolved_model,
         processor=processor,
+        query=query,
     )
 
 

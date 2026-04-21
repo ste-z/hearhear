@@ -44,6 +44,7 @@ export type Article = {
   support_sentences?: string[] | null
   svd_query_chart_dimensions?: SvdLatentDimension[] | null
   svd_chart_dimensions?: SvdLatentDimension[] | null
+  svd_article_query_dimensions?: SvdLatentDimension[] | null
   svd_positive_dimensions?: SvdLatentDimension[] | null
   svd_negative_dimensions?: SvdLatentDimension[] | null
   svd_dimensions?: SvdLatentDimension[] | null

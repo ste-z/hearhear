@@ -495,11 +495,47 @@ def _svd_query_chart_dimension_payload(
     return payload
 
 
+def _svd_query_dimension_payload_for_axes(query_vector, axis_dimensions):
+    if query_vector is None or not axis_dimensions:
+        return []
+
+    payload = []
+    vector_length = len(query_vector)
+    for axis_dimension in axis_dimensions:
+        try:
+            dim = int(axis_dimension.get("dimension_index"))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if dim < 0 or dim >= vector_length:
+            continue
+
+        label_terms = [
+            str(term)
+            for term in list(axis_dimension.get("label_terms") or [])
+            if str(term).strip()
+        ]
+        entry = _svd_dimension_entry(
+            dimension=dim,
+            raw_value=query_vector[dim],
+            label_terms=label_terms,
+        )
+        try:
+            entry["dimension_label"] = int(
+                axis_dimension.get("dimension_label", dim + 1)
+            )
+        except (TypeError, ValueError):
+            entry["dimension_label"] = dim + 1
+        payload.append(entry)
+
+    return payload
+
+
 def attach_query_svd_chart_dimensions(
     matches,
     query_dimensions,
     retrieval_model=DEFAULT_RETRIEVAL_MODEL,
     processor=None,
+    query=None,
 ):
     resolved_model = normalize_retrieval_model(retrieval_model)
     if resolved_model != "svd":
@@ -517,6 +553,17 @@ def attach_query_svd_chart_dimensions(
     if resolved_processor is None:
         return matches
 
+    query_vector = None
+    resolved_query = str(query or "").strip()
+    if resolved_query and hasattr(resolved_processor, "project_query"):
+        try:
+            query_vector = resolved_processor.project_query(
+                resolved_query,
+                normalize=True,
+            )
+        except Exception:
+            query_vector = None
+
     for match in matches:
         if not isinstance(match, dict):
             continue
@@ -528,6 +575,14 @@ def attach_query_svd_chart_dimensions(
         )
         if query_chart_dimensions:
             match["svd_query_chart_dimensions"] = query_chart_dimensions
+        article_dimensions = match.get("svd_dimensions")
+        if isinstance(article_dimensions, list) and query_vector is not None:
+            article_query_dimensions = _svd_query_dimension_payload_for_axes(
+                query_vector=query_vector,
+                axis_dimensions=article_dimensions,
+            )
+            if article_query_dimensions:
+                match["svd_article_query_dimensions"] = article_query_dimensions
 
     return matches
 

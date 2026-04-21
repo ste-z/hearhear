@@ -31,6 +31,7 @@ type ChunkingMode = 'none' | 'paragraph' | 'semantic'
 type FrontendChunkingMode = Exclude<ChunkingMode, 'paragraph'>
 type SettingsFocusTarget = 'topic-relevance' | 'agreement-scorer'
 type SvdDimensionLabelMap = Record<number, string>
+type SvdChartSeriesRole = 'article' | 'query'
 type TopicFeedbackSearchOptions = {
   topicFeedbackIrrelevantArticleIds?: string[]
   markTopicFeedbackApplied?: boolean
@@ -307,6 +308,18 @@ const formatSvdValue = (value: number): string => (
 
 const formatThresholdValue = (value: number): string => value.toFixed(2)
 
+const buildSvdDimensionLookup = (
+  dimensions?: SvdLatentDimension[] | null,
+): Map<number, SvdLatentDimension> => {
+  const lookup = new Map<number, SvdLatentDimension>()
+  for (const dimension of dimensions ?? []) {
+    if (typeof dimension.dimension_index === 'number') {
+      lookup.set(dimension.dimension_index, dimension)
+    }
+  }
+  return lookup
+}
+
 const getSvdAnchor = (x: number): 'start' | 'middle' | 'end' => {
   if (x < SVD_RADAR_CENTER - 18) return 'end'
   if (x > SVD_RADAR_CENTER + 18) return 'start'
@@ -352,13 +365,21 @@ const buildSvdDisplayLabelLines = (
 function SvdRadarChart(
   {
     dimensions,
+    comparisonDimensions = null,
     dimensionLabels = null,
+    primaryLabel = 'Article',
+    primaryRole = 'article',
+    comparisonLabel = 'Query',
     ariaLabel = 'Radar chart of SVD concepts',
-    caption = 'Radius shows absolute loading, while labels and colors preserve the signed concept direction.',
+    caption = 'Radius shows absolute loading, while filled and hollow points preserve the signed concept direction.',
     emptyCopy = 'No SVD concepts are available yet.',
   }: {
     dimensions: SvdLatentDimension[]
+    comparisonDimensions?: SvdLatentDimension[] | null
     dimensionLabels?: SvdDimensionLabelMap | null
+    primaryLabel?: string
+    primaryRole?: SvdChartSeriesRole
+    comparisonLabel?: string
     ariaLabel?: string
     caption?: string
     emptyCopy?: string
@@ -373,6 +394,11 @@ function SvdRadarChart(
     )
   }
 
+  const comparisonByDimension = buildSvdDimensionLookup(comparisonDimensions)
+  const hasComparisonSeries = chartDimensions.every(
+    (dimension) => comparisonByDimension.has(dimension.dimension_index),
+  )
+
   const areaPoints = chartDimensions
     .map((dimension, index) => {
       const radius = clampSvdMagnitude(dimension.magnitude) * SVD_RADAR_RADIUS
@@ -380,9 +406,57 @@ function SvdRadarChart(
       return `${point.x},${point.y}`
     })
     .join(' ')
+  const comparisonAreaPoints = hasComparisonSeries
+    ? chartDimensions
+      .map((dimension, index) => {
+        const comparisonDimension = comparisonByDimension.get(dimension.dimension_index)
+        const radius = clampSvdMagnitude(comparisonDimension?.magnitude ?? 0) * SVD_RADAR_RADIUS
+        const point = getSvdPoint(index, chartDimensions.length, radius)
+        return `${point.x},${point.y}`
+      })
+      .join(' ')
+    : ''
+
+  const renderRadarPoint = (
+    dimension: SvdLatentDimension,
+    index: number,
+    role: SvdChartSeriesRole,
+  ): JSX.Element => {
+    const pointRadius = clampSvdMagnitude(dimension.magnitude) * SVD_RADAR_RADIUS
+    const point = getSvdPoint(index, chartDimensions.length, pointRadius)
+    return (
+      <circle
+        key={`${role}-point-${dimension.dimension_index}`}
+        className={`svd-radar-point ${role} ${dimension.pole}`}
+        cx={point.x}
+        cy={point.y}
+        r={role === 'query' ? 3.9 : 4.6}
+      />
+    )
+  }
 
   return (
     <div className="svd-radar-shell">
+      <div className="svd-radar-legend" aria-label="Radar chart legend">
+        <span className="svd-radar-legend-item">
+          <span className={`svd-radar-legend-line ${primaryRole}`} aria-hidden="true" />
+          {primaryLabel}
+        </span>
+        {hasComparisonSeries && (
+          <span className="svd-radar-legend-item">
+            <span className="svd-radar-legend-line query" aria-hidden="true" />
+            {comparisonLabel}
+          </span>
+        )}
+        <span className="svd-radar-legend-item">
+          <span className="svd-radar-legend-point positive" aria-hidden="true" />
+          Positive activation
+        </span>
+        <span className="svd-radar-legend-item">
+          <span className="svd-radar-legend-point negative" aria-hidden="true" />
+          Negative activation
+        </span>
+      </div>
       <svg
         className="svd-radar"
         viewBox={`0 0 ${SVD_RADAR_SIZE} ${SVD_RADAR_SIZE}`}
@@ -411,16 +485,18 @@ function SvdRadarChart(
           )
         })}
 
-        <polygon className="svd-radar-area" points={areaPoints} />
+        <polygon className={`svd-radar-area ${primaryRole}`} points={areaPoints} />
+        {hasComparisonSeries && (
+          <polygon className="svd-radar-area query" points={comparisonAreaPoints} />
+        )}
 
         {chartDimensions.map((dimension, index) => {
           const axisPoint = getSvdPoint(index, chartDimensions.length, SVD_RADAR_RADIUS)
           const labelPoint = getSvdPoint(index, chartDimensions.length, SVD_RADAR_RADIUS + 30)
-          const pointRadius = clampSvdMagnitude(dimension.magnitude) * SVD_RADAR_RADIUS
-          const point = getSvdPoint(index, chartDimensions.length, pointRadius)
           const labelLines = buildSvdDisplayLabelLines(dimension, dimensionLabels)
           const anchor = getSvdAnchor(labelPoint.x)
           const labelStartY = labelPoint.y - ((labelLines.length - 1) * 9)
+          const comparisonDimension = comparisonByDimension.get(dimension.dimension_index)
 
           return (
             <g key={`axis-${dimension.dimension_index}`}>
@@ -431,12 +507,12 @@ function SvdRadarChart(
                 x2={axisPoint.x}
                 y2={axisPoint.y}
               />
-              <circle
-                className={`svd-radar-point ${dimension.pole}`}
-                cx={point.x}
-                cy={point.y}
-                r={4.4}
-              />
+              {renderRadarPoint(dimension, index, primaryRole)}
+              {hasComparisonSeries && comparisonDimension && renderRadarPoint(
+                comparisonDimension,
+                index,
+                'query',
+              )}
               <text
                 className="svd-radar-label"
                 x={labelPoint.x}
@@ -463,22 +539,65 @@ function SvdRadarChart(
   )
 }
 
+const renderSvdConceptBarTrack = (
+  dimension: SvdLatentDimension,
+  role: SvdChartSeriesRole,
+): JSX.Element => {
+  const widthPercent = `${clampSvdMagnitude(dimension.magnitude) * 100}%`
+
+  return (
+    <div className={`svd-concept-bar-track ${role}`} aria-hidden="true">
+      <div className="svd-concept-bar-half negative">
+        {dimension.value < 0 && (
+          <span
+            className={`svd-concept-bar-fill ${role}`}
+            style={{ width: widthPercent }}
+          />
+        )}
+      </div>
+      <div className="svd-concept-bar-half positive">
+        {dimension.value >= 0 && (
+          <span
+            className={`svd-concept-bar-fill ${role}`}
+            style={{ width: widthPercent }}
+          />
+        )}
+      </div>
+      <span className="svd-concept-bar-zero" />
+    </div>
+  )
+}
+
 function SvdConceptBarChart(
   {
     dimensions,
+    comparisonDimensions = null,
     dimensionLabels = null,
+    primaryLabel = 'Article',
+    primaryRole = 'article',
+    comparisonLabel = 'Query',
+    emptyCopy = 'No article-specific SVD concepts are available yet.',
   }: {
     dimensions: SvdLatentDimension[]
+    comparisonDimensions?: SvdLatentDimension[] | null
     dimensionLabels?: SvdDimensionLabelMap | null
+    primaryLabel?: string
+    primaryRole?: SvdChartSeriesRole
+    comparisonLabel?: string
+    emptyCopy?: string
   },
 ): JSX.Element {
   const chartDimensions = dimensions.slice(0, 10)
+  const comparisonByDimension = buildSvdDimensionLookup(comparisonDimensions)
+  const hasComparisonSeries = chartDimensions.some(
+    (dimension) => comparisonByDimension.has(dimension.dimension_index),
+  )
 
   if (chartDimensions.length === 0) {
     return (
       <div className="svd-concept-bar-chart">
         <div className="svd-concept-bar-empty">
-          No article-specific SVD concepts are available yet.
+          {emptyCopy}
         </div>
       </div>
     )
@@ -486,6 +605,18 @@ function SvdConceptBarChart(
 
   return (
     <div className="svd-concept-bar-chart">
+      {hasComparisonSeries && (
+        <div className="svd-concept-legend" aria-label="Bar chart legend">
+          <span className="svd-concept-legend-item">
+            <span className={`svd-concept-legend-swatch ${primaryRole}`} aria-hidden="true" />
+            {primaryLabel}
+          </span>
+          <span className="svd-concept-legend-item">
+            <span className="svd-concept-legend-swatch query" aria-hidden="true" />
+            {comparisonLabel}
+          </span>
+        </div>
+      )}
       <div className="svd-concept-axis-row" aria-hidden="true">
         <div className="svd-concept-axis-copy" />
         <div className="svd-concept-axis">
@@ -498,7 +629,7 @@ function SvdConceptBarChart(
 
       <div className="svd-concept-bar-list">
         {chartDimensions.map((dimension) => {
-          const widthPercent = `${clampSvdMagnitude(dimension.magnitude) * 100}%`
+          const comparisonDimension = comparisonByDimension.get(dimension.dimension_index)
 
           return (
             <div
@@ -514,30 +645,24 @@ function SvdConceptBarChart(
                 </div>
               </div>
 
-              <div className="svd-concept-bar-track" aria-hidden="true">
-                <div className="svd-concept-bar-half negative">
-                  {dimension.value < 0 && (
-                    <span
-                      className="svd-concept-bar-fill negative"
-                      style={{ width: widthPercent }}
-                    />
-                  )}
-                </div>
-                <div className="svd-concept-bar-half positive">
-                  {dimension.value >= 0 && (
-                    <span
-                      className="svd-concept-bar-fill positive"
-                      style={{ width: widthPercent }}
-                    />
-                  )}
-                </div>
-                <span className="svd-concept-bar-zero" />
+              <div className="svd-concept-bar-track-stack">
+                {renderSvdConceptBarTrack(dimension, primaryRole)}
+                {hasComparisonSeries && (
+                  comparisonDimension
+                    ? renderSvdConceptBarTrack(comparisonDimension, 'query')
+                    : <div className="svd-concept-bar-track missing" aria-hidden="true" />
+                )}
               </div>
 
               <div className="svd-concept-bar-value-block">
-                <span className="svd-dimension-value">
+                <span className={`svd-dimension-value ${primaryRole}`}>
                   {formatSvdValue(dimension.value)}
                 </span>
+                {hasComparisonSeries && (
+                  <span className={`svd-dimension-value query ${comparisonDimension ? '' : 'missing'}`}>
+                    {comparisonDimension ? formatSvdValue(comparisonDimension.value) : 'n/a'}
+                  </span>
+                )}
               </div>
             </div>
           )
@@ -3091,6 +3216,8 @@ function App(): JSX.Element {
                     </div>
                     <SvdRadarChart
                       dimensions={querySvdCorpusChartDimensions}
+                      primaryLabel="Query"
+                      primaryRole="query"
                       ariaLabel="Radar chart of your query across the top 10 corpus-level SVD concepts"
                       caption="These axes are fixed to the first 10 corpus-level concepts, so this gives a corpus-frame view of the query before you compare it with individual articles."
                       emptyCopy="No corpus-level SVD concept view is available for this query yet."
@@ -3104,7 +3231,12 @@ function App(): JSX.Element {
                             This bar chart keeps the query&apos;s own top 10 concepts and shows whether each concept loads positively or negatively.
                           </p>
                         </div>
-                        <SvdConceptBarChart dimensions={querySvdDimensions} />
+                        <SvdConceptBarChart
+                          dimensions={querySvdDimensions}
+                          primaryLabel="Query"
+                          primaryRole="query"
+                          emptyCopy="No query-specific SVD concepts are available yet."
+                        />
                       </div>
                     )}
                   </div>
@@ -3444,9 +3576,12 @@ function App(): JSX.Element {
                                 </div>
                                 <SvdRadarChart
                                   dimensions={article.svd_query_chart_dimensions}
+                                  comparisonDimensions={querySvdDimensions}
                                   dimensionLabels={svdDimensionLabelState.labels}
+                                  primaryLabel="Article"
+                                  comparisonLabel="Query"
                                   ariaLabel="Radar chart of this article measured on the query's top 10 SVD concepts"
-                                  caption="The axes are the 10 concepts most strongly activated by your query. Each point shows how strongly this article aligns with those same concepts."
+                                  caption="The axes are the 10 concepts most strongly activated by your query. Article and query lines show their loadings on those same concepts."
                                   emptyCopy="No query-anchored SVD concepts are available for this article yet."
                                 />
                               </div>
@@ -3462,9 +3597,12 @@ function App(): JSX.Element {
                                 </div>
                                 <SvdRadarChart
                                   dimensions={article.svd_chart_dimensions}
+                                  comparisonDimensions={querySvdCorpusChartDimensions}
                                   dimensionLabels={svdDimensionLabelState.labels}
+                                  primaryLabel="Article"
+                                  comparisonLabel="Query"
                                   ariaLabel="Radar chart of this article across the shared top 10 corpus-level SVD concepts"
-                                  caption="Each article uses the same 10 broad concept axes. Points farther from the center show stronger connections, and color shows the direction of that connection."
+                                  caption="Article and query lines use the same 10 broad concept axes. Points farther from the center show stronger connections; filled points are positive and hollow points are negative."
                                   emptyCopy="No shared corpus-level SVD concepts are available for this article yet."
                                 />
                               </div>
@@ -3483,7 +3621,10 @@ function App(): JSX.Element {
 
                                   <SvdConceptBarChart
                                     dimensions={article.svd_dimensions ?? []}
+                                    comparisonDimensions={article.svd_article_query_dimensions ?? []}
                                     dimensionLabels={svdDimensionLabelState.labels}
+                                    primaryLabel="Article"
+                                    comparisonLabel="Query"
                                   />
                                 </div>
                               )}

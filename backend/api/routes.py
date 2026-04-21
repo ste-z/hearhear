@@ -366,6 +366,7 @@ def register_routes(app):
                 results,
                 query_dimensions=query_svd_dimensions,
                 retrieval_model=context["retrieval_model"],
+                query=query_text,
             )
             log_runtime_event(
                 "articles_search.done",
