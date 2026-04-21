@@ -13,6 +13,7 @@ from backend.services.essay_service import essay_claim_candidates, essay_search
 from backend.services.pdf_service import extract_pdf_text
 from backend.services.retrieval_service import (
     available_article_character_range,
+    available_article_word_range,
     available_article_year_range,
     attach_query_svd_chart_dimensions,
     DEFAULT_AUTO_RERANK_THRESHOLDS,
@@ -21,6 +22,7 @@ from backend.services.retrieval_service import (
     json_search,
     MAX_AUTO_RERANK_CANDIDATES,
     normalize_article_character_range,
+    normalize_article_word_range,
     normalize_article_year_range,
     normalize_retrieval_model,
     normalize_rerank_selection_mode,
@@ -207,6 +209,22 @@ def _extract_request_context():
         ),
         "Maximum article length",
     )
+    word_start = _coerce_optional_int(
+        _first_payload_value(
+            payload,
+            "word_start",
+            "article_word_start",
+        ),
+        "Minimum article word count",
+    )
+    word_end = _coerce_optional_int(
+        _first_payload_value(
+            payload,
+            "word_end",
+            "article_word_end",
+        ),
+        "Maximum article word count",
+    )
     selected_thesis_sentence = str(payload.get("selected_thesis_sentence") or "").strip()
     selected_thesis_id = str(payload.get("selected_thesis_id") or "").strip() or None
     topic_feedback_irrelevant_article_ids = _coerce_string_list(
@@ -256,6 +274,8 @@ def _extract_request_context():
         "year_end": year_end,
         "character_start": character_start,
         "character_end": character_end,
+        "word_start": word_start,
+        "word_end": word_end,
         "selected_thesis_sentence": selected_thesis_sentence,
         "selected_thesis_id": selected_thesis_id,
         "topic_feedback_irrelevant_article_ids": topic_feedback_irrelevant_article_ids,
@@ -294,6 +314,7 @@ def register_routes(app):
     def config():
         min_article_year, max_article_year = available_article_year_range()
         min_article_characters, max_article_characters = available_article_character_range()
+        min_article_words, max_article_words = available_article_word_range()
         return jsonify({
             "use_llm": USE_LLM,
             "default_retrieval_model": DEFAULT_RETRIEVAL_MODEL,
@@ -315,6 +336,8 @@ def register_routes(app):
             "max_article_year": max_article_year,
             "min_article_characters": min_article_characters,
             "max_article_characters": max_article_characters,
+            "min_article_words": min_article_words,
+            "max_article_words": max_article_words,
         })
 
     @app.route("/api/articles", methods=["GET", "POST"])
@@ -352,6 +375,8 @@ def register_routes(app):
                     year_end=context["year_end"],
                     character_start=context["character_start"],
                     character_end=context["character_end"],
+                    word_start=context["word_start"],
+                    word_end=context["word_end"],
                     normalize_topic_scores=context["normalize_topic_scores"],
                     stance_method=context["stance_method"],
                     use_chunking=context["use_chunking"],
@@ -374,6 +399,8 @@ def register_routes(app):
                     year_end=context["year_end"],
                     character_start=context["character_start"],
                     character_end=context["character_end"],
+                    word_start=context["word_start"],
+                    word_end=context["word_end"],
                     normalize_topic_scores=context["normalize_topic_scores"],
                     stance_method=context["stance_method"],
                     use_chunking=context["use_chunking"],
@@ -391,6 +418,8 @@ def register_routes(app):
                         year_end=context["year_end"],
                         character_start=context["character_start"],
                         character_end=context["character_end"],
+                        word_start=context["word_start"],
+                        word_end=context["word_end"],
                         topic_feedback_irrelevant_article_ids=context["topic_feedback_irrelevant_article_ids"],
                     ),
                     "empty_results_message": None,
@@ -466,6 +495,18 @@ def register_routes(app):
                     "article_char_end",
                 ),
             )
+            word_start, word_end = normalize_article_word_range(
+                _first_payload_value(
+                    payload,
+                    "word_start",
+                    "article_word_start",
+                ),
+                _first_payload_value(
+                    payload,
+                    "word_end",
+                    "article_word_end",
+                ),
+            )
             results = similar_svd_articles(
                 article_id=article_id,
                 limit=limit,
@@ -474,6 +515,8 @@ def register_routes(app):
                 year_end=year_end,
                 character_start=character_start,
                 character_end=character_end,
+                word_start=word_start,
+                word_end=word_end,
             )
             log_runtime_event(
                 "similar_articles.done",

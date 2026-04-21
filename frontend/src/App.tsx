@@ -31,6 +31,7 @@ type RerankSelectionMode = 'manual' | 'automatic'
 type StanceMethod = 'nli' | 'llm'
 type ChunkingMode = 'none' | 'paragraph' | 'semantic'
 type FrontendChunkingMode = Exclude<ChunkingMode, 'paragraph'>
+type LengthFilterUnit = 'characters' | 'words'
 type SettingsFocusTarget = 'topic-relevance' | 'agreement-scorer'
 type SvdDimensionLabelMap = Record<number, string>
 type SvdChartSeriesRole = 'article' | 'query'
@@ -60,6 +61,8 @@ type ConfigResponse = {
   max_article_year?: number | null
   min_article_characters?: number | null
   max_article_characters?: number | null
+  min_article_words?: number | null
+  max_article_words?: number | null
 }
 
 type ApiErrorPayload = {
@@ -198,7 +201,12 @@ const clampCharacterCount = (value: number, minValue: number, maxValue: number):
   clampWholeNumber(value, minValue, maxValue)
 )
 
+const clampWordCount = (value: number, minValue: number, maxValue: number): number => (
+  clampWholeNumber(value, minValue, maxValue)
+)
+
 const formatCharacterCount = (value: number): string => value.toLocaleString()
+const formatWordCount = (value: number): string => value.toLocaleString()
 
 const hasSeenLanding = (): boolean => {
   if (typeof window === 'undefined') return false
@@ -1357,14 +1365,21 @@ function App(): JSX.Element {
   const [maxArticleYear, setMaxArticleYear] = useState<number | null>(null)
   const [minArticleCharacters, setMinArticleCharacters] = useState<number | null>(null)
   const [maxArticleCharacters, setMaxArticleCharacters] = useState<number | null>(null)
+  const [minArticleWords, setMinArticleWords] = useState<number | null>(null)
+  const [maxArticleWords, setMaxArticleWords] = useState<number | null>(null)
   const [yearStart, setYearStart] = useState<number | null>(null)
   const [yearEnd, setYearEnd] = useState<number | null>(null)
   const [yearStartInput, setYearStartInput] = useState<string>('')
   const [yearEndInput, setYearEndInput] = useState<string>('')
+  const [lengthFilterUnit, setLengthFilterUnit] = useState<LengthFilterUnit>('characters')
   const [characterStart, setCharacterStart] = useState<number | null>(null)
   const [characterEnd, setCharacterEnd] = useState<number | null>(null)
   const [characterStartInput, setCharacterStartInput] = useState<string>('')
   const [characterEndInput, setCharacterEndInput] = useState<string>('')
+  const [wordStart, setWordStart] = useState<number | null>(null)
+  const [wordEnd, setWordEnd] = useState<number | null>(null)
+  const [wordStartInput, setWordStartInput] = useState<string>('')
+  const [wordEndInput, setWordEndInput] = useState<string>('')
   const [supportedRetrievalModels, setSupportedRetrievalModels] = useState<RetrievalModel[]>(
     defaultSupportedRetrievalModels,
   )
@@ -1415,8 +1430,11 @@ function App(): JSX.Element {
   const lastAppliedFiltersRef = useRef<{
     yearStart: number | null
     yearEnd: number | null
+    lengthFilterUnit: LengthFilterUnit
     characterStart: number | null
     characterEnd: number | null
+    wordStart: number | null
+    wordEnd: number | null
   } | null>(null)
   const skipNextStanceResetRef = useRef<boolean>(false)
   const [isSearchStageVisible, setIsSearchStageVisible] = useState<boolean>(hasSeenLandingRef.current)
@@ -1460,6 +1478,8 @@ function App(): JSX.Element {
         const nextMaxArticleYear = normalizeConfigYear(data.max_article_year)
         const nextMinArticleCharacters = normalizeConfigInteger(data.min_article_characters)
         const nextMaxArticleCharacters = normalizeConfigInteger(data.max_article_characters)
+        const nextMinArticleWords = normalizeConfigInteger(data.min_article_words)
+        const nextMaxArticleWords = normalizeConfigInteger(data.max_article_words)
         setSupportedRetrievalModels(supportedModels)
         setSupportedStanceMethods(supportedAgreementMethods)
         setSupportedChunkingModes(supportedChunkingOptions)
@@ -1520,6 +1540,24 @@ function App(): JSX.Element {
             currentCharacters === null
               ? nextMaxArticleCharacters
               : clampCharacterCount(currentCharacters, nextMinArticleCharacters, nextMaxArticleCharacters)
+          ))
+        }
+        if (
+          nextMinArticleWords !== null &&
+          nextMaxArticleWords !== null &&
+          nextMinArticleWords <= nextMaxArticleWords
+        ) {
+          setMinArticleWords(nextMinArticleWords)
+          setMaxArticleWords(nextMaxArticleWords)
+          setWordStart(currentWords => (
+            currentWords === null
+              ? nextMinArticleWords
+              : clampWordCount(currentWords, nextMinArticleWords, nextMaxArticleWords)
+          ))
+          setWordEnd(currentWords => (
+            currentWords === null
+              ? nextMaxArticleWords
+              : clampWordCount(currentWords, nextMinArticleWords, nextMaxArticleWords)
           ))
         }
         setNormalizeTopicScores(Boolean(data.default_normalize_topic_scores))
@@ -1969,7 +2007,56 @@ function App(): JSX.Element {
     : (resolvedCharacterStart === resolvedCharacterEnd
       ? ` with ${formatCharacterCount(resolvedCharacterStart)} characters`
       : ` with ${formatCharacterCount(resolvedCharacterStart)} to ${formatCharacterCount(resolvedCharacterEnd)} characters`)
-  const activeFilterSummary = `${yearRangeSummary}${characterRangeSummary}`
+  const hasAvailableWordBounds = (
+    minArticleWords !== null &&
+    maxArticleWords !== null &&
+    minArticleWords <= maxArticleWords
+  )
+  const resolvedWordStart = wordStart ?? minArticleWords
+  const resolvedWordEnd = wordEnd ?? maxArticleWords
+  const wordRangeSpan = hasAvailableWordBounds && minArticleWords !== null && maxArticleWords !== null
+    ? maxArticleWords - minArticleWords
+    : 0
+  const hasWordRangeSelection = resolvedWordStart !== null && resolvedWordEnd !== null
+  const isWordFilterActive = (
+    hasWordRangeSelection &&
+    minArticleWords !== null &&
+    maxArticleWords !== null &&
+    (resolvedWordStart !== minArticleWords || resolvedWordEnd !== maxArticleWords)
+  )
+  const wordRangeSummary = !isWordFilterActive || !hasWordRangeSelection
+    ? ''
+    : (resolvedWordStart === resolvedWordEnd
+      ? ` with ${formatWordCount(resolvedWordStart)} words`
+      : ` with ${formatWordCount(resolvedWordStart)} to ${formatWordCount(resolvedWordEnd)} words`)
+  const selectedLengthRangeSummary = lengthFilterUnit === 'words'
+    ? wordRangeSummary
+    : characterRangeSummary
+  const activeFilterSummary = `${yearRangeSummary}${selectedLengthRangeSummary}`
+  const selectedLengthFilterHasBounds = lengthFilterUnit === 'words'
+    ? hasAvailableWordBounds
+    : hasAvailableCharacterBounds
+  const selectedLengthRangeSpan = lengthFilterUnit === 'words'
+    ? wordRangeSpan
+    : characterRangeSpan
+  const selectedLengthRangeStartInput = lengthFilterUnit === 'words'
+    ? wordStartInput
+    : characterStartInput
+  const selectedLengthRangeEndInput = lengthFilterUnit === 'words'
+    ? wordEndInput
+    : characterEndInput
+  const selectedLengthRangeMin = lengthFilterUnit === 'words'
+    ? minArticleWords
+    : minArticleCharacters
+  const selectedLengthRangeMax = lengthFilterUnit === 'words'
+    ? maxArticleWords
+    : maxArticleCharacters
+  const selectedLengthRangeStart = lengthFilterUnit === 'words'
+    ? resolvedWordStart
+    : resolvedCharacterStart
+  const selectedLengthRangeEnd = lengthFilterUnit === 'words'
+    ? resolvedWordEnd
+    : resolvedCharacterEnd
 
   const formatDate = (isoDate: string | null): string => {
     if (!isoDate) return 'Unknown date'
@@ -2144,6 +2231,42 @@ function App(): JSX.Element {
     setCharacterEndInput(value.replace(/[^\d]/g, ''))
   }
 
+  const handleWordStartChange = (value: string): void => {
+    const nextStart = Number(value)
+    if (Number.isNaN(nextStart)) return
+    const boundedStart = (
+      minArticleWords !== null && maxArticleWords !== null
+        ? clampWordCount(nextStart, minArticleWords, maxArticleWords)
+        : Math.round(nextStart)
+    )
+    setWordStart(boundedStart)
+    setWordEnd(currentEnd => (
+      currentEnd === null || currentEnd < boundedStart ? boundedStart : currentEnd
+    ))
+  }
+
+  const handleWordEndChange = (value: string): void => {
+    const nextEnd = Number(value)
+    if (Number.isNaN(nextEnd)) return
+    const boundedEnd = (
+      minArticleWords !== null && maxArticleWords !== null
+        ? clampWordCount(nextEnd, minArticleWords, maxArticleWords)
+        : Math.round(nextEnd)
+    )
+    setWordEnd(boundedEnd)
+    setWordStart(currentStart => (
+      currentStart === null || currentStart > boundedEnd ? boundedEnd : currentStart
+    ))
+  }
+
+  const handleWordStartInputChange = (value: string): void => {
+    setWordStartInput(value.replace(/[^\d]/g, ''))
+  }
+
+  const handleWordEndInputChange = (value: string): void => {
+    setWordEndInput(value.replace(/[^\d]/g, ''))
+  }
+
   const commitYearStartInput = (): void => {
     const normalizedValue = yearStartInput.trim()
     if (normalizedValue === '') {
@@ -2186,6 +2309,28 @@ function App(): JSX.Element {
       return
     }
     handleCharacterEndChange(normalizedValue)
+  }
+
+  const commitWordStartInput = (): void => {
+    const normalizedValue = wordStartInput.trim()
+    if (normalizedValue === '') {
+      if (minArticleWords !== null) {
+        handleWordStartChange(String(minArticleWords))
+      }
+      return
+    }
+    handleWordStartChange(normalizedValue)
+  }
+
+  const commitWordEndInput = (): void => {
+    const normalizedValue = wordEndInput.trim()
+    if (normalizedValue === '') {
+      if (maxArticleWords !== null) {
+        handleWordEndChange(String(maxArticleWords))
+      }
+      return
+    }
+    handleWordEndChange(normalizedValue)
   }
 
   const scrollToNode = (node: HTMLDivElement | null): void => {
@@ -2273,8 +2418,11 @@ function App(): JSX.Element {
     lastAppliedFiltersRef.current = {
       yearStart: resolvedYearStart,
       yearEnd: resolvedYearEnd,
+      lengthFilterUnit,
       characterStart: resolvedCharacterStart,
       characterEnd: resolvedCharacterEnd,
+      wordStart: resolvedWordStart,
+      wordEnd: resolvedWordEnd,
     }
     setHasSubmittedSearch(true)
     setShouldScrollToResults(false)
@@ -2312,8 +2460,10 @@ function App(): JSX.Element {
           rerank_threshold: currentAutoRerankThreshold,
           year_start: resolvedYearStart,
           year_end: resolvedYearEnd,
-          character_start: resolvedCharacterStart,
-          character_end: resolvedCharacterEnd,
+          character_start: lengthFilterUnit === 'characters' ? resolvedCharacterStart : null,
+          character_end: lengthFilterUnit === 'characters' ? resolvedCharacterEnd : null,
+          word_start: lengthFilterUnit === 'words' ? resolvedWordStart : null,
+          word_end: lengthFilterUnit === 'words' ? resolvedWordEnd : null,
           topic_feedback_irrelevant_article_ids: feedbackArticleIds,
           skip_typo_correction: Boolean(options.skipTypoCorrection),
         }),
@@ -2418,8 +2568,11 @@ function App(): JSX.Element {
     lastAppliedFiltersRef.current = {
       yearStart: resolvedYearStart,
       yearEnd: resolvedYearEnd,
+      lengthFilterUnit,
       characterStart: resolvedCharacterStart,
       characterEnd: resolvedCharacterEnd,
+      wordStart: resolvedWordStart,
+      wordEnd: resolvedWordEnd,
     }
     setHasSubmittedSearch(true)
     setShouldScrollToResults(true)
@@ -2458,8 +2611,10 @@ function App(): JSX.Element {
           rerank_threshold: currentAutoRerankThreshold,
           year_start: resolvedYearStart,
           year_end: resolvedYearEnd,
-          character_start: resolvedCharacterStart,
-          character_end: resolvedCharacterEnd,
+          character_start: lengthFilterUnit === 'characters' ? resolvedCharacterStart : null,
+          character_end: lengthFilterUnit === 'characters' ? resolvedCharacterEnd : null,
+          word_start: lengthFilterUnit === 'words' ? resolvedWordStart : null,
+          word_end: lengthFilterUnit === 'words' ? resolvedWordEnd : null,
           topic_feedback_irrelevant_article_ids: feedbackArticleIds,
         }),
       })
@@ -2532,8 +2687,11 @@ function App(): JSX.Element {
       lastAppliedFilters &&
       lastAppliedFilters.yearStart === resolvedYearStart &&
       lastAppliedFilters.yearEnd === resolvedYearEnd &&
+      lastAppliedFilters.lengthFilterUnit === lengthFilterUnit &&
       lastAppliedFilters.characterStart === resolvedCharacterStart &&
-      lastAppliedFilters.characterEnd === resolvedCharacterEnd
+      lastAppliedFilters.characterEnd === resolvedCharacterEnd &&
+      lastAppliedFilters.wordStart === resolvedWordStart &&
+      lastAppliedFilters.wordEnd === resolvedWordEnd
     ) {
       return
     }
@@ -2552,9 +2710,12 @@ function App(): JSX.Element {
     hasSubmittedSearch,
     inputMode,
     isFilterOpen,
+    lengthFilterUnit,
     loading,
     resolvedCharacterEnd,
     resolvedCharacterStart,
+    resolvedWordEnd,
+    resolvedWordStart,
     resolvedYearEnd,
     resolvedYearStart,
   ])
@@ -2574,6 +2735,14 @@ function App(): JSX.Element {
   useEffect(() => {
     setCharacterEndInput(resolvedCharacterEnd === null ? '' : String(resolvedCharacterEnd))
   }, [resolvedCharacterEnd])
+
+  useEffect(() => {
+    setWordStartInput(resolvedWordStart === null ? '' : String(resolvedWordStart))
+  }, [resolvedWordStart])
+
+  useEffect(() => {
+    setWordEndInput(resolvedWordEnd === null ? '' : String(resolvedWordEnd))
+  }, [resolvedWordEnd])
 
   const scrollEssayOptions = (direction: 'left' | 'right'): void => {
     const container = essayOptionsRef.current
@@ -2798,8 +2967,10 @@ function App(): JSX.Element {
           offset,
           year_start: resolvedYearStart,
           year_end: resolvedYearEnd,
-          character_start: resolvedCharacterStart,
-          character_end: resolvedCharacterEnd,
+          character_start: lengthFilterUnit === 'characters' ? resolvedCharacterStart : null,
+          character_end: lengthFilterUnit === 'characters' ? resolvedCharacterEnd : null,
+          word_start: lengthFilterUnit === 'words' ? resolvedWordStart : null,
+          word_end: lengthFilterUnit === 'words' ? resolvedWordEnd : null,
         }),
       })
       const data = await readApiJson<SimilarArticlesResponse>(response)
@@ -4507,64 +4678,126 @@ function App(): JSX.Element {
               </div>
               <div className="weight-card full-row">
                 <span>Article length</span>
+                <div className="length-filter-tabs" role="tablist" aria-label="Article length unit">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={lengthFilterUnit === 'characters'}
+                    className={`length-filter-tab ${lengthFilterUnit === 'characters' ? 'active' : ''}`}
+                    onClick={() => setLengthFilterUnit('characters')}
+                  >
+                    Characters
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={lengthFilterUnit === 'words'}
+                    className={`length-filter-tab ${lengthFilterUnit === 'words' ? 'active' : ''}`}
+                    onClick={() => setLengthFilterUnit('words')}
+                  >
+                    Words
+                  </button>
+                </div>
                 <div className="year-range-summary-grid" aria-live="polite">
                   <label className="year-range-value-card year-range-input-card">
-                    <span>Min chars</span>
+                    <span>{lengthFilterUnit === 'words' ? 'Min words' : 'Min chars'}</span>
                     <input
                       type="text"
                       inputMode="numeric"
                       pattern="[0-9]*"
-                      value={characterStartInput}
-                      onChange={(event) => handleCharacterStartInputChange(event.target.value)}
-                      onBlur={commitCharacterStartInput}
+                      value={selectedLengthRangeStartInput}
+                      onChange={(event) => {
+                        if (lengthFilterUnit === 'words') {
+                          handleWordStartInputChange(event.target.value)
+                          return
+                        }
+                        handleCharacterStartInputChange(event.target.value)
+                      }}
+                      onBlur={lengthFilterUnit === 'words' ? commitWordStartInput : commitCharacterStartInput}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
                           event.currentTarget.blur()
                         }
                       }}
-                      disabled={!hasAvailableCharacterBounds}
-                      aria-label="Minimum article length in characters"
+                      disabled={!selectedLengthFilterHasBounds}
+                      aria-label={`Minimum article length in ${lengthFilterUnit}`}
                     />
                   </label>
                   <label className="year-range-value-card year-range-input-card">
-                    <span>Max chars</span>
+                    <span>{lengthFilterUnit === 'words' ? 'Max words' : 'Max chars'}</span>
                     <input
                       type="text"
                       inputMode="numeric"
                       pattern="[0-9]*"
-                      value={characterEndInput}
-                      onChange={(event) => handleCharacterEndInputChange(event.target.value)}
-                      onBlur={commitCharacterEndInput}
+                      value={selectedLengthRangeEndInput}
+                      onChange={(event) => {
+                        if (lengthFilterUnit === 'words') {
+                          handleWordEndInputChange(event.target.value)
+                          return
+                        }
+                        handleCharacterEndInputChange(event.target.value)
+                      }}
+                      onBlur={lengthFilterUnit === 'words' ? commitWordEndInput : commitCharacterEndInput}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
                           event.currentTarget.blur()
                         }
                       }}
-                      disabled={!hasAvailableCharacterBounds}
-                      aria-label="Maximum article length in characters"
+                      disabled={!selectedLengthFilterHasBounds}
+                      aria-label={`Maximum article length in ${lengthFilterUnit}`}
                     />
                   </label>
                 </div>
-                {minArticleCharacters !== null && maxArticleCharacters !== null && resolvedCharacterStart !== null && resolvedCharacterEnd !== null && (
+                {selectedLengthRangeMin !== null && selectedLengthRangeMax !== null && selectedLengthRangeStart !== null && selectedLengthRangeEnd !== null && (
                   <TwoHandleRangeSlider
-                    minValue={minArticleCharacters}
-                    maxValue={maxArticleCharacters}
-                    startValue={resolvedCharacterStart}
-                    endValue={resolvedCharacterEnd}
-                    disabled={!hasAvailableCharacterBounds || characterRangeSpan === 0}
+                    minValue={selectedLengthRangeMin}
+                    maxValue={selectedLengthRangeMax}
+                    startValue={selectedLengthRangeStart}
+                    endValue={selectedLengthRangeEnd}
+                    disabled={!selectedLengthFilterHasBounds || selectedLengthRangeSpan === 0}
                     startAriaLabel="Minimum article length"
                     endAriaLabel="Maximum article length"
-                    formatValue={(value) => `${formatCharacterCount(value)} characters`}
-                    onStartValueChange={(nextCharacters) => handleCharacterStartChange(String(nextCharacters))}
-                    onEndValueChange={(nextCharacters) => handleCharacterEndChange(String(nextCharacters))}
+                    formatValue={(value) => (
+                      lengthFilterUnit === 'words'
+                        ? `${formatWordCount(value)} words`
+                        : `${formatCharacterCount(value)} characters`
+                    )}
+                    onStartValueChange={(nextValue) => {
+                      if (lengthFilterUnit === 'words') {
+                        handleWordStartChange(String(nextValue))
+                        return
+                      }
+                      handleCharacterStartChange(String(nextValue))
+                    }}
+                    onEndValueChange={(nextValue) => {
+                      if (lengthFilterUnit === 'words') {
+                        handleWordEndChange(String(nextValue))
+                        return
+                      }
+                      handleCharacterEndChange(String(nextValue))
+                    }}
                   />
                 )}
                 <div className="year-range-scale" aria-hidden="true">
-                  <span>{minArticleCharacters === null ? '—' : formatCharacterCount(minArticleCharacters)}</span>
-                  <span>{maxArticleCharacters === null ? '—' : formatCharacterCount(maxArticleCharacters)}</span>
+                  <span>
+                    {selectedLengthRangeMin === null
+                      ? '—'
+                      : (lengthFilterUnit === 'words'
+                        ? formatWordCount(selectedLengthRangeMin)
+                        : formatCharacterCount(selectedLengthRangeMin))}
+                  </span>
+                  <span>
+                    {selectedLengthRangeMax === null
+                      ? '—'
+                      : (lengthFilterUnit === 'words'
+                        ? formatWordCount(selectedLengthRangeMax)
+                        : formatCharacterCount(selectedLengthRangeMax))}
+                  </span>
                 </div>
                 <p className="setting-help-text">
-                  Only return articles whose full body text falls within the selected character range.
+                  {lengthFilterUnit === 'words'
+                    ? 'Only return articles whose full body text falls within the selected word-count range.'
+                    : 'Only return articles whose full body text falls within the selected character range.'}
                 </p>
               </div>
             </div>

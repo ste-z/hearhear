@@ -3262,6 +3262,40 @@
   gap: 14px;
 }
 
+.length-filter-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid rgba(32, 33, 36, 0.1);
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.length-filter-tab {
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #5f6368;
+  padding: 7px 12px;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.length-filter-tab:hover {
+  color: #202124;
+}
+
+.length-filter-tab.active {
+  background: #ffffff;
+  color: #1a4fb8;
+  box-shadow: 0 6px 14px rgba(32, 33, 36, 0.08);
+}
+
 .year-range-value-card {
   display: flex;
   flex-direction: column;
