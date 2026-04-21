@@ -9,24 +9,26 @@ from flask import send_from_directory, request, jsonify
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from backend.runtime.runtime_debug import log_runtime_event
-from backend.services.essay_service import essay_claim_candidates, essay_search
-from backend.services.pdf_service import extract_pdf_text
-from backend.services.retrieval_service import (
+from backend.services.filters.article_filters import (
     available_article_character_range,
     available_article_reading_time_range,
     available_article_word_range,
     available_article_year_range,
+    normalize_article_character_range,
+    normalize_article_reading_time_range,
+    normalize_article_word_range,
+    normalize_article_year_range,
+)
+from backend.services.filters.text_filters import normalize_avoid_words
+from backend.services.essay_service import essay_claim_candidates, essay_search
+from backend.services.pdf_service import extract_pdf_text
+from backend.services.retrieval_service import (
     attach_query_svd_chart_dimensions,
     DEFAULT_AUTO_RERANK_THRESHOLDS,
     DEFAULT_RERANK_SELECTION_MODE,
     DEFAULT_RETRIEVAL_MODEL,
     json_search,
     MAX_AUTO_RERANK_CANDIDATES,
-    normalize_article_character_range,
-    normalize_article_reading_time_range,
-    normalize_article_word_range,
-    normalize_article_year_range,
-    normalize_avoid_words,
     normalize_retrieval_model,
     normalize_rerank_selection_mode,
     retrieval_query_typo_suggestion,
