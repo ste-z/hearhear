@@ -38,7 +38,6 @@ type TopicFeedbackSearchOptions = {
   topicFeedbackIrrelevantArticleIds?: string[]
   markTopicFeedbackApplied?: boolean
   topicOverride?: string
-  scrollToResults?: boolean
 }
 
 type ConfigResponse = {
@@ -2184,7 +2183,7 @@ function App(): JSX.Element {
       setQuerySvdDimensions(normalized.querySvdDimensions)
       setEmptyResultsMessage(normalized.emptyResultsMessage)
       setTypoCorrection(normalized.typoCorrection)
-      setShouldScrollToResults(Boolean(options.scrollToResults) || !normalized.typoCorrection)
+      setShouldScrollToResults(!normalized.typoCorrection)
       if (options.markTopicFeedbackApplied) {
         setAppliedTopicFeedbackArticleIds(feedbackArticleIds)
       }
@@ -2368,7 +2367,7 @@ function App(): JSX.Element {
     if (!nextTopic || loading) return
     skipNextStanceResetRef.current = true
     setTopic(nextTopic)
-    void handleSubmitStance({ topicOverride: nextTopic, scrollToResults: true })
+    void handleSubmitStance({ topicOverride: nextTopic })
   }
 
   useEffect(() => {

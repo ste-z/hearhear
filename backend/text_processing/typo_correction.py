@@ -1,4 +1,3 @@
-import itertools
 import math
 import re
 
@@ -17,7 +16,6 @@ from backend.text_processing.text_normalization import normalize_text_for_vector
 _TOKEN_RE = re.compile(DEFAULT_TOKEN_PATTERN)
 _MAX_DISTANCE = 2
 _MAX_OPTIONS = 3
-_MAX_CORRECTED_TERMS = 5
 
 
 def _query_tokens(query):
@@ -114,10 +112,12 @@ def _replace_query_terms(query, replacements):
 
 def build_query_typo_suggestion(query, processor):
     """
-    Suggest typo corrections only when the query has no exact vocabulary hit.
+    Suggest one per-token typo correction at a time.
 
     The processor's feature list is already filtered by the index min_df setting,
-    so exact/candidate checks use the same corpus vocabulary as retrieval.
+    so exact/candidate checks use the same corpus vocabulary as retrieval. Exact
+    hits suppress correction for that token only, allowing other query words to
+    surface their own suggestions one at a time.
     """
     original_query = str(query or "").strip()
     if not original_query or processor is None:
@@ -131,61 +131,39 @@ def build_query_typo_suggestion(query, processor):
     if not replacement_df:
         return None
 
-    stop_words = set(DEFAULT_STOP_WORDS)
-    token_set = set(tokens)
-    if any(token in replacement_df or token in stop_words for token in token_set):
-        return None
-
-    corrections = []
     seen_terms = set()
+    stop_words = set(DEFAULT_STOP_WORDS)
     for token in tokens:
         if token in seen_terms:
             continue
         seen_terms.add(token)
+        if token in replacement_df or token in stop_words:
+            continue
+
         options = _candidate_replacements(token, replacement_df)
         if not options:
             continue
-        corrections.append(
+
+        query_options = [
             {
-                "term": token,
-                "options": options,
+                "query": _replace_query_terms(original_query, {token: option["term"]}),
+                "label": option["term"],
+                "replacements": {token: option["term"]},
+                "distance": int(option["distance"]),
+                "df": int(option["df"]),
             }
-        )
-
-    if not corrections:
-        return None
-
-    corrected_terms = corrections[:_MAX_CORRECTED_TERMS]
-    option_groups = [correction["options"] for correction in corrected_terms]
-    query_options = []
-    seen_queries = set()
-    for combination in itertools.product(*option_groups):
-        replacements = {
-            correction["term"]: option["term"]
-            for correction, option in zip(corrected_terms, combination)
+            for option in options[:_MAX_OPTIONS]
+        ]
+        return {
+            "query": original_query,
+            "highlighted_terms": [token],
+            "options": query_options,
+            "corrections": [
+                {
+                    "term": token,
+                    "options": options,
+                }
+            ],
         }
-        corrected_query = _replace_query_terms(original_query, replacements)
-        if not corrected_query or corrected_query.lower() in seen_queries:
-            continue
-        seen_queries.add(corrected_query.lower())
-        query_options.append(
-            {
-                "query": corrected_query,
-                "label": corrected_query,
-                "replacements": replacements,
-                "distance": int(sum(option["distance"] for option in combination)),
-                "df": int(sum(option["df"] for option in combination)),
-            }
-        )
 
-    query_options.sort(key=lambda item: (item["distance"], -item["df"], item["label"]))
-    query_options = query_options[:_MAX_OPTIONS]
-    if not query_options:
-        return None
-
-    return {
-        "query": original_query,
-        "highlighted_terms": [correction["term"] for correction in corrections],
-        "options": query_options,
-        "corrections": corrections,
-    }
+    return None
