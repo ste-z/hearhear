@@ -17,6 +17,7 @@ import {
   EssayTextExtractionResponse,
   LlmRelevantParagraph,
   RetrievalModel,
+  SimilarArticlesResponse,
   SvdLatentDimension,
 } from './types'
 import Chat from './Chat'
@@ -100,6 +101,7 @@ const defaultAutoRerankThresholds: Record<RetrievalModel, number> = {
   svd: 0.6,
 }
 const defaultMaxAutoRerankCandidates = 100
+const similarArticlesPageSize = 5
 
 const isRetrievalModel = (value: unknown): value is RetrievalModel => (
   value === 'tfidf' || value === 'svd'
@@ -1308,6 +1310,12 @@ function App(): JSX.Element {
   const [activeAboutTab, setActiveAboutTab] = useState<InputMode>('stance')
   const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
+  const [similarArticleSource, setSimilarArticleSource] = useState<Article | null>(null)
+  const [similarArticles, setSimilarArticles] = useState<Article[]>([])
+  const [similarArticlesOffset, setSimilarArticlesOffset] = useState<number>(0)
+  const [similarArticlesHasMore, setSimilarArticlesHasMore] = useState<boolean>(false)
+  const [similarArticlesLoading, setSimilarArticlesLoading] = useState<boolean>(false)
+  const [similarArticlesError, setSimilarArticlesError] = useState<string | null>(null)
   const [settingsFocusTarget, setSettingsFocusTarget] = useState<SettingsFocusTarget | null>(null)
   const [essayCandidates, setEssayCandidates] = useState<EssayClaimCandidate[]>([])
   const [essayPreparedText, setEssayPreparedText] = useState<string>('')
@@ -2479,6 +2487,76 @@ function App(): JSX.Element {
         markTopicFeedbackApplied: true,
       },
     )
+  }
+
+  const closeSimilarArticles = (): void => {
+    setSimilarArticleSource(null)
+    setSimilarArticles([])
+    setSimilarArticlesOffset(0)
+    setSimilarArticlesHasMore(false)
+    setSimilarArticlesLoading(false)
+    setSimilarArticlesError(null)
+  }
+
+  const fetchSimilarArticles = async (
+    article: Article,
+    offset = 0,
+  ): Promise<void> => {
+    const isLoadingMore = offset > 0
+    setSimilarArticleSource(article)
+    setSimilarArticlesLoading(true)
+    setSimilarArticlesError(null)
+    if (!isLoadingMore) {
+      setSimilarArticles([])
+      setSimilarArticlesOffset(0)
+      setSimilarArticlesHasMore(false)
+    }
+
+    try {
+      const response = await fetch('/api/articles/similar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          article_id: article.id,
+          limit: similarArticlesPageSize,
+          offset,
+          year_start: resolvedYearStart,
+          year_end: resolvedYearEnd,
+        }),
+      })
+      const data = await readApiJson<SimilarArticlesResponse>(response)
+      const nextResults = Array.isArray(data.results) ? data.results : []
+      setSimilarArticles(currentArticles => {
+        if (!isLoadingMore) return nextResults
+        const seen = new Set(currentArticles.map(getArticleIdKey))
+        const appended = nextResults.filter(result => !seen.has(getArticleIdKey(result)))
+        return [...currentArticles, ...appended]
+      })
+      setSimilarArticlesOffset(
+        typeof data.next_offset === 'number'
+          ? data.next_offset
+          : offset + nextResults.length,
+      )
+      setSimilarArticlesHasMore(Boolean(data.has_more))
+    } catch (similarError) {
+      console.error('Similar article search failed:', similarError)
+      setSimilarArticlesError(
+        similarError instanceof Error
+          ? similarError.message
+          : 'Similar article search failed.',
+      )
+    } finally {
+      setSimilarArticlesLoading(false)
+    }
+  }
+
+  const handleFindSimilarArticles = (article: Article): void => {
+    void fetchSimilarArticles(article, 0)
+  }
+
+  const handleLoadMoreSimilarArticles = (): void => {
+    if (!similarArticleSource || similarArticlesLoading) return
+    void fetchSimilarArticles(similarArticleSource, similarArticlesOffset)
   }
 
   const getMatchSummary = (article: Article): string => {
@@ -3749,6 +3827,17 @@ function App(): JSX.Element {
                         >
                           Mark as not relevant
                         </button>
+                        <button
+                          type="button"
+                          className="topic-feedback-button similar"
+                          onClick={() => handleFindSimilarArticles(article)}
+                          disabled={similarArticlesLoading && getArticleIdKey(similarArticleSource ?? article) === getArticleIdKey(article)}
+                          aria-label={`Find articles similar to ${article.title}`}
+                        >
+                          {similarArticlesLoading && getArticleIdKey(similarArticleSource ?? article) === getArticleIdKey(article)
+                            ? 'Finding similar...'
+                            : 'Find similar articles'}
+                        </button>
                       </div>
                     </article>
                   )
@@ -3805,6 +3894,98 @@ function App(): JSX.Element {
       )}
 
       {shouldShowEssayShortcut && <Chat onSearchTerm={handleEssaySearch} />}
+
+      {similarArticleSource && (
+        <div
+          className="modal-backdrop"
+          onClick={closeSimilarArticles}
+          role="presentation"
+        >
+          <div
+            className="modal-card similar-articles-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="similar-articles-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <p className="modal-eyebrow">SVD similarity</p>
+                <h3 id="similar-articles-modal-title">Similar articles</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={closeSimilarArticles}
+                aria-label="Close similar articles popup"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="similar-articles-source">
+              <span>Source</span>
+              <strong>{similarArticleSource.title}</strong>
+            </div>
+
+            {similarArticlesError && (
+              <div className="similar-articles-error" role="alert">
+                {similarArticlesError}
+              </div>
+            )}
+
+            {similarArticlesLoading && similarArticles.length === 0 && (
+              <div className="similar-articles-empty" role="status" aria-live="polite">
+                Finding similar articles...
+              </div>
+            )}
+
+            {!similarArticlesLoading && !similarArticlesError && similarArticles.length === 0 && (
+              <div className="similar-articles-empty">
+                No similar SVD articles were found for this result.
+              </div>
+            )}
+
+            {similarArticles.length > 0 && (
+              <div className="similar-articles-list">
+                {similarArticles.map((similarArticle, index) => (
+                  <article
+                    key={`${similarArticleSource.id}-similar-${similarArticle.id}`}
+                    className="similar-article-item"
+                  >
+                    <div className="similar-article-rank">{index + 1}</div>
+                    <div className="similar-article-copy">
+                      <div className="similar-article-header">
+                        <h4>
+                          <a href={similarArticle.url} target="_blank" rel="noreferrer">
+                            {similarArticle.title}
+                          </a>
+                        </h4>
+                        <span>{formatPercent(similarArticle.score)}</span>
+                      </div>
+                      <p className="similar-article-meta">
+                        {similarArticle.author_display || similarArticle.author_raw || 'Unknown author'} | {formatDate(similarArticle.date)}
+                      </p>
+                      <p className="similar-article-summary">{similarArticle.summary}</p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+
+            {(similarArticlesHasMore || similarArticlesLoading) && similarArticles.length > 0 && (
+              <button
+                type="button"
+                className="similar-articles-load-more"
+                onClick={handleLoadMoreSimilarArticles}
+                disabled={similarArticlesLoading}
+              >
+                {similarArticlesLoading ? 'Loading...' : 'Load more'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {isAboutOpen && (
         <div

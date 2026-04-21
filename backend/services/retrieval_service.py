@@ -1,3 +1,4 @@
+import numpy as np
 from sqlalchemy import func, or_
 
 from backend.db.models import GuardianArticle
@@ -463,6 +464,69 @@ def svd_search(query, top_n=100, year_start=None, year_end=None):
         year_start=year_start,
         year_end=year_end,
     )
+
+
+def similar_svd_articles(article_id, limit=5, offset=0, year_start=None, year_end=None):
+    source_id = str(article_id or "").strip()
+    if not source_id:
+        raise ValueError("An article_id is required.")
+
+    resolved_limit = max(1, min(25, int(limit)))
+    resolved_offset = max(0, int(offset))
+    resolved_year_start, resolved_year_end = normalize_article_year_range(
+        year_start,
+        year_end,
+    )
+
+    try:
+        processor = build_retrieval_processor(retrieval_model="svd")
+    except RuntimeError as exc:
+        raise ValueError("SVD similar-article search is not available yet.") from exc
+
+    try:
+        source_idx = processor.get_doc_idx_by_id(source_id)
+        source_vector = processor.get_doc_vector(source_id, normalize=True)
+    except Exception as exc:
+        raise ValueError("That article is not available in the SVD index.") from exc
+
+    scores = np.asarray(
+        processor.normalized_doc_embeddings @ source_vector,
+        dtype=np.float32,
+    ).reshape(-1)
+    ranked_indices = np.argsort(scores)[::-1]
+
+    ranked = []
+    for raw_idx in ranked_indices:
+        idx = int(raw_idx)
+        if idx == source_idx:
+            continue
+        score = float(scores[idx])
+        if score <= 0:
+            continue
+        ranked.append((processor.doc_ids[idx], score))
+
+    if resolved_year_start is not None or resolved_year_end is not None:
+        ranked = _filter_ranked_articles_by_year_range(
+            ranked,
+            year_start=resolved_year_start,
+            year_end=resolved_year_end,
+        )
+
+    page_ranked = ranked[resolved_offset:resolved_offset + resolved_limit + 1]
+    has_more = len(page_ranked) > resolved_limit
+    page_ranked = page_ranked[:resolved_limit]
+    results = build_matches(
+        page_ranked,
+        retrieval_model="svd",
+        processor=processor,
+    )
+
+    return {
+        "source_article_id": source_id,
+        "results": results,
+        "next_offset": resolved_offset + len(results),
+        "has_more": has_more,
+    }
 
 
 def retrieval_query_svd_dimensions(query, retrieval_model=DEFAULT_RETRIEVAL_MODEL):

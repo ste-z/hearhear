@@ -66,6 +66,13 @@ export type ArticleSearchResponse = {
   empty_results_message?: string | null
 }
 
+export type SimilarArticlesResponse = {
+  source_article_id?: string | number | null
+  results?: Article[] | null
+  next_offset?: number | null
+  has_more?: boolean | null
+}
+
 export type ResultsOverview = {
   overview: string
   key_points?: string[] | null
