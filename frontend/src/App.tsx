@@ -58,6 +58,8 @@ type ConfigResponse = {
   supported_rerank_selection_modes?: string[] | null
   min_article_year?: number | null
   max_article_year?: number | null
+  min_article_characters?: number | null
+  max_article_characters?: number | null
 }
 
 type ApiErrorPayload = {
@@ -173,7 +175,7 @@ const normalizeAutoRerankThresholds = (
   return nextThresholds
 }
 
-const normalizeConfigYear = (value: unknown): number | null => {
+const normalizeConfigInteger = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isInteger(value)) return value
   if (typeof value === 'string' && value.trim() !== '') {
     const parsed = Number(value)
@@ -182,9 +184,21 @@ const normalizeConfigYear = (value: unknown): number | null => {
   return null
 }
 
-const clampYear = (value: number, minYear: number, maxYear: number): number => (
-  Math.min(maxYear, Math.max(minYear, Math.round(value)))
+const normalizeConfigYear = normalizeConfigInteger
+
+const clampWholeNumber = (value: number, minValue: number, maxValue: number): number => (
+  Math.min(maxValue, Math.max(minValue, Math.round(value)))
 )
+
+const clampYear = (value: number, minYear: number, maxYear: number): number => (
+  clampWholeNumber(value, minYear, maxYear)
+)
+
+const clampCharacterCount = (value: number, minValue: number, maxValue: number): number => (
+  clampWholeNumber(value, minValue, maxValue)
+)
+
+const formatCharacterCount = (value: number): string => value.toLocaleString()
 
 const hasSeenLanding = (): boolean => {
   if (typeof window === 'undefined') return false
@@ -760,49 +774,55 @@ function SvdConceptBarChart(
   )
 }
 
-function YearRangeSlider(
+function TwoHandleRangeSlider(
   {
-    minYear,
-    maxYear,
-    startYear,
-    endYear,
+    minValue,
+    maxValue,
+    startValue,
+    endValue,
     disabled = false,
-    onStartYearChange,
-    onEndYearChange,
+    startAriaLabel,
+    endAriaLabel,
+    formatValue = (value: number): string => String(value),
+    onStartValueChange,
+    onEndValueChange,
   }: {
-    minYear: number
-    maxYear: number
-    startYear: number
-    endYear: number
+    minValue: number
+    maxValue: number
+    startValue: number
+    endValue: number
     disabled?: boolean
-    onStartYearChange: (nextYear: number) => void
-    onEndYearChange: (nextYear: number) => void
+    startAriaLabel: string
+    endAriaLabel: string
+    formatValue?: (value: number) => string
+    onStartValueChange: (nextValue: number) => void
+    onEndValueChange: (nextValue: number) => void
   },
 ): JSX.Element {
   const sliderShellRef = useRef<HTMLDivElement | null>(null)
   const [draggingThumb, setDraggingThumb] = useState<'start' | 'end' | null>(null)
-  const yearSpan = Math.max(0, maxYear - minYear)
-  const startPercent = yearSpan === 0 ? 0 : (((startYear - minYear) / yearSpan) * 100)
-  const endPercent = yearSpan === 0 ? 100 : (((endYear - minYear) / yearSpan) * 100)
+  const valueSpan = Math.max(0, maxValue - minValue)
+  const startPercent = valueSpan === 0 ? 0 : (((startValue - minValue) / valueSpan) * 100)
+  const endPercent = valueSpan === 0 ? 100 : (((endValue - minValue) / valueSpan) * 100)
 
-  const resolveYearFromClientX = (clientX: number): number => {
+  const resolveValueFromClientX = (clientX: number): number => {
     const sliderBounds = sliderShellRef.current?.getBoundingClientRect()
-    if (!sliderBounds || sliderBounds.width <= 0 || yearSpan === 0) {
-      return startYear
+    if (!sliderBounds || sliderBounds.width <= 0 || valueSpan === 0) {
+      return startValue
     }
     const relativeX = Math.min(sliderBounds.width, Math.max(0, clientX - sliderBounds.left))
     const nextPercent = relativeX / sliderBounds.width
-    const nextYear = minYear + Math.round(nextPercent * yearSpan)
-    return clampYear(nextYear, minYear, maxYear)
+    const nextValue = minValue + Math.round(nextPercent * valueSpan)
+    return clampWholeNumber(nextValue, minValue, maxValue)
   }
 
-  const applyDraggedYear = (clientX: number, thumb: 'start' | 'end'): void => {
-    const nextYear = resolveYearFromClientX(clientX)
+  const applyDraggedValue = (clientX: number, thumb: 'start' | 'end'): void => {
+    const nextValue = resolveValueFromClientX(clientX)
     if (thumb === 'start') {
-      onStartYearChange(Math.min(nextYear, endYear))
+      onStartValueChange(Math.min(nextValue, endValue))
       return
     }
-    onEndYearChange(Math.max(nextYear, startYear))
+    onEndValueChange(Math.max(nextValue, startValue))
   }
 
   useEffect(() => {
@@ -811,7 +831,7 @@ function YearRangeSlider(
     }
 
     const handlePointerMove = (event: PointerEvent): void => {
-      applyDraggedYear(event.clientX, draggingThumb)
+      applyDraggedValue(event.clientX, draggingThumb)
     }
 
     const stopDragging = (): void => {
@@ -827,7 +847,17 @@ function YearRangeSlider(
       window.removeEventListener('pointerup', stopDragging)
       window.removeEventListener('pointercancel', stopDragging)
     }
-  }, [disabled, draggingThumb, endYear, maxYear, minYear, onEndYearChange, onStartYearChange, startYear, yearSpan])
+  }, [
+    disabled,
+    draggingThumb,
+    endValue,
+    maxValue,
+    minValue,
+    onEndValueChange,
+    onStartValueChange,
+    startValue,
+    valueSpan,
+  ])
 
   const beginDrag = (
     thumb: 'start' | 'end',
@@ -837,13 +867,13 @@ function YearRangeSlider(
     event.preventDefault()
     event.stopPropagation()
     setDraggingThumb(thumb)
-    applyDraggedYear(event.clientX, thumb)
+    applyDraggedValue(event.clientX, thumb)
   }
 
   const handleTrackPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
     if (disabled) return
-    const nextYear = resolveYearFromClientX(event.clientX)
-    const nearestThumb = Math.abs(nextYear - startYear) <= Math.abs(nextYear - endYear)
+    const nextValue = resolveValueFromClientX(event.clientX)
+    const nearestThumb = Math.abs(nextValue - startValue) <= Math.abs(nextValue - endValue)
       ? 'start'
       : 'end'
     beginDrag(nearestThumb, event)
@@ -851,10 +881,10 @@ function YearRangeSlider(
 
   const nudgeThumb = (thumb: 'start' | 'end', delta: number): void => {
     if (thumb === 'start') {
-      onStartYearChange(clampYear(startYear + delta, minYear, endYear))
+      onStartValueChange(clampWholeNumber(startValue + delta, minValue, endValue))
       return
     }
-    onEndYearChange(clampYear(endYear + delta, startYear, maxYear))
+    onEndValueChange(clampWholeNumber(endValue + delta, startValue, maxValue))
   }
 
   const handleThumbKeyDown = (
@@ -878,9 +908,9 @@ function YearRangeSlider(
     if (event.key === 'Home') {
       event.preventDefault()
       if (thumb === 'start') {
-        onStartYearChange(minYear)
+        onStartValueChange(minValue)
       } else {
-        onEndYearChange(startYear)
+        onEndValueChange(startValue)
       }
       return
     }
@@ -888,9 +918,9 @@ function YearRangeSlider(
     if (event.key === 'End') {
       event.preventDefault()
       if (thumb === 'start') {
-        onStartYearChange(endYear)
+        onStartValueChange(endValue)
       } else {
-        onEndYearChange(maxYear)
+        onEndValueChange(maxValue)
       }
     }
   }
@@ -920,11 +950,11 @@ function YearRangeSlider(
           onKeyDown={(event) => handleThumbKeyDown('start', event)}
           disabled={disabled}
           role="slider"
-          aria-label="Start year"
-          aria-valuemin={minYear}
-          aria-valuemax={endYear}
-          aria-valuenow={startYear}
-          aria-valuetext={String(startYear)}
+          aria-label={startAriaLabel}
+          aria-valuemin={minValue}
+          aria-valuemax={endValue}
+          aria-valuenow={startValue}
+          aria-valuetext={formatValue(startValue)}
         />
         <button
           type="button"
@@ -934,11 +964,11 @@ function YearRangeSlider(
           onKeyDown={(event) => handleThumbKeyDown('end', event)}
           disabled={disabled}
           role="slider"
-          aria-label="End year"
-          aria-valuemin={startYear}
-          aria-valuemax={maxYear}
-          aria-valuenow={endYear}
-          aria-valuetext={String(endYear)}
+          aria-label={endAriaLabel}
+          aria-valuemin={startValue}
+          aria-valuemax={maxValue}
+          aria-valuenow={endValue}
+          aria-valuetext={formatValue(endValue)}
         />
       </div>
     </div>
@@ -1325,10 +1355,16 @@ function App(): JSX.Element {
   const [retrievalModel, setRetrievalModel] = useState<RetrievalModel>('svd')
   const [minArticleYear, setMinArticleYear] = useState<number | null>(null)
   const [maxArticleYear, setMaxArticleYear] = useState<number | null>(null)
+  const [minArticleCharacters, setMinArticleCharacters] = useState<number | null>(null)
+  const [maxArticleCharacters, setMaxArticleCharacters] = useState<number | null>(null)
   const [yearStart, setYearStart] = useState<number | null>(null)
   const [yearEnd, setYearEnd] = useState<number | null>(null)
   const [yearStartInput, setYearStartInput] = useState<string>('')
   const [yearEndInput, setYearEndInput] = useState<string>('')
+  const [characterStart, setCharacterStart] = useState<number | null>(null)
+  const [characterEnd, setCharacterEnd] = useState<number | null>(null)
+  const [characterStartInput, setCharacterStartInput] = useState<string>('')
+  const [characterEndInput, setCharacterEndInput] = useState<string>('')
   const [supportedRetrievalModels, setSupportedRetrievalModels] = useState<RetrievalModel[]>(
     defaultSupportedRetrievalModels,
   )
@@ -1376,7 +1412,12 @@ function App(): JSX.Element {
   const agreementSettingsRef = useRef<HTMLDivElement | null>(null)
   const resultsSectionRef = useRef<HTMLDivElement | null>(null)
   const touchStartYRef = useRef<number | null>(null)
-  const lastAppliedYearRangeRef = useRef<{ yearStart: number | null, yearEnd: number | null } | null>(null)
+  const lastAppliedFiltersRef = useRef<{
+    yearStart: number | null
+    yearEnd: number | null
+    characterStart: number | null
+    characterEnd: number | null
+  } | null>(null)
   const skipNextStanceResetRef = useRef<boolean>(false)
   const [isSearchStageVisible, setIsSearchStageVisible] = useState<boolean>(hasSeenLandingRef.current)
   const [hasSubmittedSearch, setHasSubmittedSearch] = useState<boolean>(false)
@@ -1417,6 +1458,8 @@ function App(): JSX.Element {
             : supportedChunkingOptions[0])
         const nextMinArticleYear = normalizeConfigYear(data.min_article_year)
         const nextMaxArticleYear = normalizeConfigYear(data.max_article_year)
+        const nextMinArticleCharacters = normalizeConfigInteger(data.min_article_characters)
+        const nextMaxArticleCharacters = normalizeConfigInteger(data.max_article_characters)
         setSupportedRetrievalModels(supportedModels)
         setSupportedStanceMethods(supportedAgreementMethods)
         setSupportedChunkingModes(supportedChunkingOptions)
@@ -1459,6 +1502,24 @@ function App(): JSX.Element {
             currentYear === null
               ? nextMaxArticleYear
               : clampYear(currentYear, nextMinArticleYear, nextMaxArticleYear)
+          ))
+        }
+        if (
+          nextMinArticleCharacters !== null &&
+          nextMaxArticleCharacters !== null &&
+          nextMinArticleCharacters <= nextMaxArticleCharacters
+        ) {
+          setMinArticleCharacters(nextMinArticleCharacters)
+          setMaxArticleCharacters(nextMaxArticleCharacters)
+          setCharacterStart(currentCharacters => (
+            currentCharacters === null
+              ? nextMinArticleCharacters
+              : clampCharacterCount(currentCharacters, nextMinArticleCharacters, nextMaxArticleCharacters)
+          ))
+          setCharacterEnd(currentCharacters => (
+            currentCharacters === null
+              ? nextMaxArticleCharacters
+              : clampCharacterCount(currentCharacters, nextMinArticleCharacters, nextMaxArticleCharacters)
           ))
         }
         setNormalizeTopicScores(Boolean(data.default_normalize_topic_scores))
@@ -1881,16 +1942,34 @@ function App(): JSX.Element {
     maxArticleYear !== null &&
     (resolvedYearStart !== minArticleYear || resolvedYearEnd !== maxArticleYear)
   )
-  const activeYearRangeLabel = !hasYearRangeSelection
-    ? 'All years'
-    : (resolvedYearStart === resolvedYearEnd
-      ? `${resolvedYearStart}`
-      : `${resolvedYearStart}-${resolvedYearEnd}`)
   const yearRangeSummary = !isYearFilterActive || !hasYearRangeSelection
     ? ''
     : (resolvedYearStart === resolvedYearEnd
       ? ` from ${resolvedYearStart}`
       : ` from ${resolvedYearStart} to ${resolvedYearEnd}`)
+  const hasAvailableCharacterBounds = (
+    minArticleCharacters !== null &&
+    maxArticleCharacters !== null &&
+    minArticleCharacters <= maxArticleCharacters
+  )
+  const resolvedCharacterStart = characterStart ?? minArticleCharacters
+  const resolvedCharacterEnd = characterEnd ?? maxArticleCharacters
+  const characterRangeSpan = hasAvailableCharacterBounds && minArticleCharacters !== null && maxArticleCharacters !== null
+    ? maxArticleCharacters - minArticleCharacters
+    : 0
+  const hasCharacterRangeSelection = resolvedCharacterStart !== null && resolvedCharacterEnd !== null
+  const isCharacterFilterActive = (
+    hasCharacterRangeSelection &&
+    minArticleCharacters !== null &&
+    maxArticleCharacters !== null &&
+    (resolvedCharacterStart !== minArticleCharacters || resolvedCharacterEnd !== maxArticleCharacters)
+  )
+  const characterRangeSummary = !isCharacterFilterActive || !hasCharacterRangeSelection
+    ? ''
+    : (resolvedCharacterStart === resolvedCharacterEnd
+      ? ` with ${formatCharacterCount(resolvedCharacterStart)} characters`
+      : ` with ${formatCharacterCount(resolvedCharacterStart)} to ${formatCharacterCount(resolvedCharacterEnd)} characters`)
+  const activeFilterSummary = `${yearRangeSummary}${characterRangeSummary}`
 
   const formatDate = (isoDate: string | null): string => {
     if (!isoDate) return 'Unknown date'
@@ -2029,6 +2108,42 @@ function App(): JSX.Element {
     setYearEndInput(value.replace(/[^\d]/g, ''))
   }
 
+  const handleCharacterStartChange = (value: string): void => {
+    const nextStart = Number(value)
+    if (Number.isNaN(nextStart)) return
+    const boundedStart = (
+      minArticleCharacters !== null && maxArticleCharacters !== null
+        ? clampCharacterCount(nextStart, minArticleCharacters, maxArticleCharacters)
+        : Math.round(nextStart)
+    )
+    setCharacterStart(boundedStart)
+    setCharacterEnd(currentEnd => (
+      currentEnd === null || currentEnd < boundedStart ? boundedStart : currentEnd
+    ))
+  }
+
+  const handleCharacterEndChange = (value: string): void => {
+    const nextEnd = Number(value)
+    if (Number.isNaN(nextEnd)) return
+    const boundedEnd = (
+      minArticleCharacters !== null && maxArticleCharacters !== null
+        ? clampCharacterCount(nextEnd, minArticleCharacters, maxArticleCharacters)
+        : Math.round(nextEnd)
+    )
+    setCharacterEnd(boundedEnd)
+    setCharacterStart(currentStart => (
+      currentStart === null || currentStart > boundedEnd ? boundedEnd : currentStart
+    ))
+  }
+
+  const handleCharacterStartInputChange = (value: string): void => {
+    setCharacterStartInput(value.replace(/[^\d]/g, ''))
+  }
+
+  const handleCharacterEndInputChange = (value: string): void => {
+    setCharacterEndInput(value.replace(/[^\d]/g, ''))
+  }
+
   const commitYearStartInput = (): void => {
     const normalizedValue = yearStartInput.trim()
     if (normalizedValue === '') {
@@ -2049,6 +2164,28 @@ function App(): JSX.Element {
       return
     }
     handleYearEndChange(normalizedValue)
+  }
+
+  const commitCharacterStartInput = (): void => {
+    const normalizedValue = characterStartInput.trim()
+    if (normalizedValue === '') {
+      if (minArticleCharacters !== null) {
+        handleCharacterStartChange(String(minArticleCharacters))
+      }
+      return
+    }
+    handleCharacterStartChange(normalizedValue)
+  }
+
+  const commitCharacterEndInput = (): void => {
+    const normalizedValue = characterEndInput.trim()
+    if (normalizedValue === '') {
+      if (maxArticleCharacters !== null) {
+        handleCharacterEndChange(String(maxArticleCharacters))
+      }
+      return
+    }
+    handleCharacterEndChange(normalizedValue)
   }
 
   const scrollToNode = (node: HTMLDivElement | null): void => {
@@ -2133,9 +2270,11 @@ function App(): JSX.Element {
     if (inputMode !== 'stance' || !nextTopic || !trimmedOpinion || loading) return
     const feedbackArticleIds = options.topicFeedbackIrrelevantArticleIds ?? topicFeedbackIrrelevantArticleIds
 
-    lastAppliedYearRangeRef.current = {
+    lastAppliedFiltersRef.current = {
       yearStart: resolvedYearStart,
       yearEnd: resolvedYearEnd,
+      characterStart: resolvedCharacterStart,
+      characterEnd: resolvedCharacterEnd,
     }
     setHasSubmittedSearch(true)
     setShouldScrollToResults(false)
@@ -2173,6 +2312,8 @@ function App(): JSX.Element {
           rerank_threshold: currentAutoRerankThreshold,
           year_start: resolvedYearStart,
           year_end: resolvedYearEnd,
+          character_start: resolvedCharacterStart,
+          character_end: resolvedCharacterEnd,
           topic_feedback_irrelevant_article_ids: feedbackArticleIds,
           skip_typo_correction: Boolean(options.skipTypoCorrection),
         }),
@@ -2274,9 +2415,11 @@ function App(): JSX.Element {
     if (!isLlmAgreementSelected && !nextThesisSentence) return
     const feedbackArticleIds = options.topicFeedbackIrrelevantArticleIds ?? topicFeedbackIrrelevantArticleIds
 
-    lastAppliedYearRangeRef.current = {
+    lastAppliedFiltersRef.current = {
       yearStart: resolvedYearStart,
       yearEnd: resolvedYearEnd,
+      characterStart: resolvedCharacterStart,
+      characterEnd: resolvedCharacterEnd,
     }
     setHasSubmittedSearch(true)
     setShouldScrollToResults(true)
@@ -2315,6 +2458,8 @@ function App(): JSX.Element {
           rerank_threshold: currentAutoRerankThreshold,
           year_start: resolvedYearStart,
           year_end: resolvedYearEnd,
+          character_start: resolvedCharacterStart,
+          character_end: resolvedCharacterEnd,
           topic_feedback_irrelevant_article_ids: feedbackArticleIds,
         }),
       })
@@ -2382,11 +2527,13 @@ function App(): JSX.Element {
       return
     }
 
-    const lastAppliedYearRange = lastAppliedYearRangeRef.current
+    const lastAppliedFilters = lastAppliedFiltersRef.current
     if (
-      lastAppliedYearRange &&
-      lastAppliedYearRange.yearStart === resolvedYearStart &&
-      lastAppliedYearRange.yearEnd === resolvedYearEnd
+      lastAppliedFilters &&
+      lastAppliedFilters.yearStart === resolvedYearStart &&
+      lastAppliedFilters.yearEnd === resolvedYearEnd &&
+      lastAppliedFilters.characterStart === resolvedCharacterStart &&
+      lastAppliedFilters.characterEnd === resolvedCharacterEnd
     ) {
       return
     }
@@ -2406,6 +2553,8 @@ function App(): JSX.Element {
     inputMode,
     isFilterOpen,
     loading,
+    resolvedCharacterEnd,
+    resolvedCharacterStart,
     resolvedYearEnd,
     resolvedYearStart,
   ])
@@ -2417,6 +2566,14 @@ function App(): JSX.Element {
   useEffect(() => {
     setYearEndInput(resolvedYearEnd === null ? '' : String(resolvedYearEnd))
   }, [resolvedYearEnd])
+
+  useEffect(() => {
+    setCharacterStartInput(resolvedCharacterStart === null ? '' : String(resolvedCharacterStart))
+  }, [resolvedCharacterStart])
+
+  useEffect(() => {
+    setCharacterEndInput(resolvedCharacterEnd === null ? '' : String(resolvedCharacterEnd))
+  }, [resolvedCharacterEnd])
 
   const scrollEssayOptions = (direction: 'left' | 'right'): void => {
     const container = essayOptionsRef.current
@@ -2641,6 +2798,8 @@ function App(): JSX.Element {
           offset,
           year_start: resolvedYearStart,
           year_end: resolvedYearEnd,
+          character_start: resolvedCharacterStart,
+          character_end: resolvedCharacterEnd,
         }),
       })
       const data = await readApiJson<SimilarArticlesResponse>(response)
@@ -2931,7 +3090,7 @@ function App(): JSX.Element {
 
   const resultsDescription = useMemo(() => {
     if (loading) {
-      return `Ranking Guardian opinion pieces${yearRangeSummary} with your current search settings.`
+      return `Ranking Guardian opinion pieces${activeFilterSummary} with your current search settings.`
     }
 
     if (error) {
@@ -2951,8 +3110,8 @@ function App(): JSX.Element {
         return emptyResultsMessage
       }
       return (
-        `No matching articles came back${yearRangeSummary} this time. `
-        + 'Try broadening the topic, sharpening the claim, or widening the year range.'
+        `No matching articles came back${activeFilterSummary} this time. `
+        + 'Try broadening the topic, sharpening the claim, or widening the filters.'
       )
     }
 
@@ -2967,10 +3126,11 @@ function App(): JSX.Element {
       : ''
     return (
       `${activeVisibleArticles.length} Guardian opinion ${activeVisibleArticles.length === 1 ? 'piece' : 'pieces'}`
-      + `${yearRangeSummary} ranked with your current search settings.${hiddenCopy}${feedbackCopy}${appliedFeedbackCopy}`
+      + `${activeFilterSummary} ranked with your current search settings.${hiddenCopy}${feedbackCopy}${appliedFeedbackCopy}`
     )
   }, [
     activeVisibleArticles.length,
+    activeFilterSummary,
     appliedTopicFeedbackArticleIds.length,
     articles.length,
     emptyResultsMessage,
@@ -2981,7 +3141,6 @@ function App(): JSX.Element {
     llmIrrelevantArticles.length,
     loading,
     topicFeedbackIrrelevantArticles.length,
-    yearRangeSummary,
   ])
 
   return (
@@ -3441,7 +3600,7 @@ function App(): JSX.Element {
               className="utility-pill"
               onClick={() => setIsFilterOpen(true)}
             >
-              {`Filter (${activeYearRangeLabel})`}
+              Filter
             </button>
             <button
               type="button"
@@ -4033,7 +4192,7 @@ function App(): JSX.Element {
             {!loading && !error && articles.length === 0 && (
               <div className="results-empty-card searched">
                 <p>
-                  {emptyResultsMessage || `No matching articles were returned${yearRangeSummary}. Try broadening the topic, making the stance more explicit, or widening the year range.`}
+                  {emptyResultsMessage || `No matching articles were returned${activeFilterSummary}. Try broadening the topic, making the stance more explicit, or widening the filters.`}
                 </p>
               </div>
             )}
@@ -4273,7 +4432,7 @@ function App(): JSX.Element {
             <div className="modal-header">
               <div>
                 <p className="modal-eyebrow">Filter</p>
-                <h3 id="filter-settings-title">Article year range</h3>
+                <h3 id="filter-settings-title">Article filters</h3>
               </div>
               <button
                 type="button"
@@ -4326,14 +4485,16 @@ function App(): JSX.Element {
                   </label>
                 </div>
                 {minArticleYear !== null && maxArticleYear !== null && resolvedYearStart !== null && resolvedYearEnd !== null && (
-                  <YearRangeSlider
-                    minYear={minArticleYear}
-                    maxYear={maxArticleYear}
-                    startYear={resolvedYearStart}
-                    endYear={resolvedYearEnd}
+                  <TwoHandleRangeSlider
+                    minValue={minArticleYear}
+                    maxValue={maxArticleYear}
+                    startValue={resolvedYearStart}
+                    endValue={resolvedYearEnd}
                     disabled={!hasAvailableYearBounds || yearRangeSpan === 0}
-                    onStartYearChange={(nextYear) => handleYearStartChange(String(nextYear))}
-                    onEndYearChange={(nextYear) => handleYearEndChange(String(nextYear))}
+                    startAriaLabel="Start year"
+                    endAriaLabel="End year"
+                    onStartValueChange={(nextYear) => handleYearStartChange(String(nextYear))}
+                    onEndValueChange={(nextYear) => handleYearEndChange(String(nextYear))}
                   />
                 )}
                 <div className="year-range-scale" aria-hidden="true">
@@ -4342,6 +4503,68 @@ function App(): JSX.Element {
                 </div>
                 <p className="setting-help-text">
                   Only return articles published within the selected year range.
+                </p>
+              </div>
+              <div className="weight-card full-row">
+                <span>Article length</span>
+                <div className="year-range-summary-grid" aria-live="polite">
+                  <label className="year-range-value-card year-range-input-card">
+                    <span>Min chars</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={characterStartInput}
+                      onChange={(event) => handleCharacterStartInputChange(event.target.value)}
+                      onBlur={commitCharacterStartInput}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.currentTarget.blur()
+                        }
+                      }}
+                      disabled={!hasAvailableCharacterBounds}
+                      aria-label="Minimum article length in characters"
+                    />
+                  </label>
+                  <label className="year-range-value-card year-range-input-card">
+                    <span>Max chars</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={characterEndInput}
+                      onChange={(event) => handleCharacterEndInputChange(event.target.value)}
+                      onBlur={commitCharacterEndInput}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.currentTarget.blur()
+                        }
+                      }}
+                      disabled={!hasAvailableCharacterBounds}
+                      aria-label="Maximum article length in characters"
+                    />
+                  </label>
+                </div>
+                {minArticleCharacters !== null && maxArticleCharacters !== null && resolvedCharacterStart !== null && resolvedCharacterEnd !== null && (
+                  <TwoHandleRangeSlider
+                    minValue={minArticleCharacters}
+                    maxValue={maxArticleCharacters}
+                    startValue={resolvedCharacterStart}
+                    endValue={resolvedCharacterEnd}
+                    disabled={!hasAvailableCharacterBounds || characterRangeSpan === 0}
+                    startAriaLabel="Minimum article length"
+                    endAriaLabel="Maximum article length"
+                    formatValue={(value) => `${formatCharacterCount(value)} characters`}
+                    onStartValueChange={(nextCharacters) => handleCharacterStartChange(String(nextCharacters))}
+                    onEndValueChange={(nextCharacters) => handleCharacterEndChange(String(nextCharacters))}
+                  />
+                )}
+                <div className="year-range-scale" aria-hidden="true">
+                  <span>{minArticleCharacters === null ? '—' : formatCharacterCount(minArticleCharacters)}</span>
+                  <span>{maxArticleCharacters === null ? '—' : formatCharacterCount(maxArticleCharacters)}</span>
+                </div>
+                <p className="setting-help-text">
+                  Only return articles whose full body text falls within the selected character range.
                 </p>
               </div>
             </div>

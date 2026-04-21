@@ -20,6 +20,7 @@ export type Article = {
   score?: number | null
   keywords?: string[] | null
   central_claim_summary?: string | null
+  character_count?: number | null
   combined_score?: number | null
   topic_score?: number | null
   stance_score_normalized?: number | null

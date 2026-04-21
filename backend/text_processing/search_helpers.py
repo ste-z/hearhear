@@ -134,6 +134,23 @@ def serialize_article(article, score=None):
     if n_contributors is None:
         n_contributors = len(authors)
 
+    character_count = None
+    for count_key in (
+        "character_count",
+        "body_character_count",
+        "article_character_count",
+    ):
+        character_count = _get_value(article, count_key)
+        if character_count is not None:
+            break
+    if character_count is None:
+        body_text = _get_value(article, "body_text")
+        character_count = len(str(body_text)) if body_text is not None else None
+    try:
+        character_count = int(character_count) if character_count is not None else None
+    except (TypeError, ValueError):
+        character_count = None
+
     payload = {
         "id": _get_value(article, "id"),
         "title": _get_value(article, "title"),
@@ -146,6 +163,7 @@ def serialize_article(article, score=None):
         "n_contributors": int(n_contributors),
         "keywords": _get_value(article, "keywords", []) or [],
         "year": _get_value(article, "year"),
+        "character_count": character_count,
     }
     if score is not None:
         payload["score"] = float(score)
