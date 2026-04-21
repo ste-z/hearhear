@@ -22,6 +22,7 @@ from backend.stance_processing.stance_rerank import (
     DEFAULT_CHUNKING_MODE,
     normalize_chunking_mode,
 )
+from backend.text_processing.svd_dimension_labels import cached_svd_dimension_labels
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,23 @@ def _format_dimension_for_labeling(dimension):
         "value": value,
         "pole": pole,
     }
+
+
+def _dimension_indices(dimensions):
+    indices = []
+    seen = set()
+    for dimension in dimensions:
+        if not isinstance(dimension, dict):
+            continue
+        try:
+            index = int(dimension.get("dimension_index"))
+        except (TypeError, ValueError):
+            continue
+        if index in seen:
+            continue
+        indices.append(index)
+        seen.add(index)
+    return indices
 
 
 def _parse_svd_dimension_labels(raw_content, requested_indices):
@@ -453,19 +471,39 @@ def register_chat_route(app, json_search):
         if not isinstance(dimensions, list) or not dimensions:
             return jsonify({"error": "A non-empty dimensions list is required."}), 400
 
+        requested_indices = _dimension_indices(dimensions)
+        cached_labels = cached_svd_dimension_labels(requested_indices)
+        cached_indices = {
+            int(item["dimension_index"])
+            for item in cached_labels
+            if isinstance(item, dict) and "dimension_index" in item
+        }
+        if cached_labels and len(cached_indices) == len(set(requested_indices)):
+            return jsonify({"labels": cached_labels, "source": "precomputed"})
+
         api_key = os.getenv("SPARK_API_KEY") or os.getenv("API_KEY")
         if not api_key:
+            if cached_labels:
+                return jsonify({"labels": cached_labels, "source": "precomputed_partial"})
             return jsonify({"error": "SPARK_API_KEY or API_KEY not set — add it to your .env file"}), 500
 
         label_inputs = []
         for dimension in dimensions[:24]:
             if not isinstance(dimension, dict):
                 continue
+            try:
+                dimension_index = int(dimension.get("dimension_index"))
+            except (TypeError, ValueError):
+                continue
+            if dimension_index in cached_indices:
+                continue
             formatted = _format_dimension_for_labeling(dimension)
             if formatted is not None:
                 label_inputs.append(formatted)
 
         if not label_inputs:
+            if cached_labels:
+                return jsonify({"labels": cached_labels, "source": "precomputed"})
             return jsonify({"error": "No usable SVD dimensions were provided."}), 400
 
         try:
@@ -490,7 +528,7 @@ def register_chat_route(app, json_search):
 
         try:
             response = client.chat(messages)
-            labels = _parse_svd_dimension_labels(
+            live_labels = _parse_svd_dimension_labels(
                 response.get("content"),
                 requested_indices=[item["dimension_index"] for item in label_inputs],
             )
@@ -498,7 +536,8 @@ def register_chat_route(app, json_search):
             logger.exception("SVD dimension labeling request failed")
             return jsonify({"error": "LLM SVD dimension labeling failed"}), 500
 
-        return jsonify({"labels": labels})
+        labels = cached_labels + live_labels
+        return jsonify({"labels": labels, "source": "mixed" if cached_labels else "llm"})
 
     @app.route("/api/llm/results-overview", methods=["POST"])
     def results_overview():
