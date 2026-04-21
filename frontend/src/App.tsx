@@ -1408,7 +1408,8 @@ function App(): JSX.Element {
   const [readingTimeEnd, setReadingTimeEnd] = useState<number | null>(null)
   const [readingTimeStartInput, setReadingTimeStartInput] = useState<string>('')
   const [readingTimeEndInput, setReadingTimeEndInput] = useState<string>('')
-  const [wordsToAvoidText, setWordsToAvoidText] = useState<string>('')
+  const [wordsToAvoid, setWordsToAvoid] = useState<string[]>([])
+  const [wordsToAvoidDraft, setWordsToAvoidDraft] = useState<string>('')
   const [supportedRetrievalModels, setSupportedRetrievalModels] = useState<RetrievalModel[]>(
     defaultSupportedRetrievalModels,
   )
@@ -2010,11 +2011,7 @@ function App(): JSX.Element {
   const canUseChunking = canUseLlmAgreement && supportedChunkingModes.includes('semantic')
   const canToggleSvd = canUseSvd && canUseTfidf
   const isLexicalSearchMode = retrievalModel === 'tfidf'
-  const parsedWordsToAvoid = useMemo(
-    () => parseWordsToAvoid(wordsToAvoidText),
-    [wordsToAvoidText],
-  )
-  const activeWordsToAvoid = isLexicalSearchMode ? parsedWordsToAvoid : []
+  const activeWordsToAvoid = isLexicalSearchMode ? wordsToAvoid : []
   const activeWordsToAvoidKey = activeWordsToAvoid.join('\u0000')
   const currentAutoRerankThreshold = autoRerankThresholds[retrievalModel]
   const availableYears = useMemo(() => {
@@ -2387,6 +2384,41 @@ function App(): JSX.Element {
 
   const handleReadingTimeEndInputChange = (value: string): void => {
     setReadingTimeEndInput(value.replace(/[^\d]/g, ''))
+  }
+
+  const addWordsToAvoid = (value: string): void => {
+    const nextWords = parseWordsToAvoid(value)
+    if (nextWords.length === 0) return
+
+    setWordsToAvoid(currentWords => {
+      const seen = new Set(currentWords)
+      const mergedWords = [...currentWords]
+      for (const word of nextWords) {
+        if (seen.has(word)) continue
+        mergedWords.push(word)
+        seen.add(word)
+      }
+      return mergedWords
+    })
+    setWordsToAvoidDraft('')
+  }
+
+  const removeWordToAvoid = (word: string): void => {
+    setWordsToAvoid(currentWords => currentWords.filter(currentWord => currentWord !== word))
+  }
+
+  const handleWordsToAvoidKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (!isLexicalSearchMode) return
+
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      addWordsToAvoid(wordsToAvoidDraft)
+      return
+    }
+
+    if (event.key === 'Backspace' && wordsToAvoidDraft === '') {
+      setWordsToAvoid(currentWords => currentWords.slice(0, -1))
+    }
   }
 
   const commitYearStartInput = (): void => {
@@ -5026,31 +5058,43 @@ function App(): JSX.Element {
                 aria-disabled={!isLexicalSearchMode}
               >
                 <span>Words to avoid</span>
-                <textarea
-                  className="avoid-words-textarea"
-                  value={wordsToAvoidText}
-                  onChange={(event) => setWordsToAvoidText(event.target.value)}
-                  disabled={!isLexicalSearchMode}
-                  rows={3}
-                  spellCheck={false}
-                  placeholder={isLexicalSearchMode ? 'immigration, election, tax' : 'Available in Lexical mode'}
-                  aria-label="Words to avoid"
-                  aria-describedby="avoid-words-help"
-                />
+                <div
+                  className={`year-range-value-card year-range-input-card avoid-words-input-card ${!isLexicalSearchMode ? 'disabled' : ''}`}
+                >
+                  <span id="avoid-words-input-label">Word</span>
+                  <div className="avoid-words-token-field">
+                    {wordsToAvoid.map(word => (
+                      <button
+                        key={word}
+                        type="button"
+                        className="avoid-words-chip"
+                        onClick={() => removeWordToAvoid(word)}
+                        disabled={!isLexicalSearchMode}
+                        aria-label={`Remove ${word} from words to avoid`}
+                      >
+                        {word}
+                        <span className="avoid-words-chip-remove" aria-hidden="true">x</span>
+                      </button>
+                    ))}
+                    <input
+                      className="avoid-words-entry-input"
+                      type="text"
+                      value={wordsToAvoidDraft}
+                      onChange={(event) => setWordsToAvoidDraft(event.target.value)}
+                      onKeyDown={handleWordsToAvoidKeyDown}
+                      disabled={!isLexicalSearchMode}
+                      spellCheck={false}
+                      placeholder={isLexicalSearchMode && wordsToAvoid.length === 0 ? 'Add word' : ''}
+                      aria-labelledby="avoid-words-input-label"
+                      aria-describedby="avoid-words-help"
+                    />
+                  </div>
+                </div>
                 <p id="avoid-words-help" className="setting-help-text">
                   {isLexicalSearchMode
-                    ? 'Exclude articles containing any listed word from lexical TF-IDF results.'
+                    ? 'Exclude tagged words from lexical TF-IDF results.'
                     : 'Switch Topic Relevance Search Mode to Lexical to use this filter.'}
                 </p>
-                {isLexicalSearchMode && parsedWordsToAvoid.length > 0 && (
-                  <div className="avoid-words-chip-list" aria-label="Parsed words to avoid">
-                    {parsedWordsToAvoid.map(word => (
-                      <span key={word} className="avoid-words-chip">
-                        {word}
-                      </span>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           </div>
