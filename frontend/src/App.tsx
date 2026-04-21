@@ -241,8 +241,23 @@ const summarizeApiText = (value: string, maxLength = 180): string => (
 
 const getArticleIdKey = (article: Pick<Article, 'id'>): string => String(article.id)
 const typoTokenPattern = /[\p{L}]+(?:[-'][\p{L}]+)*/gu
+const avoidWordTokenPattern = /[\p{L}\p{N}_]+(?:[-'][\p{L}\p{N}_]+)*/gu
 
 const normalizeTypoTerm = (value: string): string => value.trim().toLocaleLowerCase()
+
+const parseWordsToAvoid = (value: string): string[] => {
+  const seen = new Set<string>()
+  const words: string[] = []
+
+  for (const match of value.matchAll(avoidWordTokenPattern)) {
+    const word = match[0].replace(/^[_'-]+|[_'-]+$/g, '').toLocaleLowerCase()
+    if (!word || seen.has(word)) continue
+    words.push(word)
+    seen.add(word)
+  }
+
+  return words
+}
 
 const normalizeTypoCorrection = (value: unknown): TypoCorrectionSuggestion | null => {
   if (!value || typeof value !== 'object') return null
@@ -1393,6 +1408,7 @@ function App(): JSX.Element {
   const [readingTimeEnd, setReadingTimeEnd] = useState<number | null>(null)
   const [readingTimeStartInput, setReadingTimeStartInput] = useState<string>('')
   const [readingTimeEndInput, setReadingTimeEndInput] = useState<string>('')
+  const [wordsToAvoidText, setWordsToAvoidText] = useState<string>('')
   const [supportedRetrievalModels, setSupportedRetrievalModels] = useState<RetrievalModel[]>(
     defaultSupportedRetrievalModels,
   )
@@ -1450,6 +1466,7 @@ function App(): JSX.Element {
     wordEnd: number | null
     readingTimeStart: number | null
     readingTimeEnd: number | null
+    wordsToAvoidKey: string
   } | null>(null)
   const skipNextStanceResetRef = useRef<boolean>(false)
   const [isSearchStageVisible, setIsSearchStageVisible] = useState<boolean>(hasSeenLandingRef.current)
@@ -1992,6 +2009,13 @@ function App(): JSX.Element {
   const canUseLlmAgreement = supportedStanceMethods.includes('llm') && llmAgreementAvailable
   const canUseChunking = canUseLlmAgreement && supportedChunkingModes.includes('semantic')
   const canToggleSvd = canUseSvd && canUseTfidf
+  const isLexicalSearchMode = retrievalModel === 'tfidf'
+  const parsedWordsToAvoid = useMemo(
+    () => parseWordsToAvoid(wordsToAvoidText),
+    [wordsToAvoidText],
+  )
+  const activeWordsToAvoid = isLexicalSearchMode ? parsedWordsToAvoid : []
+  const activeWordsToAvoidKey = activeWordsToAvoid.join('\u0000')
   const currentAutoRerankThreshold = autoRerankThresholds[retrievalModel]
   const availableYears = useMemo(() => {
     if (minArticleYear === null || maxArticleYear === null || minArticleYear > maxArticleYear) {
@@ -2086,12 +2110,15 @@ function App(): JSX.Element {
     : (resolvedReadingTimeStart === resolvedReadingTimeEnd
       ? ` with a ${formatReadingMinutes(resolvedReadingTimeStart)} min read`
       : ` with a ${formatReadingMinutes(resolvedReadingTimeStart)} to ${formatReadingMinutes(resolvedReadingTimeEnd)} min read`)
+  const avoidWordsFilterSummary = activeWordsToAvoid.length === 0
+    ? ''
+    : ` avoiding ${activeWordsToAvoid.length === 1 ? activeWordsToAvoid[0] : `${activeWordsToAvoid.length} words`}`
   const selectedLengthRangeSummary = lengthFilterUnit === 'reading_time'
     ? readingTimeRangeSummary
     : (lengthFilterUnit === 'words'
       ? wordRangeSummary
       : characterRangeSummary)
-  const activeFilterSummary = `${yearRangeSummary}${selectedLengthRangeSummary}`
+  const activeFilterSummary = `${yearRangeSummary}${selectedLengthRangeSummary}${avoidWordsFilterSummary}`
   const selectedLengthFilterHasBounds = lengthFilterUnit === 'reading_time'
     ? hasAvailableReadingTimeBounds
     : (lengthFilterUnit === 'words' ? hasAvailableWordBounds : hasAvailableCharacterBounds)
@@ -2542,6 +2569,7 @@ function App(): JSX.Element {
       wordEnd: resolvedWordEnd,
       readingTimeStart: resolvedReadingTimeStart,
       readingTimeEnd: resolvedReadingTimeEnd,
+      wordsToAvoidKey: activeWordsToAvoidKey,
     }
     setHasSubmittedSearch(true)
     setShouldScrollToResults(false)
@@ -2585,6 +2613,7 @@ function App(): JSX.Element {
           word_end: lengthFilterUnit === 'words' ? resolvedWordEnd : null,
           reading_time_start: lengthFilterUnit === 'reading_time' ? resolvedReadingTimeStart : null,
           reading_time_end: lengthFilterUnit === 'reading_time' ? resolvedReadingTimeEnd : null,
+          words_to_avoid: activeWordsToAvoid,
           topic_feedback_irrelevant_article_ids: feedbackArticleIds,
           skip_typo_correction: Boolean(options.skipTypoCorrection),
         }),
@@ -2696,6 +2725,7 @@ function App(): JSX.Element {
       wordEnd: resolvedWordEnd,
       readingTimeStart: resolvedReadingTimeStart,
       readingTimeEnd: resolvedReadingTimeEnd,
+      wordsToAvoidKey: activeWordsToAvoidKey,
     }
     setHasSubmittedSearch(true)
     setShouldScrollToResults(true)
@@ -2740,6 +2770,7 @@ function App(): JSX.Element {
           word_end: lengthFilterUnit === 'words' ? resolvedWordEnd : null,
           reading_time_start: lengthFilterUnit === 'reading_time' ? resolvedReadingTimeStart : null,
           reading_time_end: lengthFilterUnit === 'reading_time' ? resolvedReadingTimeEnd : null,
+          words_to_avoid: activeWordsToAvoid,
           topic_feedback_irrelevant_article_ids: feedbackArticleIds,
         }),
       })
@@ -2818,7 +2849,8 @@ function App(): JSX.Element {
       lastAppliedFilters.wordStart === resolvedWordStart &&
       lastAppliedFilters.wordEnd === resolvedWordEnd &&
       lastAppliedFilters.readingTimeStart === resolvedReadingTimeStart &&
-      lastAppliedFilters.readingTimeEnd === resolvedReadingTimeEnd
+      lastAppliedFilters.readingTimeEnd === resolvedReadingTimeEnd &&
+      lastAppliedFilters.wordsToAvoidKey === activeWordsToAvoidKey
     ) {
       return
     }
@@ -2834,6 +2866,7 @@ function App(): JSX.Element {
   }, [
     canSearchStance,
     canSubmitEssay,
+    activeWordsToAvoidKey,
     hasSubmittedSearch,
     inputMode,
     isFilterOpen,
@@ -4987,6 +5020,37 @@ function App(): JSX.Element {
                     ? 'Only return articles whose full body text falls within the selected word-count range.'
                     : 'Only return articles whose full body text falls within the selected character range.'}
                 </p>
+              </div>
+              <div
+                className={`weight-card full-row lexical-filter-card ${!isLexicalSearchMode ? 'disabled' : ''}`}
+                aria-disabled={!isLexicalSearchMode}
+              >
+                <span>Words to avoid</span>
+                <textarea
+                  className="avoid-words-textarea"
+                  value={wordsToAvoidText}
+                  onChange={(event) => setWordsToAvoidText(event.target.value)}
+                  disabled={!isLexicalSearchMode}
+                  rows={3}
+                  spellCheck={false}
+                  placeholder={isLexicalSearchMode ? 'immigration, election, tax' : 'Available in Lexical mode'}
+                  aria-label="Words to avoid"
+                  aria-describedby="avoid-words-help"
+                />
+                <p id="avoid-words-help" className="setting-help-text">
+                  {isLexicalSearchMode
+                    ? 'Exclude articles containing any listed word from lexical TF-IDF results.'
+                    : 'Switch Topic Relevance Search Mode to Lexical to use this filter.'}
+                </p>
+                {isLexicalSearchMode && parsedWordsToAvoid.length > 0 && (
+                  <div className="avoid-words-chip-list" aria-label="Parsed words to avoid">
+                    {parsedWordsToAvoid.map(word => (
+                      <span key={word} className="avoid-words-chip">
+                        {word}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -35,6 +35,30 @@ WORD_COUNT_PATTERN = re.compile(r"\b[\w'-]+\b")
 READING_TIME_WORDS_PER_MINUTE = 250
 
 
+def normalize_avoid_words(value):
+    if value is None:
+        return []
+
+    if isinstance(value, str):
+        raw_values = [value]
+    else:
+        try:
+            raw_values = list(value)
+        except TypeError:
+            raw_values = [value]
+
+    normalized = []
+    seen = set()
+    for raw_value in raw_values:
+        for token in WORD_COUNT_PATTERN.findall(str(raw_value or "")):
+            word = token.strip("_-'").casefold()
+            if not word or word in seen:
+                continue
+            normalized.append(word)
+            seen.add(word)
+    return normalized
+
+
 def _coerce_year(value):
     try:
         return int(value)
@@ -323,6 +347,51 @@ def _body_text_word_count(value):
     return len(WORD_COUNT_PATTERN.findall(str(value)))
 
 
+def _word_token_variants(value):
+    tokens = set()
+    if value is None:
+        return tokens
+
+    for token in WORD_COUNT_PATTERN.findall(str(value)):
+        normalized = token.strip("_-'").casefold()
+        if not normalized:
+            continue
+        tokens.add(normalized)
+        for part in re.split(r"[-']", normalized):
+            part = part.strip("_")
+            if part:
+                tokens.add(part)
+    return tokens
+
+
+def _article_searchable_token_set(article):
+    if isinstance(article, dict):
+        fields = [
+            article.get("title"),
+            article.get("summary"),
+            article.get("body_text"),
+            article.get("central_claim_summary"),
+        ]
+        keywords = article.get("keywords")
+    else:
+        fields = [
+            getattr(article, "title", None),
+            getattr(article, "summary", None),
+            getattr(article, "body_text", None),
+        ]
+        keywords = getattr(article, "keywords", None)
+
+    if isinstance(keywords, (list, tuple, set)):
+        fields.extend(keywords)
+    elif keywords:
+        fields.append(keywords)
+
+    tokens = set()
+    for field in fields:
+        tokens.update(_word_token_variants(field))
+    return tokens
+
+
 def _ranked_article_character_count(article, character_lookup):
     if isinstance(article, str):
         return _coerce_length_count(character_lookup.get(article))
@@ -491,6 +560,58 @@ def _filter_ranked_articles_by_word_range(ranked_articles, word_start=None, word
     return filtered
 
 
+def _filter_ranked_articles_by_avoid_words(ranked_articles, words_to_avoid=None):
+    resolved_avoid_words = normalize_avoid_words(words_to_avoid)
+    if not resolved_avoid_words:
+        return list(ranked_articles)
+
+    avoid_word_set = set(resolved_avoid_words)
+    doc_ids_to_lookup = [
+        article
+        for article, _score in ranked_articles
+        if isinstance(article, str) and article.strip()
+    ]
+    token_lookup = {}
+    if doc_ids_to_lookup:
+        rows = (
+            GuardianArticle.query.with_entities(
+                GuardianArticle.id,
+                GuardianArticle.title,
+                GuardianArticle.summary,
+                GuardianArticle.body_text,
+                GuardianArticle.keywords,
+            )
+            .filter(GuardianArticle.id.in_(doc_ids_to_lookup))
+            .all()
+        )
+        token_lookup = {
+            article_id: _article_searchable_token_set(
+                {
+                    "title": title,
+                    "summary": summary,
+                    "body_text": body_text,
+                    "keywords": keywords,
+                }
+            )
+            for article_id, title, summary, body_text, keywords in rows
+        }
+
+    filtered = []
+    for article, score in ranked_articles:
+        if isinstance(article, str):
+            article_tokens = token_lookup.get(article.strip())
+            if article_tokens is None:
+                filtered.append((article, score))
+                continue
+        else:
+            article_tokens = _article_searchable_token_set(article)
+
+        if article_tokens.isdisjoint(avoid_word_set):
+            filtered.append((article, score))
+
+    return filtered
+
+
 def _filter_ranked_articles_by_excluded_ids(ranked_articles, excluded_article_ids):
     excluded_ids = set(normalize_article_id_list(excluded_article_ids))
     if not excluded_ids:
@@ -524,6 +645,7 @@ def select_rerank_candidates(
     word_end=None,
     reading_time_start=None,
     reading_time_end=None,
+    words_to_avoid=None,
     rerank_selection_mode=DEFAULT_RERANK_SELECTION_MODE,
     rerank_threshold=None,
     topic_feedback_irrelevant_article_ids=None,
@@ -545,6 +667,7 @@ def select_rerank_candidates(
             word_end=word_end,
             reading_time_start=reading_time_start,
             reading_time_end=reading_time_end,
+            words_to_avoid=words_to_avoid,
             topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
         )
         log_runtime_event(
@@ -577,6 +700,7 @@ def select_rerank_candidates(
         word_end=word_end,
         reading_time_start=reading_time_start,
         reading_time_end=reading_time_end,
+        words_to_avoid=words_to_avoid,
         topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
     )
     selected_matches = _filter_matches_by_topic_threshold(
@@ -619,6 +743,7 @@ def keyword_search(
     word_end=None,
     reading_time_start=None,
     reading_time_end=None,
+    words_to_avoid=None,
     exclude_article_ids=None,
 ):
     if not query or not query.strip():
@@ -648,6 +773,7 @@ def keyword_search(
         resolved_reading_time_start,
         resolved_reading_time_end,
     )
+    resolved_avoid_words = normalize_avoid_words(words_to_avoid)
 
     results_query = GuardianArticle.query.filter(
         or_(
@@ -677,14 +803,25 @@ def keyword_search(
     if excluded_ids:
         results_query = results_query.filter(~GuardianArticle.id.in_(excluded_ids))
 
-    results = (
-        results_query
-        .order_by(GuardianArticle.date.desc())
-        .limit(resolved_top_n)
-        .all()
-    )
+    ordered_query = results_query.order_by(GuardianArticle.date.desc())
+    if not resolved_avoid_words:
+        results = ordered_query.limit(resolved_top_n).all()
+    else:
+        results = []
+        offset = 0
+        batch_size = max(resolved_top_n * 4, resolved_top_n + 20)
+        while len(results) < resolved_top_n:
+            batch = ordered_query.offset(offset).limit(batch_size).all()
+            if not batch:
+                break
+            filtered_batch = _filter_ranked_articles_by_avoid_words(
+                [(article, 0) for article in batch],
+                resolved_avoid_words,
+            )
+            results.extend(article for article, _score in filtered_batch)
+            offset += len(batch)
 
-    return [serialize_article(article) for article in results]
+    return [serialize_article(article) for article in results[:resolved_top_n]]
 
 
 def retrieval_search(
@@ -699,6 +836,7 @@ def retrieval_search(
     word_end=None,
     reading_time_start=None,
     reading_time_end=None,
+    words_to_avoid=None,
     topic_feedback_irrelevant_article_ids=None,
 ):
     if not query or not query.strip():
@@ -732,6 +870,11 @@ def retrieval_search(
         resolved_reading_time_start,
         resolved_reading_time_end,
     )
+    resolved_avoid_words = (
+        normalize_avoid_words(words_to_avoid)
+        if resolved_model == "tfidf"
+        else []
+    )
 
     log_runtime_event(
         "retrieval_search.start",
@@ -746,6 +889,7 @@ def retrieval_search(
         word_end=resolved_word_end,
         reading_time_start=resolved_reading_time_start,
         reading_time_end=resolved_reading_time_end,
+        avoid_word_count=len(resolved_avoid_words),
         rocchio_irrelevant_count=len(feedback_article_ids),
     )
     try:
@@ -763,6 +907,7 @@ def retrieval_search(
             word_end=resolved_word_end,
             reading_time_start=resolved_reading_time_start,
             reading_time_end=resolved_reading_time_end,
+            avoid_word_count=len(resolved_avoid_words),
         )
         return keyword_search(
             resolved_query,
@@ -775,6 +920,7 @@ def retrieval_search(
             word_end=resolved_word_end,
             reading_time_start=resolved_reading_time_start,
             reading_time_end=resolved_reading_time_end,
+            words_to_avoid=resolved_avoid_words,
             exclude_article_ids=feedback_article_ids,
         )
 
@@ -793,7 +939,7 @@ def retrieval_search(
     )
     search_padding = len(feedback_article_ids)
 
-    has_range_filter = any(
+    has_range_filter = bool(resolved_avoid_words) or any(
         value is not None
         for value in (
             resolved_year_start,
@@ -836,6 +982,7 @@ def retrieval_search(
                 word_end=resolved_word_end,
                 reading_time_start=resolved_reading_time_start,
                 reading_time_end=resolved_reading_time_end,
+                avoid_word_count=len(resolved_avoid_words),
                 search_limit=search_limit,
             )
             ranked_batch = processor_search(top_n=search_limit)
@@ -858,6 +1005,10 @@ def retrieval_search(
                 filtered_ranked,
                 word_start=reading_time_word_start,
                 word_end=reading_time_word_end,
+            )
+            filtered_ranked = _filter_ranked_articles_by_avoid_words(
+                filtered_ranked,
+                resolved_avoid_words,
             )
             filtered_ranked = _filter_ranked_articles_by_excluded_ids(
                 filtered_ranked,
@@ -887,6 +1038,7 @@ def retrieval_search(
             word_end=resolved_word_end,
             reading_time_start=resolved_reading_time_start,
             reading_time_end=resolved_reading_time_end,
+            avoid_word_count=len(resolved_avoid_words),
             filtered_count=len(ranked),
         )
 
@@ -913,6 +1065,7 @@ def tfidf_cos_search(
     word_end=None,
     reading_time_start=None,
     reading_time_end=None,
+    words_to_avoid=None,
 ):
     return retrieval_search(
         query,
@@ -926,6 +1079,7 @@ def tfidf_cos_search(
         word_end=word_end,
         reading_time_start=reading_time_start,
         reading_time_end=reading_time_end,
+        words_to_avoid=words_to_avoid,
     )
 
 
@@ -940,6 +1094,7 @@ def svd_search(
     word_end=None,
     reading_time_start=None,
     reading_time_end=None,
+    words_to_avoid=None,
 ):
     return retrieval_search(
         query,
@@ -953,6 +1108,7 @@ def svd_search(
         word_end=word_end,
         reading_time_start=reading_time_start,
         reading_time_end=reading_time_end,
+        words_to_avoid=words_to_avoid,
     )
 
 
@@ -1162,6 +1318,7 @@ def json_search(
     word_end=None,
     reading_time_start=None,
     reading_time_end=None,
+    words_to_avoid=None,
     topic_feedback_irrelevant_article_ids=None,
 ):
     """
@@ -1187,6 +1344,7 @@ def json_search(
             word_end=word_end,
             reading_time_start=reading_time_start,
             reading_time_end=reading_time_end,
+            words_to_avoid=words_to_avoid,
             topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
         )
     except Exception:
@@ -1205,6 +1363,7 @@ def json_search(
             word_end=word_end,
             reading_time_start=reading_time_start,
             reading_time_end=reading_time_end,
+            words_to_avoid=words_to_avoid if resolved_model == "tfidf" else None,
             exclude_article_ids=topic_feedback_irrelevant_article_ids,
         )
 
@@ -1225,6 +1384,7 @@ def stance_search(
     word_end=None,
     reading_time_start=None,
     reading_time_end=None,
+    words_to_avoid=None,
     normalize_topic_scores=False,
     rerank_selection_mode=DEFAULT_RERANK_SELECTION_MODE,
     rerank_threshold=None,
@@ -1257,6 +1417,7 @@ def stance_search(
         word_end=word_end,
         reading_time_start=reading_time_start,
         reading_time_end=reading_time_end,
+        words_to_avoid=words_to_avoid,
         rerank_selection_mode=resolved_selection_mode,
         rerank_threshold=rerank_threshold,
         topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,

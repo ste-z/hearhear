@@ -26,6 +26,7 @@ from backend.services.retrieval_service import (
     normalize_article_reading_time_range,
     normalize_article_word_range,
     normalize_article_year_range,
+    normalize_avoid_words,
     normalize_retrieval_model,
     normalize_rerank_selection_mode,
     retrieval_query_typo_suggestion,
@@ -245,6 +246,15 @@ def _extract_request_context():
         ),
         "Maximum article reading time",
     )
+    words_to_avoid = normalize_avoid_words(
+        _first_payload_value(
+            payload,
+            "words_to_avoid",
+            "avoid_words",
+            "excluded_words",
+            "avoid_terms",
+        )
+    )
     selected_thesis_sentence = str(payload.get("selected_thesis_sentence") or "").strip()
     selected_thesis_id = str(payload.get("selected_thesis_id") or "").strip() or None
     topic_feedback_irrelevant_article_ids = _coerce_string_list(
@@ -298,6 +308,7 @@ def _extract_request_context():
         "word_end": word_end,
         "reading_time_start": reading_time_start,
         "reading_time_end": reading_time_end,
+        "words_to_avoid": words_to_avoid,
         "selected_thesis_sentence": selected_thesis_sentence,
         "selected_thesis_id": selected_thesis_id,
         "topic_feedback_irrelevant_article_ids": topic_feedback_irrelevant_article_ids,
@@ -384,6 +395,11 @@ def register_routes(app):
                 stance_method=context["stance_method"],
                 rerank_selection_mode=context["rerank_selection_mode"],
                 rerank_threshold=context["rerank_threshold"],
+                avoid_word_count=(
+                    len(context["words_to_avoid"])
+                    if context["retrieval_model"] == "tfidf"
+                    else 0
+                ),
                 rocchio_irrelevant_count=len(context["topic_feedback_irrelevant_article_ids"]),
             )
             empty_results_message = None
@@ -404,6 +420,7 @@ def register_routes(app):
                     word_end=context["word_end"],
                     reading_time_start=context["reading_time_start"],
                     reading_time_end=context["reading_time_end"],
+                    words_to_avoid=context["words_to_avoid"],
                     normalize_topic_scores=context["normalize_topic_scores"],
                     stance_method=context["stance_method"],
                     use_chunking=context["use_chunking"],
@@ -430,6 +447,7 @@ def register_routes(app):
                     word_end=context["word_end"],
                     reading_time_start=context["reading_time_start"],
                     reading_time_end=context["reading_time_end"],
+                    words_to_avoid=context["words_to_avoid"],
                     normalize_topic_scores=context["normalize_topic_scores"],
                     stance_method=context["stance_method"],
                     use_chunking=context["use_chunking"],
@@ -451,6 +469,7 @@ def register_routes(app):
                         word_end=context["word_end"],
                         reading_time_start=context["reading_time_start"],
                         reading_time_end=context["reading_time_end"],
+                        words_to_avoid=context["words_to_avoid"],
                         topic_feedback_irrelevant_article_ids=context["topic_feedback_irrelevant_article_ids"],
                     ),
                     "empty_results_message": None,
