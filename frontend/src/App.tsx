@@ -38,6 +38,7 @@ type TopicFeedbackSearchOptions = {
   topicFeedbackIrrelevantArticleIds?: string[]
   markTopicFeedbackApplied?: boolean
   topicOverride?: string
+  scrollToResults?: boolean
 }
 
 type ConfigResponse = {
@@ -1376,8 +1377,10 @@ function App(): JSX.Element {
   const resultsSectionRef = useRef<HTMLDivElement | null>(null)
   const touchStartYRef = useRef<number | null>(null)
   const lastAppliedYearRangeRef = useRef<{ yearStart: number | null, yearEnd: number | null } | null>(null)
+  const skipNextStanceResetRef = useRef<boolean>(false)
   const [isSearchStageVisible, setIsSearchStageVisible] = useState<boolean>(hasSeenLandingRef.current)
   const [hasSubmittedSearch, setHasSubmittedSearch] = useState<boolean>(false)
+  const [shouldScrollToResults, setShouldScrollToResults] = useState<boolean>(true)
   const useChunking = chunkingMode !== 'none'
 
   useEffect(() => {
@@ -1611,6 +1614,10 @@ function App(): JSX.Element {
     if (inputMode !== 'stance') {
       return
     }
+    if (skipNextStanceResetRef.current) {
+      skipNextStanceResetRef.current = false
+      return
+    }
     setArticles([])
     setTopicFeedbackIrrelevantArticleIds([])
     setAppliedTopicFeedbackArticleIds([])
@@ -1802,6 +1809,7 @@ function App(): JSX.Element {
   useEffect(() => {
     if (typeof window === 'undefined') return
     if (!hasSubmittedSearch) return
+    if (!shouldScrollToResults) return
 
     let secondFrameId = 0
 
@@ -1817,7 +1825,7 @@ function App(): JSX.Element {
         window.cancelAnimationFrame(secondFrameId)
       }
     }
-  }, [hasSubmittedSearch])
+  }, [hasSubmittedSearch, shouldScrollToResults])
 
   const trimmedEssayText = searchTerm.trim()
   const trimmedTopic = topic.trim()
@@ -2130,6 +2138,7 @@ function App(): JSX.Element {
       yearEnd: resolvedYearEnd,
     }
     setHasSubmittedSearch(true)
+    setShouldScrollToResults(false)
     if (typeof document !== 'undefined') {
       document.body.style.overflow = ''
     }
@@ -2175,6 +2184,7 @@ function App(): JSX.Element {
       setQuerySvdDimensions(normalized.querySvdDimensions)
       setEmptyResultsMessage(normalized.emptyResultsMessage)
       setTypoCorrection(normalized.typoCorrection)
+      setShouldScrollToResults(Boolean(options.scrollToResults) || !normalized.typoCorrection)
       if (options.markTopicFeedbackApplied) {
         setAppliedTopicFeedbackArticleIds(feedbackArticleIds)
       }
@@ -2185,6 +2195,7 @@ function App(): JSX.Element {
       setQuerySvdDimensions([])
       setEmptyResultsMessage(null)
       setTypoCorrection(null)
+      setShouldScrollToResults(true)
       setError(fetchError instanceof Error ? fetchError.message : 'Search request failed.')
     } finally {
       setLoading(false)
@@ -2267,6 +2278,7 @@ function App(): JSX.Element {
       yearEnd: resolvedYearEnd,
     }
     setHasSubmittedSearch(true)
+    setShouldScrollToResults(true)
     if (typeof document !== 'undefined') {
       document.body.style.overflow = ''
     }
@@ -2354,8 +2366,9 @@ function App(): JSX.Element {
   const handleApplyTypoCorrection = (correctedQuery: string): void => {
     const nextTopic = correctedQuery.trim()
     if (!nextTopic || loading) return
+    skipNextStanceResetRef.current = true
     setTopic(nextTopic)
-    void handleSubmitStance({ topicOverride: nextTopic })
+    void handleSubmitStance({ topicOverride: nextTopic, scrollToResults: true })
   }
 
   useEffect(() => {
@@ -3162,6 +3175,28 @@ function App(): JSX.Element {
                       aria-label="Topic"
                     />
                   </span>
+                  {!loading && typoCorrection && (
+                    <span className="inline-typo-popover" role="status" aria-live="polite">
+                      <span className="typo-suggestion-copy">
+                        <span className="typo-suggestion-query">
+                          {renderTypoHighlightedQuery(typoCorrection)}
+                        </span>
+                        <span className="typo-suggestion-label">did you mean:</span>
+                      </span>
+                      <span className="typo-suggestion-options">
+                        {typoCorrection.options.map((option) => (
+                          <button
+                            key={option.query}
+                            type="button"
+                            className="typo-suggestion-option"
+                            onClick={() => handleApplyTypoCorrection(option.query)}
+                          >
+                            {option.label || option.query}
+                          </button>
+                        ))}
+                      </span>
+                    </span>
+                  )}
                 </span>
               ) : (
                 <span className="intro-typewriter-slot" aria-hidden="true">
@@ -3484,29 +3519,6 @@ function App(): JSX.Element {
               <h2>Guardian opinion matches</h2>
               <p className="results-paper-copy">{resultsDescription}</p>
             </div>
-
-            {!loading && !error && inputMode === 'stance' && typoCorrection && (
-              <div className="typo-suggestion-bar" role="status" aria-live="polite">
-                <div className="typo-suggestion-copy">
-                  <span className="typo-suggestion-query">
-                    {renderTypoHighlightedQuery(typoCorrection)}
-                  </span>
-                  <span className="typo-suggestion-label">did you mean:</span>
-                </div>
-                <div className="typo-suggestion-options">
-                  {typoCorrection.options.map((option) => (
-                    <button
-                      key={option.query}
-                      type="button"
-                      className="typo-suggestion-option"
-                      onClick={() => handleApplyTypoCorrection(option.query)}
-                    >
-                      {option.label || option.query}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {!loading && !error && pendingTopicFeedbackCount > 0 && (
               <div className="topic-feedback-refresh-bar" role="status" aria-live="polite">
