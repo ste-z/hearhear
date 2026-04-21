@@ -31,7 +31,7 @@ type RerankSelectionMode = 'manual' | 'automatic'
 type StanceMethod = 'nli' | 'llm'
 type ChunkingMode = 'none' | 'paragraph' | 'semantic'
 type FrontendChunkingMode = Exclude<ChunkingMode, 'paragraph'>
-type LengthFilterUnit = 'characters' | 'words'
+type LengthFilterUnit = 'characters' | 'words' | 'reading_time'
 type SettingsFocusTarget = 'topic-relevance' | 'agreement-scorer'
 type SvdDimensionLabelMap = Record<number, string>
 type SvdChartSeriesRole = 'article' | 'query'
@@ -63,6 +63,8 @@ type ConfigResponse = {
   max_article_characters?: number | null
   min_article_words?: number | null
   max_article_words?: number | null
+  min_article_reading_minutes?: number | null
+  max_article_reading_minutes?: number | null
 }
 
 type ApiErrorPayload = {
@@ -205,8 +207,13 @@ const clampWordCount = (value: number, minValue: number, maxValue: number): numb
   clampWholeNumber(value, minValue, maxValue)
 )
 
+const clampReadingMinutes = (value: number, minValue: number, maxValue: number): number => (
+  clampWholeNumber(value, minValue, maxValue)
+)
+
 const formatCharacterCount = (value: number): string => value.toLocaleString()
 const formatWordCount = (value: number): string => value.toLocaleString()
+const formatReadingMinutes = (value: number): string => value.toLocaleString()
 
 const hasSeenLanding = (): boolean => {
   if (typeof window === 'undefined') return false
@@ -1367,6 +1374,8 @@ function App(): JSX.Element {
   const [maxArticleCharacters, setMaxArticleCharacters] = useState<number | null>(null)
   const [minArticleWords, setMinArticleWords] = useState<number | null>(null)
   const [maxArticleWords, setMaxArticleWords] = useState<number | null>(null)
+  const [minArticleReadingMinutes, setMinArticleReadingMinutes] = useState<number | null>(null)
+  const [maxArticleReadingMinutes, setMaxArticleReadingMinutes] = useState<number | null>(null)
   const [yearStart, setYearStart] = useState<number | null>(null)
   const [yearEnd, setYearEnd] = useState<number | null>(null)
   const [yearStartInput, setYearStartInput] = useState<string>('')
@@ -1380,6 +1389,10 @@ function App(): JSX.Element {
   const [wordEnd, setWordEnd] = useState<number | null>(null)
   const [wordStartInput, setWordStartInput] = useState<string>('')
   const [wordEndInput, setWordEndInput] = useState<string>('')
+  const [readingTimeStart, setReadingTimeStart] = useState<number | null>(null)
+  const [readingTimeEnd, setReadingTimeEnd] = useState<number | null>(null)
+  const [readingTimeStartInput, setReadingTimeStartInput] = useState<string>('')
+  const [readingTimeEndInput, setReadingTimeEndInput] = useState<string>('')
   const [supportedRetrievalModels, setSupportedRetrievalModels] = useState<RetrievalModel[]>(
     defaultSupportedRetrievalModels,
   )
@@ -1435,6 +1448,8 @@ function App(): JSX.Element {
     characterEnd: number | null
     wordStart: number | null
     wordEnd: number | null
+    readingTimeStart: number | null
+    readingTimeEnd: number | null
   } | null>(null)
   const skipNextStanceResetRef = useRef<boolean>(false)
   const [isSearchStageVisible, setIsSearchStageVisible] = useState<boolean>(hasSeenLandingRef.current)
@@ -1480,6 +1495,8 @@ function App(): JSX.Element {
         const nextMaxArticleCharacters = normalizeConfigInteger(data.max_article_characters)
         const nextMinArticleWords = normalizeConfigInteger(data.min_article_words)
         const nextMaxArticleWords = normalizeConfigInteger(data.max_article_words)
+        const nextMinArticleReadingMinutes = normalizeConfigInteger(data.min_article_reading_minutes)
+        const nextMaxArticleReadingMinutes = normalizeConfigInteger(data.max_article_reading_minutes)
         setSupportedRetrievalModels(supportedModels)
         setSupportedStanceMethods(supportedAgreementMethods)
         setSupportedChunkingModes(supportedChunkingOptions)
@@ -1558,6 +1575,24 @@ function App(): JSX.Element {
             currentWords === null
               ? nextMaxArticleWords
               : clampWordCount(currentWords, nextMinArticleWords, nextMaxArticleWords)
+          ))
+        }
+        if (
+          nextMinArticleReadingMinutes !== null &&
+          nextMaxArticleReadingMinutes !== null &&
+          nextMinArticleReadingMinutes <= nextMaxArticleReadingMinutes
+        ) {
+          setMinArticleReadingMinutes(nextMinArticleReadingMinutes)
+          setMaxArticleReadingMinutes(nextMaxArticleReadingMinutes)
+          setReadingTimeStart(currentMinutes => (
+            currentMinutes === null
+              ? nextMinArticleReadingMinutes
+              : clampReadingMinutes(currentMinutes, nextMinArticleReadingMinutes, nextMaxArticleReadingMinutes)
+          ))
+          setReadingTimeEnd(currentMinutes => (
+            currentMinutes === null
+              ? nextMaxArticleReadingMinutes
+              : clampReadingMinutes(currentMinutes, nextMinArticleReadingMinutes, nextMaxArticleReadingMinutes)
           ))
         }
         setNormalizeTopicScores(Boolean(data.default_normalize_topic_scores))
@@ -2029,34 +2064,58 @@ function App(): JSX.Element {
     : (resolvedWordStart === resolvedWordEnd
       ? ` with ${formatWordCount(resolvedWordStart)} words`
       : ` with ${formatWordCount(resolvedWordStart)} to ${formatWordCount(resolvedWordEnd)} words`)
-  const selectedLengthRangeSummary = lengthFilterUnit === 'words'
-    ? wordRangeSummary
-    : characterRangeSummary
+  const hasAvailableReadingTimeBounds = (
+    minArticleReadingMinutes !== null &&
+    maxArticleReadingMinutes !== null &&
+    minArticleReadingMinutes <= maxArticleReadingMinutes
+  )
+  const resolvedReadingTimeStart = readingTimeStart ?? minArticleReadingMinutes
+  const resolvedReadingTimeEnd = readingTimeEnd ?? maxArticleReadingMinutes
+  const readingTimeRangeSpan = hasAvailableReadingTimeBounds && minArticleReadingMinutes !== null && maxArticleReadingMinutes !== null
+    ? maxArticleReadingMinutes - minArticleReadingMinutes
+    : 0
+  const hasReadingTimeRangeSelection = resolvedReadingTimeStart !== null && resolvedReadingTimeEnd !== null
+  const isReadingTimeFilterActive = (
+    hasReadingTimeRangeSelection &&
+    minArticleReadingMinutes !== null &&
+    maxArticleReadingMinutes !== null &&
+    (resolvedReadingTimeStart !== minArticleReadingMinutes || resolvedReadingTimeEnd !== maxArticleReadingMinutes)
+  )
+  const readingTimeRangeSummary = !isReadingTimeFilterActive || !hasReadingTimeRangeSelection
+    ? ''
+    : (resolvedReadingTimeStart === resolvedReadingTimeEnd
+      ? ` with a ${formatReadingMinutes(resolvedReadingTimeStart)} min read`
+      : ` with a ${formatReadingMinutes(resolvedReadingTimeStart)} to ${formatReadingMinutes(resolvedReadingTimeEnd)} min read`)
+  const selectedLengthRangeSummary = lengthFilterUnit === 'reading_time'
+    ? readingTimeRangeSummary
+    : (lengthFilterUnit === 'words'
+      ? wordRangeSummary
+      : characterRangeSummary)
   const activeFilterSummary = `${yearRangeSummary}${selectedLengthRangeSummary}`
-  const selectedLengthFilterHasBounds = lengthFilterUnit === 'words'
-    ? hasAvailableWordBounds
-    : hasAvailableCharacterBounds
-  const selectedLengthRangeSpan = lengthFilterUnit === 'words'
-    ? wordRangeSpan
-    : characterRangeSpan
-  const selectedLengthRangeStartInput = lengthFilterUnit === 'words'
-    ? wordStartInput
-    : characterStartInput
-  const selectedLengthRangeEndInput = lengthFilterUnit === 'words'
-    ? wordEndInput
-    : characterEndInput
-  const selectedLengthRangeMin = lengthFilterUnit === 'words'
-    ? minArticleWords
-    : minArticleCharacters
-  const selectedLengthRangeMax = lengthFilterUnit === 'words'
-    ? maxArticleWords
-    : maxArticleCharacters
-  const selectedLengthRangeStart = lengthFilterUnit === 'words'
-    ? resolvedWordStart
-    : resolvedCharacterStart
-  const selectedLengthRangeEnd = lengthFilterUnit === 'words'
-    ? resolvedWordEnd
-    : resolvedCharacterEnd
+  const selectedLengthFilterHasBounds = lengthFilterUnit === 'reading_time'
+    ? hasAvailableReadingTimeBounds
+    : (lengthFilterUnit === 'words' ? hasAvailableWordBounds : hasAvailableCharacterBounds)
+  const selectedLengthRangeSpan = lengthFilterUnit === 'reading_time'
+    ? readingTimeRangeSpan
+    : (lengthFilterUnit === 'words' ? wordRangeSpan : characterRangeSpan)
+  const selectedLengthRangeStartInput = lengthFilterUnit === 'reading_time'
+    ? readingTimeStartInput
+    : (lengthFilterUnit === 'words' ? wordStartInput : characterStartInput)
+  const selectedLengthRangeEndInput = lengthFilterUnit === 'reading_time'
+    ? readingTimeEndInput
+    : (lengthFilterUnit === 'words' ? wordEndInput : characterEndInput)
+  const selectedLengthRangeMin = lengthFilterUnit === 'reading_time'
+    ? minArticleReadingMinutes
+    : (lengthFilterUnit === 'words' ? minArticleWords : minArticleCharacters)
+  const selectedLengthRangeMax = lengthFilterUnit === 'reading_time'
+    ? maxArticleReadingMinutes
+    : (lengthFilterUnit === 'words' ? maxArticleWords : maxArticleCharacters)
+  const selectedLengthRangeStart = lengthFilterUnit === 'reading_time'
+    ? resolvedReadingTimeStart
+    : (lengthFilterUnit === 'words' ? resolvedWordStart : resolvedCharacterStart)
+  const selectedLengthRangeEnd = lengthFilterUnit === 'reading_time'
+    ? resolvedReadingTimeEnd
+    : (lengthFilterUnit === 'words' ? resolvedWordEnd : resolvedCharacterEnd)
 
   const formatDate = (isoDate: string | null): string => {
     if (!isoDate) return 'Unknown date'
@@ -2267,6 +2326,42 @@ function App(): JSX.Element {
     setWordEndInput(value.replace(/[^\d]/g, ''))
   }
 
+  const handleReadingTimeStartChange = (value: string): void => {
+    const nextStart = Number(value)
+    if (Number.isNaN(nextStart)) return
+    const boundedStart = (
+      minArticleReadingMinutes !== null && maxArticleReadingMinutes !== null
+        ? clampReadingMinutes(nextStart, minArticleReadingMinutes, maxArticleReadingMinutes)
+        : Math.round(nextStart)
+    )
+    setReadingTimeStart(boundedStart)
+    setReadingTimeEnd(currentEnd => (
+      currentEnd === null || currentEnd < boundedStart ? boundedStart : currentEnd
+    ))
+  }
+
+  const handleReadingTimeEndChange = (value: string): void => {
+    const nextEnd = Number(value)
+    if (Number.isNaN(nextEnd)) return
+    const boundedEnd = (
+      minArticleReadingMinutes !== null && maxArticleReadingMinutes !== null
+        ? clampReadingMinutes(nextEnd, minArticleReadingMinutes, maxArticleReadingMinutes)
+        : Math.round(nextEnd)
+    )
+    setReadingTimeEnd(boundedEnd)
+    setReadingTimeStart(currentStart => (
+      currentStart === null || currentStart > boundedEnd ? boundedEnd : currentStart
+    ))
+  }
+
+  const handleReadingTimeStartInputChange = (value: string): void => {
+    setReadingTimeStartInput(value.replace(/[^\d]/g, ''))
+  }
+
+  const handleReadingTimeEndInputChange = (value: string): void => {
+    setReadingTimeEndInput(value.replace(/[^\d]/g, ''))
+  }
+
   const commitYearStartInput = (): void => {
     const normalizedValue = yearStartInput.trim()
     if (normalizedValue === '') {
@@ -2331,6 +2426,28 @@ function App(): JSX.Element {
       return
     }
     handleWordEndChange(normalizedValue)
+  }
+
+  const commitReadingTimeStartInput = (): void => {
+    const normalizedValue = readingTimeStartInput.trim()
+    if (normalizedValue === '') {
+      if (minArticleReadingMinutes !== null) {
+        handleReadingTimeStartChange(String(minArticleReadingMinutes))
+      }
+      return
+    }
+    handleReadingTimeStartChange(normalizedValue)
+  }
+
+  const commitReadingTimeEndInput = (): void => {
+    const normalizedValue = readingTimeEndInput.trim()
+    if (normalizedValue === '') {
+      if (maxArticleReadingMinutes !== null) {
+        handleReadingTimeEndChange(String(maxArticleReadingMinutes))
+      }
+      return
+    }
+    handleReadingTimeEndChange(normalizedValue)
   }
 
   const scrollToNode = (node: HTMLDivElement | null): void => {
@@ -2423,6 +2540,8 @@ function App(): JSX.Element {
       characterEnd: resolvedCharacterEnd,
       wordStart: resolvedWordStart,
       wordEnd: resolvedWordEnd,
+      readingTimeStart: resolvedReadingTimeStart,
+      readingTimeEnd: resolvedReadingTimeEnd,
     }
     setHasSubmittedSearch(true)
     setShouldScrollToResults(false)
@@ -2464,6 +2583,8 @@ function App(): JSX.Element {
           character_end: lengthFilterUnit === 'characters' ? resolvedCharacterEnd : null,
           word_start: lengthFilterUnit === 'words' ? resolvedWordStart : null,
           word_end: lengthFilterUnit === 'words' ? resolvedWordEnd : null,
+          reading_time_start: lengthFilterUnit === 'reading_time' ? resolvedReadingTimeStart : null,
+          reading_time_end: lengthFilterUnit === 'reading_time' ? resolvedReadingTimeEnd : null,
           topic_feedback_irrelevant_article_ids: feedbackArticleIds,
           skip_typo_correction: Boolean(options.skipTypoCorrection),
         }),
@@ -2573,6 +2694,8 @@ function App(): JSX.Element {
       characterEnd: resolvedCharacterEnd,
       wordStart: resolvedWordStart,
       wordEnd: resolvedWordEnd,
+      readingTimeStart: resolvedReadingTimeStart,
+      readingTimeEnd: resolvedReadingTimeEnd,
     }
     setHasSubmittedSearch(true)
     setShouldScrollToResults(true)
@@ -2615,6 +2738,8 @@ function App(): JSX.Element {
           character_end: lengthFilterUnit === 'characters' ? resolvedCharacterEnd : null,
           word_start: lengthFilterUnit === 'words' ? resolvedWordStart : null,
           word_end: lengthFilterUnit === 'words' ? resolvedWordEnd : null,
+          reading_time_start: lengthFilterUnit === 'reading_time' ? resolvedReadingTimeStart : null,
+          reading_time_end: lengthFilterUnit === 'reading_time' ? resolvedReadingTimeEnd : null,
           topic_feedback_irrelevant_article_ids: feedbackArticleIds,
         }),
       })
@@ -2691,7 +2816,9 @@ function App(): JSX.Element {
       lastAppliedFilters.characterStart === resolvedCharacterStart &&
       lastAppliedFilters.characterEnd === resolvedCharacterEnd &&
       lastAppliedFilters.wordStart === resolvedWordStart &&
-      lastAppliedFilters.wordEnd === resolvedWordEnd
+      lastAppliedFilters.wordEnd === resolvedWordEnd &&
+      lastAppliedFilters.readingTimeStart === resolvedReadingTimeStart &&
+      lastAppliedFilters.readingTimeEnd === resolvedReadingTimeEnd
     ) {
       return
     }
@@ -2714,6 +2841,8 @@ function App(): JSX.Element {
     loading,
     resolvedCharacterEnd,
     resolvedCharacterStart,
+    resolvedReadingTimeEnd,
+    resolvedReadingTimeStart,
     resolvedWordEnd,
     resolvedWordStart,
     resolvedYearEnd,
@@ -2743,6 +2872,14 @@ function App(): JSX.Element {
   useEffect(() => {
     setWordEndInput(resolvedWordEnd === null ? '' : String(resolvedWordEnd))
   }, [resolvedWordEnd])
+
+  useEffect(() => {
+    setReadingTimeStartInput(resolvedReadingTimeStart === null ? '' : String(resolvedReadingTimeStart))
+  }, [resolvedReadingTimeStart])
+
+  useEffect(() => {
+    setReadingTimeEndInput(resolvedReadingTimeEnd === null ? '' : String(resolvedReadingTimeEnd))
+  }, [resolvedReadingTimeEnd])
 
   const scrollEssayOptions = (direction: 'left' | 'right'): void => {
     const container = essayOptionsRef.current
@@ -2971,6 +3108,8 @@ function App(): JSX.Element {
           character_end: lengthFilterUnit === 'characters' ? resolvedCharacterEnd : null,
           word_start: lengthFilterUnit === 'words' ? resolvedWordStart : null,
           word_end: lengthFilterUnit === 'words' ? resolvedWordEnd : null,
+          reading_time_start: lengthFilterUnit === 'reading_time' ? resolvedReadingTimeStart : null,
+          reading_time_end: lengthFilterUnit === 'reading_time' ? resolvedReadingTimeEnd : null,
         }),
       })
       const data = await readApiJson<SimilarArticlesResponse>(response)
@@ -4697,54 +4836,87 @@ function App(): JSX.Element {
                   >
                     Words
                   </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={lengthFilterUnit === 'reading_time'}
+                    className={`length-filter-tab ${lengthFilterUnit === 'reading_time' ? 'active' : ''}`}
+                    onClick={() => setLengthFilterUnit('reading_time')}
+                  >
+                    Reading time
+                  </button>
                 </div>
                 <div className="year-range-summary-grid" aria-live="polite">
                   <label className="year-range-value-card year-range-input-card">
-                    <span>{lengthFilterUnit === 'words' ? 'Min words' : 'Min chars'}</span>
+                    <span>
+                      {lengthFilterUnit === 'reading_time'
+                        ? 'Min min'
+                        : (lengthFilterUnit === 'words' ? 'Min words' : 'Min chars')}
+                    </span>
                     <input
                       type="text"
                       inputMode="numeric"
                       pattern="[0-9]*"
                       value={selectedLengthRangeStartInput}
                       onChange={(event) => {
+                        if (lengthFilterUnit === 'reading_time') {
+                          handleReadingTimeStartInputChange(event.target.value)
+                          return
+                        }
                         if (lengthFilterUnit === 'words') {
                           handleWordStartInputChange(event.target.value)
                           return
                         }
                         handleCharacterStartInputChange(event.target.value)
                       }}
-                      onBlur={lengthFilterUnit === 'words' ? commitWordStartInput : commitCharacterStartInput}
+                      onBlur={
+                        lengthFilterUnit === 'reading_time'
+                          ? commitReadingTimeStartInput
+                          : (lengthFilterUnit === 'words' ? commitWordStartInput : commitCharacterStartInput)
+                      }
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
                           event.currentTarget.blur()
                         }
                       }}
                       disabled={!selectedLengthFilterHasBounds}
-                      aria-label={`Minimum article length in ${lengthFilterUnit}`}
+                      aria-label={`Minimum article length in ${lengthFilterUnit === 'reading_time' ? 'reading minutes' : lengthFilterUnit}`}
                     />
                   </label>
                   <label className="year-range-value-card year-range-input-card">
-                    <span>{lengthFilterUnit === 'words' ? 'Max words' : 'Max chars'}</span>
+                    <span>
+                      {lengthFilterUnit === 'reading_time'
+                        ? 'Max min'
+                        : (lengthFilterUnit === 'words' ? 'Max words' : 'Max chars')}
+                    </span>
                     <input
                       type="text"
                       inputMode="numeric"
                       pattern="[0-9]*"
                       value={selectedLengthRangeEndInput}
                       onChange={(event) => {
+                        if (lengthFilterUnit === 'reading_time') {
+                          handleReadingTimeEndInputChange(event.target.value)
+                          return
+                        }
                         if (lengthFilterUnit === 'words') {
                           handleWordEndInputChange(event.target.value)
                           return
                         }
                         handleCharacterEndInputChange(event.target.value)
                       }}
-                      onBlur={lengthFilterUnit === 'words' ? commitWordEndInput : commitCharacterEndInput}
+                      onBlur={
+                        lengthFilterUnit === 'reading_time'
+                          ? commitReadingTimeEndInput
+                          : (lengthFilterUnit === 'words' ? commitWordEndInput : commitCharacterEndInput)
+                      }
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
                           event.currentTarget.blur()
                         }
                       }}
                       disabled={!selectedLengthFilterHasBounds}
-                      aria-label={`Maximum article length in ${lengthFilterUnit}`}
+                      aria-label={`Maximum article length in ${lengthFilterUnit === 'reading_time' ? 'reading minutes' : lengthFilterUnit}`}
                     />
                   </label>
                 </div>
@@ -4758,11 +4930,17 @@ function App(): JSX.Element {
                     startAriaLabel="Minimum article length"
                     endAriaLabel="Maximum article length"
                     formatValue={(value) => (
-                      lengthFilterUnit === 'words'
+                      lengthFilterUnit === 'reading_time'
+                        ? `${formatReadingMinutes(value)} min`
+                        : lengthFilterUnit === 'words'
                         ? `${formatWordCount(value)} words`
                         : `${formatCharacterCount(value)} characters`
                     )}
                     onStartValueChange={(nextValue) => {
+                      if (lengthFilterUnit === 'reading_time') {
+                        handleReadingTimeStartChange(String(nextValue))
+                        return
+                      }
                       if (lengthFilterUnit === 'words') {
                         handleWordStartChange(String(nextValue))
                         return
@@ -4770,6 +4948,10 @@ function App(): JSX.Element {
                       handleCharacterStartChange(String(nextValue))
                     }}
                     onEndValueChange={(nextValue) => {
+                      if (lengthFilterUnit === 'reading_time') {
+                        handleReadingTimeEndChange(String(nextValue))
+                        return
+                      }
                       if (lengthFilterUnit === 'words') {
                         handleWordEndChange(String(nextValue))
                         return
@@ -4782,20 +4964,26 @@ function App(): JSX.Element {
                   <span>
                     {selectedLengthRangeMin === null
                       ? '—'
-                      : (lengthFilterUnit === 'words'
+                      : (lengthFilterUnit === 'reading_time'
+                        ? formatReadingMinutes(selectedLengthRangeMin)
+                        : lengthFilterUnit === 'words'
                         ? formatWordCount(selectedLengthRangeMin)
                         : formatCharacterCount(selectedLengthRangeMin))}
                   </span>
                   <span>
                     {selectedLengthRangeMax === null
                       ? '—'
-                      : (lengthFilterUnit === 'words'
+                      : (lengthFilterUnit === 'reading_time'
+                        ? formatReadingMinutes(selectedLengthRangeMax)
+                        : lengthFilterUnit === 'words'
                         ? formatWordCount(selectedLengthRangeMax)
                         : formatCharacterCount(selectedLengthRangeMax))}
                   </span>
                 </div>
                 <p className="setting-help-text">
-                  {lengthFilterUnit === 'words'
+                  {lengthFilterUnit === 'reading_time'
+                    ? 'Only return articles whose estimated reading time falls within the selected range, using 250 words per minute.'
+                    : lengthFilterUnit === 'words'
                     ? 'Only return articles whose full body text falls within the selected word-count range.'
                     : 'Only return articles whose full body text falls within the selected character range.'}
                 </p>
