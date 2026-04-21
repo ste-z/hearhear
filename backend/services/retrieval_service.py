@@ -1,3 +1,5 @@
+import re
+
 import numpy as np
 from sqlalchemy import func, or_
 
@@ -29,9 +31,18 @@ DEFAULT_AUTO_RERANK_THRESHOLDS = {
     "svd": 0.6,
 }
 MAX_AUTO_RERANK_CANDIDATES = 100
+WORD_COUNT_PATTERN = re.compile(r"\b[\w'-]+\b")
+READING_TIME_WORDS_PER_MINUTE = 250
 
 
 def _coerce_year(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_length_count(value):
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -43,6 +54,37 @@ def _coerce_float(value, default=None):
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _article_character_count_expression():
+    return GuardianArticle.body_character_count
+
+
+def _article_word_count_expression():
+    return GuardianArticle.body_word_count
+
+
+def _reading_minutes_from_word_count(word_count):
+    resolved_count = _coerce_length_count(word_count)
+    if resolved_count is None or resolved_count <= 0:
+        return 0
+    return max(1, ((resolved_count - 1) // READING_TIME_WORDS_PER_MINUTE) + 1)
+
+
+def _reading_time_min_word_count(reading_minutes):
+    resolved_minutes = _coerce_length_count(reading_minutes)
+    if resolved_minutes is None:
+        return None
+    if resolved_minutes <= 1:
+        return 1
+    return ((resolved_minutes - 1) * READING_TIME_WORDS_PER_MINUTE) + 1
+
+
+def _reading_time_max_word_count(reading_minutes):
+    resolved_minutes = _coerce_length_count(reading_minutes)
+    if resolved_minutes is None:
+        return None
+    return max(0, resolved_minutes * READING_TIME_WORDS_PER_MINUTE)
 
 
 def available_article_year_range():
@@ -57,6 +99,46 @@ def available_article_year_range():
     if min_year is None or max_year is None:
         return None, None
     return int(min_year), int(max_year)
+
+
+def available_article_character_range():
+    character_count = _article_character_count_expression()
+    min_characters, max_characters = (
+        GuardianArticle.query.with_entities(
+            func.min(character_count),
+            func.max(character_count),
+        )
+        .first()
+        or (None, None)
+    )
+    if min_characters is None or max_characters is None:
+        return None, None
+    return int(min_characters), int(max_characters)
+
+
+def available_article_word_range():
+    word_count = _article_word_count_expression()
+    min_words, max_words = (
+        GuardianArticle.query.with_entities(
+            func.min(word_count),
+            func.max(word_count),
+        )
+        .first()
+        or (None, None)
+    )
+    if min_words is None or max_words is None:
+        return None, None
+    return int(min_words), int(max_words)
+
+
+def available_article_reading_time_range():
+    min_words, max_words = available_article_word_range()
+    if min_words is None or max_words is None:
+        return None, None
+    return (
+        _reading_minutes_from_word_count(min_words),
+        _reading_minutes_from_word_count(max_words),
+    )
 
 
 def normalize_rerank_selection_mode(value, default=DEFAULT_RERANK_SELECTION_MODE):
@@ -117,6 +199,99 @@ def normalize_article_year_range(year_start=None, year_end=None):
     return resolved_start, resolved_end
 
 
+def normalize_article_character_range(character_start=None, character_end=None):
+    available_start, available_end = available_article_character_range()
+    if available_start is None or available_end is None:
+        return None, None
+    if character_start is None and character_end is None:
+        return None, None
+
+    resolved_start = _coerce_length_count(character_start)
+    resolved_end = _coerce_length_count(character_end)
+    if resolved_start is None:
+        resolved_start = available_start
+    if resolved_end is None:
+        resolved_end = available_end
+
+    resolved_start = max(available_start, min(available_end, resolved_start))
+    resolved_end = max(available_start, min(available_end, resolved_end))
+
+    if resolved_start > resolved_end:
+        raise ValueError(
+            "Minimum article length must be less than or equal to maximum article length."
+        )
+
+    if resolved_start == available_start and resolved_end == available_end:
+        return None, None
+
+    return resolved_start, resolved_end
+
+
+def normalize_article_word_range(word_start=None, word_end=None):
+    available_start, available_end = available_article_word_range()
+    if available_start is None or available_end is None:
+        return None, None
+    if word_start is None and word_end is None:
+        return None, None
+
+    resolved_start = _coerce_length_count(word_start)
+    resolved_end = _coerce_length_count(word_end)
+    if resolved_start is None:
+        resolved_start = available_start
+    if resolved_end is None:
+        resolved_end = available_end
+
+    resolved_start = max(available_start, min(available_end, resolved_start))
+    resolved_end = max(available_start, min(available_end, resolved_end))
+
+    if resolved_start > resolved_end:
+        raise ValueError(
+            "Minimum article word count must be less than or equal to maximum article word count."
+        )
+
+    if resolved_start == available_start and resolved_end == available_end:
+        return None, None
+
+    return resolved_start, resolved_end
+
+
+def normalize_article_reading_time_range(reading_time_start=None, reading_time_end=None):
+    available_start, available_end = available_article_reading_time_range()
+    if available_start is None or available_end is None:
+        return None, None
+    if reading_time_start is None and reading_time_end is None:
+        return None, None
+
+    resolved_start = _coerce_length_count(reading_time_start)
+    resolved_end = _coerce_length_count(reading_time_end)
+    if resolved_start is None:
+        resolved_start = available_start
+    if resolved_end is None:
+        resolved_end = available_end
+
+    resolved_start = max(available_start, min(available_end, resolved_start))
+    resolved_end = max(available_start, min(available_end, resolved_end))
+
+    if resolved_start > resolved_end:
+        raise ValueError(
+            "Minimum article reading time must be less than or equal to maximum article reading time."
+        )
+
+    if resolved_start == available_start and resolved_end == available_end:
+        return None, None
+
+    return resolved_start, resolved_end
+
+
+def _word_range_for_reading_time_range(reading_time_start=None, reading_time_end=None):
+    if reading_time_start is None and reading_time_end is None:
+        return None, None
+    return (
+        _reading_time_min_word_count(reading_time_start),
+        _reading_time_max_word_count(reading_time_end),
+    )
+
+
 def _ranked_article_year(article, year_lookup):
     if isinstance(article, str):
         return _coerce_year(year_lookup.get(article))
@@ -134,6 +309,71 @@ def _ranked_article_id(article):
         value = getattr(article, "id", None)
     article_id = str(value or "").strip()
     return article_id or None
+
+
+def _body_text_character_count(value):
+    if value is None:
+        return None
+    return len(str(value))
+
+
+def _body_text_word_count(value):
+    if value is None:
+        return None
+    return len(WORD_COUNT_PATTERN.findall(str(value)))
+
+
+def _ranked_article_character_count(article, character_lookup):
+    if isinstance(article, str):
+        return _coerce_length_count(character_lookup.get(article))
+    if isinstance(article, dict):
+        for count_key in (
+            "character_count",
+            "body_character_count",
+            "article_character_count",
+        ):
+            explicit_count = _coerce_length_count(article.get(count_key))
+            if explicit_count is not None:
+                return explicit_count
+        if "body_text" in article:
+            return _body_text_character_count(article.get("body_text"))
+        article_id = _ranked_article_id(article)
+        return _coerce_length_count(character_lookup.get(article_id))
+
+    for count_attr in ("character_count", "body_character_count", "article_character_count"):
+        explicit_count = _coerce_length_count(getattr(article, count_attr, None))
+        if explicit_count is not None:
+            return explicit_count
+    if hasattr(article, "body_text"):
+        return _body_text_character_count(getattr(article, "body_text", None))
+    article_id = _ranked_article_id(article)
+    return _coerce_length_count(character_lookup.get(article_id))
+
+
+def _ranked_article_word_count(article, word_lookup):
+    if isinstance(article, str):
+        return _coerce_length_count(word_lookup.get(article))
+    if isinstance(article, dict):
+        for count_key in (
+            "word_count",
+            "body_word_count",
+            "article_word_count",
+        ):
+            explicit_count = _coerce_length_count(article.get(count_key))
+            if explicit_count is not None:
+                return explicit_count
+        if "body_text" in article:
+            return _body_text_word_count(article.get("body_text"))
+        article_id = _ranked_article_id(article)
+        return _coerce_length_count(word_lookup.get(article_id))
+
+    explicit_count = _coerce_length_count(getattr(article, "body_word_count", None))
+    if explicit_count is not None:
+        return explicit_count
+    if hasattr(article, "body_text"):
+        return _body_text_word_count(getattr(article, "body_text", None))
+    article_id = _ranked_article_id(article)
+    return _coerce_length_count(word_lookup.get(article_id))
 
 
 def _filter_ranked_articles_by_year_range(ranked_articles, year_start=None, year_end=None):
@@ -171,6 +411,86 @@ def _filter_ranked_articles_by_year_range(ranked_articles, year_start=None, year
     return filtered
 
 
+def _filter_ranked_articles_by_character_range(
+    ranked_articles,
+    character_start=None,
+    character_end=None,
+):
+    if character_start is None and character_end is None:
+        return list(ranked_articles)
+
+    doc_ids_to_lookup = [
+        article
+        for article, _score in ranked_articles
+        if isinstance(article, str) and article.strip()
+    ]
+    character_lookup = {}
+    if doc_ids_to_lookup:
+        rows = (
+            GuardianArticle.query.with_entities(
+                GuardianArticle.id,
+                _article_character_count_expression(),
+            )
+            .filter(GuardianArticle.id.in_(doc_ids_to_lookup))
+            .all()
+        )
+        character_lookup = {
+            article_id: _coerce_length_count(character_count)
+            for article_id, character_count in rows
+        }
+
+    filtered = []
+    for article, score in ranked_articles:
+        character_count = _ranked_article_character_count(article, character_lookup)
+        if character_count is None:
+            continue
+        if character_start is not None and character_count < character_start:
+            continue
+        if character_end is not None and character_count > character_end:
+            continue
+        filtered.append((article, score))
+
+    return filtered
+
+
+def _filter_ranked_articles_by_word_range(ranked_articles, word_start=None, word_end=None):
+    if word_start is None and word_end is None:
+        return list(ranked_articles)
+
+    doc_ids_to_lookup = [
+        article
+        for article, _score in ranked_articles
+        if isinstance(article, str) and article.strip()
+    ]
+    word_lookup = {}
+    if doc_ids_to_lookup:
+        rows = (
+            GuardianArticle.query.with_entities(
+                GuardianArticle.id,
+                _article_word_count_expression(),
+            )
+            .filter(GuardianArticle.id.in_(doc_ids_to_lookup))
+            .all()
+        )
+        word_lookup = {
+            article_id: _coerce_length_count(word_count)
+            for article_id, word_count in rows
+        }
+
+    filtered = []
+    for article, score in ranked_articles:
+        word_count = _ranked_article_word_count(article, word_lookup)
+        if word_count is None:
+            continue
+        if word_start is not None and word_count < word_start:
+            continue
+        if word_end is not None and word_count > word_end:
+            continue
+        filtered.append((article, score))
+
+    return filtered
+
+
 def _filter_ranked_articles_by_excluded_ids(ranked_articles, excluded_article_ids):
     excluded_ids = set(normalize_article_id_list(excluded_article_ids))
     if not excluded_ids:
@@ -198,6 +518,12 @@ def select_rerank_candidates(
     retrieval_model=DEFAULT_RETRIEVAL_MODEL,
     year_start=None,
     year_end=None,
+    character_start=None,
+    character_end=None,
+    word_start=None,
+    word_end=None,
+    reading_time_start=None,
+    reading_time_end=None,
     rerank_selection_mode=DEFAULT_RERANK_SELECTION_MODE,
     rerank_threshold=None,
     topic_feedback_irrelevant_article_ids=None,
@@ -213,6 +539,12 @@ def select_rerank_candidates(
             retrieval_model=resolved_model,
             year_start=year_start,
             year_end=year_end,
+            character_start=character_start,
+            character_end=character_end,
+            word_start=word_start,
+            word_end=word_end,
+            reading_time_start=reading_time_start,
+            reading_time_end=reading_time_end,
             topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
         )
         log_runtime_event(
@@ -239,6 +571,12 @@ def select_rerank_candidates(
         retrieval_model=resolved_model,
         year_start=year_start,
         year_end=year_end,
+        character_start=character_start,
+        character_end=character_end,
+        word_start=word_start,
+        word_end=word_end,
+        reading_time_start=reading_time_start,
+        reading_time_end=reading_time_end,
         topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
     )
     selected_matches = _filter_matches_by_topic_threshold(
@@ -275,6 +613,12 @@ def keyword_search(
     top_n=100,
     year_start=None,
     year_end=None,
+    character_start=None,
+    character_end=None,
+    word_start=None,
+    word_end=None,
+    reading_time_start=None,
+    reading_time_end=None,
     exclude_article_ids=None,
 ):
     if not query or not query.strip():
@@ -288,6 +632,22 @@ def keyword_search(
         year_start,
         year_end,
     )
+    resolved_character_start, resolved_character_end = normalize_article_character_range(
+        character_start,
+        character_end,
+    )
+    resolved_word_start, resolved_word_end = normalize_article_word_range(
+        word_start,
+        word_end,
+    )
+    resolved_reading_time_start, resolved_reading_time_end = normalize_article_reading_time_range(
+        reading_time_start,
+        reading_time_end,
+    )
+    reading_time_word_start, reading_time_word_end = _word_range_for_reading_time_range(
+        resolved_reading_time_start,
+        resolved_reading_time_end,
+    )
 
     results_query = GuardianArticle.query.filter(
         or_(
@@ -299,6 +659,20 @@ def keyword_search(
         results_query = results_query.filter(GuardianArticle.year >= resolved_year_start)
     if resolved_year_end is not None:
         results_query = results_query.filter(GuardianArticle.year <= resolved_year_end)
+    character_count = _article_character_count_expression()
+    if resolved_character_start is not None:
+        results_query = results_query.filter(character_count >= resolved_character_start)
+    if resolved_character_end is not None:
+        results_query = results_query.filter(character_count <= resolved_character_end)
+    word_count = _article_word_count_expression()
+    if resolved_word_start is not None:
+        results_query = results_query.filter(word_count >= resolved_word_start)
+    if resolved_word_end is not None:
+        results_query = results_query.filter(word_count <= resolved_word_end)
+    if reading_time_word_start is not None:
+        results_query = results_query.filter(word_count >= reading_time_word_start)
+    if reading_time_word_end is not None:
+        results_query = results_query.filter(word_count <= reading_time_word_end)
     excluded_ids = normalize_article_id_list(exclude_article_ids)
     if excluded_ids:
         results_query = results_query.filter(~GuardianArticle.id.in_(excluded_ids))
@@ -319,6 +693,12 @@ def retrieval_search(
     retrieval_model=DEFAULT_RETRIEVAL_MODEL,
     year_start=None,
     year_end=None,
+    character_start=None,
+    character_end=None,
+    word_start=None,
+    word_end=None,
+    reading_time_start=None,
+    reading_time_end=None,
     topic_feedback_irrelevant_article_ids=None,
 ):
     if not query or not query.strip():
@@ -336,6 +716,22 @@ def retrieval_search(
         year_start,
         year_end,
     )
+    resolved_character_start, resolved_character_end = normalize_article_character_range(
+        character_start,
+        character_end,
+    )
+    resolved_word_start, resolved_word_end = normalize_article_word_range(
+        word_start,
+        word_end,
+    )
+    resolved_reading_time_start, resolved_reading_time_end = normalize_article_reading_time_range(
+        reading_time_start,
+        reading_time_end,
+    )
+    reading_time_word_start, reading_time_word_end = _word_range_for_reading_time_range(
+        resolved_reading_time_start,
+        resolved_reading_time_end,
+    )
 
     log_runtime_event(
         "retrieval_search.start",
@@ -344,6 +740,12 @@ def retrieval_search(
         top_n=resolved_top_n,
         year_start=resolved_year_start,
         year_end=resolved_year_end,
+        character_start=resolved_character_start,
+        character_end=resolved_character_end,
+        word_start=resolved_word_start,
+        word_end=resolved_word_end,
+        reading_time_start=resolved_reading_time_start,
+        reading_time_end=resolved_reading_time_end,
         rocchio_irrelevant_count=len(feedback_article_ids),
     )
     try:
@@ -355,12 +757,24 @@ def retrieval_search(
             reason=str(exc),
             year_start=resolved_year_start,
             year_end=resolved_year_end,
+            character_start=resolved_character_start,
+            character_end=resolved_character_end,
+            word_start=resolved_word_start,
+            word_end=resolved_word_end,
+            reading_time_start=resolved_reading_time_start,
+            reading_time_end=resolved_reading_time_end,
         )
         return keyword_search(
             resolved_query,
             top_n=resolved_top_n,
             year_start=resolved_year_start,
             year_end=resolved_year_end,
+            character_start=resolved_character_start,
+            character_end=resolved_character_end,
+            word_start=resolved_word_start,
+            word_end=resolved_word_end,
+            reading_time_start=resolved_reading_time_start,
+            reading_time_end=resolved_reading_time_end,
             exclude_article_ids=feedback_article_ids,
         )
 
@@ -379,7 +793,21 @@ def retrieval_search(
     )
     search_padding = len(feedback_article_ids)
 
-    if resolved_year_start is None and resolved_year_end is None:
+    has_range_filter = any(
+        value is not None
+        for value in (
+            resolved_year_start,
+            resolved_year_end,
+            resolved_character_start,
+            resolved_character_end,
+            resolved_word_start,
+            resolved_word_end,
+            resolved_reading_time_start,
+            resolved_reading_time_end,
+        )
+    )
+
+    if not has_range_filter:
         ranked = processor_search(top_n=resolved_top_n + search_padding)
         ranked = _filter_ranked_articles_by_excluded_ids(
             ranked,
@@ -398,10 +826,16 @@ def retrieval_search(
 
         while True:
             log_runtime_event(
-                "retrieval_search.year_filter_scan",
+                "retrieval_search.range_filter_scan",
                 retrieval_model=resolved_model,
                 year_start=resolved_year_start,
                 year_end=resolved_year_end,
+                character_start=resolved_character_start,
+                character_end=resolved_character_end,
+                word_start=resolved_word_start,
+                word_end=resolved_word_end,
+                reading_time_start=resolved_reading_time_start,
+                reading_time_end=resolved_reading_time_end,
                 search_limit=search_limit,
             )
             ranked_batch = processor_search(top_n=search_limit)
@@ -409,6 +843,21 @@ def retrieval_search(
                 ranked_batch,
                 year_start=resolved_year_start,
                 year_end=resolved_year_end,
+            )
+            filtered_ranked = _filter_ranked_articles_by_character_range(
+                filtered_ranked,
+                character_start=resolved_character_start,
+                character_end=resolved_character_end,
+            )
+            filtered_ranked = _filter_ranked_articles_by_word_range(
+                filtered_ranked,
+                word_start=resolved_word_start,
+                word_end=resolved_word_end,
+            )
+            filtered_ranked = _filter_ranked_articles_by_word_range(
+                filtered_ranked,
+                word_start=reading_time_word_start,
+                word_end=reading_time_word_end,
             )
             filtered_ranked = _filter_ranked_articles_by_excluded_ids(
                 filtered_ranked,
@@ -428,10 +877,16 @@ def retrieval_search(
 
         ranked = filtered_ranked[:resolved_top_n]
         log_runtime_event(
-            "retrieval_search.year_filter_done",
+            "retrieval_search.range_filter_done",
             retrieval_model=resolved_model,
             year_start=resolved_year_start,
             year_end=resolved_year_end,
+            character_start=resolved_character_start,
+            character_end=resolved_character_end,
+            word_start=resolved_word_start,
+            word_end=resolved_word_end,
+            reading_time_start=resolved_reading_time_start,
+            reading_time_end=resolved_reading_time_end,
             filtered_count=len(ranked),
         )
 
@@ -447,27 +902,73 @@ def retrieval_search(
     )
 
 
-def tfidf_cos_search(query, top_n=100, year_start=None, year_end=None):
+def tfidf_cos_search(
+    query,
+    top_n=100,
+    year_start=None,
+    year_end=None,
+    character_start=None,
+    character_end=None,
+    word_start=None,
+    word_end=None,
+    reading_time_start=None,
+    reading_time_end=None,
+):
     return retrieval_search(
         query,
         top_n=top_n,
         retrieval_model="tfidf",
         year_start=year_start,
         year_end=year_end,
+        character_start=character_start,
+        character_end=character_end,
+        word_start=word_start,
+        word_end=word_end,
+        reading_time_start=reading_time_start,
+        reading_time_end=reading_time_end,
     )
 
 
-def svd_search(query, top_n=100, year_start=None, year_end=None):
+def svd_search(
+    query,
+    top_n=100,
+    year_start=None,
+    year_end=None,
+    character_start=None,
+    character_end=None,
+    word_start=None,
+    word_end=None,
+    reading_time_start=None,
+    reading_time_end=None,
+):
     return retrieval_search(
         query,
         top_n=top_n,
         retrieval_model="svd",
         year_start=year_start,
         year_end=year_end,
+        character_start=character_start,
+        character_end=character_end,
+        word_start=word_start,
+        word_end=word_end,
+        reading_time_start=reading_time_start,
+        reading_time_end=reading_time_end,
     )
 
 
-def similar_svd_articles(article_id, limit=5, offset=0, year_start=None, year_end=None):
+def similar_svd_articles(
+    article_id,
+    limit=5,
+    offset=0,
+    year_start=None,
+    year_end=None,
+    character_start=None,
+    character_end=None,
+    word_start=None,
+    word_end=None,
+    reading_time_start=None,
+    reading_time_end=None,
+):
     source_id = str(article_id or "").strip()
     if not source_id:
         raise ValueError("An article_id is required.")
@@ -477,6 +978,22 @@ def similar_svd_articles(article_id, limit=5, offset=0, year_start=None, year_en
     resolved_year_start, resolved_year_end = normalize_article_year_range(
         year_start,
         year_end,
+    )
+    resolved_character_start, resolved_character_end = normalize_article_character_range(
+        character_start,
+        character_end,
+    )
+    resolved_word_start, resolved_word_end = normalize_article_word_range(
+        word_start,
+        word_end,
+    )
+    resolved_reading_time_start, resolved_reading_time_end = normalize_article_reading_time_range(
+        reading_time_start,
+        reading_time_end,
+    )
+    reading_time_word_start, reading_time_word_end = _word_range_for_reading_time_range(
+        resolved_reading_time_start,
+        resolved_reading_time_end,
     )
 
     try:
@@ -511,6 +1028,24 @@ def similar_svd_articles(article_id, limit=5, offset=0, year_start=None, year_en
             ranked,
             year_start=resolved_year_start,
             year_end=resolved_year_end,
+        )
+    if resolved_character_start is not None or resolved_character_end is not None:
+        ranked = _filter_ranked_articles_by_character_range(
+            ranked,
+            character_start=resolved_character_start,
+            character_end=resolved_character_end,
+        )
+    if resolved_word_start is not None or resolved_word_end is not None:
+        ranked = _filter_ranked_articles_by_word_range(
+            ranked,
+            word_start=resolved_word_start,
+            word_end=resolved_word_end,
+        )
+    if reading_time_word_start is not None or reading_time_word_end is not None:
+        ranked = _filter_ranked_articles_by_word_range(
+            ranked,
+            word_start=reading_time_word_start,
+            word_end=reading_time_word_end,
         )
 
     page_ranked = ranked[resolved_offset:resolved_offset + resolved_limit + 1]
@@ -621,6 +1156,12 @@ def json_search(
     top_n=100,
     year_start=None,
     year_end=None,
+    character_start=None,
+    character_end=None,
+    word_start=None,
+    word_end=None,
+    reading_time_start=None,
+    reading_time_end=None,
     topic_feedback_irrelevant_article_ids=None,
 ):
     """
@@ -640,6 +1181,12 @@ def json_search(
             retrieval_model=resolved_model,
             year_start=year_start,
             year_end=year_end,
+            character_start=character_start,
+            character_end=character_end,
+            word_start=word_start,
+            word_end=word_end,
+            reading_time_start=reading_time_start,
+            reading_time_end=reading_time_end,
             topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
         )
     except Exception:
@@ -652,6 +1199,12 @@ def json_search(
             top_n=top_n,
             year_start=year_start,
             year_end=year_end,
+            character_start=character_start,
+            character_end=character_end,
+            word_start=word_start,
+            word_end=word_end,
+            reading_time_start=reading_time_start,
+            reading_time_end=reading_time_end,
             exclude_article_ids=topic_feedback_irrelevant_article_ids,
         )
 
@@ -666,6 +1219,12 @@ def stance_search(
     retrieval_model=DEFAULT_RETRIEVAL_MODEL,
     year_start=None,
     year_end=None,
+    character_start=None,
+    character_end=None,
+    word_start=None,
+    word_end=None,
+    reading_time_start=None,
+    reading_time_end=None,
     normalize_topic_scores=False,
     rerank_selection_mode=DEFAULT_RERANK_SELECTION_MODE,
     rerank_threshold=None,
@@ -692,6 +1251,12 @@ def stance_search(
         retrieval_model=resolved_model,
         year_start=year_start,
         year_end=year_end,
+        character_start=character_start,
+        character_end=character_end,
+        word_start=word_start,
+        word_end=word_end,
+        reading_time_start=reading_time_start,
+        reading_time_end=reading_time_end,
         rerank_selection_mode=resolved_selection_mode,
         rerank_threshold=rerank_threshold,
         topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,

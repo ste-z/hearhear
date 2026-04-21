@@ -6,6 +6,9 @@ import pandas as pd
 from pathlib import Path
 
 
+WORD_COUNT_PATTERN = re.compile(r"\b[\w'-]+\b")
+
+
 def parse_json_list_cell(x):
     if isinstance(x, list):
         return x
@@ -205,6 +208,12 @@ def clean_guardian_articles(df, min_body_text_chars=1000):
 
     cleaned["body_text"] = cleaned["body_text"].astype("string")
     cleaned["body_text_length"] = cleaned["body_text"].str.len()
+    cleaned["body_character_count"] = cleaned["body_text_length"].astype(int)
+    cleaned["body_word_count"] = (
+        cleaned["body_text"]
+        .apply(lambda value: len(WORD_COUNT_PATTERN.findall(str(value or ""))))
+        .astype(int)
+    )
     cleaned = cleaned.loc[cleaned["body_text_length"] >= int(min_body_text_chars)].copy()
 
     # Handle multiple authors robustly for app usage.

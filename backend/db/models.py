@@ -15,6 +15,8 @@ class GuardianArticle(db.Model):
     n_contributors = db.Column(db.Integer, nullable=False, default=0)
     keywords = db.Column(db.JSON, nullable=False, default=list)
     body_text = db.Column(db.Text, nullable=False, default="")
+    body_character_count = db.Column(db.Integer, nullable=False, default=0, index=True)
+    body_word_count = db.Column(db.Integer, nullable=False, default=0, index=True)
     # Kept for backward compatibility; not used by app routes/UI.
     section_id = db.Column(db.String(128), nullable=False, default="")
     section_name = db.Column(db.String(128), nullable=False, default="")

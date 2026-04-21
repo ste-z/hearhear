@@ -1,8 +1,9 @@
 import os
+import re
 from pathlib import Path
 
 import pandas as pd
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_, text
 
 from backend.claims.claim_store import (
     PACKAGED_CLAIM_RESULTS_DIR,
@@ -27,6 +28,7 @@ DEFAULT_BUNDLED_INDEX_NAME = "guardian_tfidf"
 DEFAULT_ANALYSIS_EXPORT_DIR = Path(__file__).resolve().parent.parent / "data" / "processed" / "analysis_exports"
 DEFAULT_SVD_DIMENSION_SUMMARY_EXPORT_TOP_TERMS = 10
 STORE_GUARDIAN_BODY_TEXT_ENV = "STORE_GUARDIAN_BODY_TEXT_IN_DB"
+WORD_COUNT_PATTERN = re.compile(r"\b[\w'-]+\b")
 
 
 def _is_missing(value):
@@ -48,6 +50,23 @@ def _clean_list(value):
     if isinstance(value, list):
         return value
     return []
+
+
+def _article_character_count(value):
+    return len(_clean_str(value))
+
+
+def _article_word_count(value):
+    return len(WORD_COUNT_PATTERN.findall(_clean_str(value)))
+
+
+def _clean_count(value, fallback=0):
+    try:
+        if _is_missing(value):
+            return int(fallback)
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return int(fallback)
 
 
 def _clean_datetime(value):
@@ -75,6 +94,108 @@ def _env_flag(name, default=False):
 
 def _should_store_body_text():
     return _env_flag(STORE_GUARDIAN_BODY_TEXT_ENV, default=False)
+
+
+def _ensure_guardian_article_length_columns():
+    rows = db.session.execute(text("PRAGMA table_info(guardian_articles)")).fetchall()
+    existing_columns = {str(row[1]) for row in rows}
+
+    column_specs = {
+        "body_character_count": "INTEGER NOT NULL DEFAULT 0",
+        "body_word_count": "INTEGER NOT NULL DEFAULT 0",
+    }
+    for column_name, column_spec in column_specs.items():
+        if column_name not in existing_columns:
+            db.session.execute(
+                text(f"ALTER TABLE guardian_articles ADD COLUMN {column_name} {column_spec}")
+            )
+
+    db.session.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_guardian_articles_body_character_count "
+        "ON guardian_articles (body_character_count)"
+    ))
+    db.session.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_guardian_articles_body_word_count "
+        "ON guardian_articles (body_word_count)"
+    ))
+    db.session.commit()
+
+
+def _article_length_lookup_from_dataframe(articles):
+    if articles is None or articles.empty or "id" not in articles.columns:
+        return {}
+
+    lookup = {}
+    for row in articles.itertuples(index=False):
+        row_data = row._asdict()
+        article_id = _clean_str(row_data.get("id"))
+        if not article_id:
+            continue
+
+        body_text = _clean_str(row_data.get("body_text"))
+        character_count = _clean_count(
+            row_data.get("body_character_count"),
+            fallback=_clean_count(
+                row_data.get("body_text_length"),
+                fallback=_article_character_count(body_text),
+            ),
+        )
+        word_count = _clean_count(
+            row_data.get("body_word_count"),
+            fallback=_article_word_count(body_text),
+        )
+        lookup[article_id] = (character_count, word_count)
+
+    return lookup
+
+
+def _populate_missing_article_length_metadata(bundled_articles=None, batch_size=DEFAULT_BATCH_SIZE):
+    bundled_lookup = _article_length_lookup_from_dataframe(bundled_articles)
+    missing_query = GuardianArticle.query.filter(
+        or_(
+            GuardianArticle.body_character_count <= 0,
+            GuardianArticle.body_word_count <= 0,
+        )
+    )
+
+    updated = 0
+    pending = 0
+    for article in missing_query.yield_per(batch_size):
+        body_text = _clean_str(article.body_text)
+        fallback_counts = bundled_lookup.get(article.id)
+        fallback_character_count = fallback_counts[0] if fallback_counts else 0
+        fallback_word_count = fallback_counts[1] if fallback_counts else 0
+        character_count = _clean_count(
+            article.body_character_count,
+            fallback=_article_character_count(body_text) or fallback_character_count,
+        )
+        word_count = _clean_count(
+            article.body_word_count,
+            fallback=_article_word_count(body_text) or fallback_word_count,
+        )
+
+        if character_count <= 0 and fallback_character_count > 0:
+            character_count = fallback_character_count
+        if word_count <= 0 and fallback_word_count > 0:
+            word_count = fallback_word_count
+
+        if (
+            article.body_character_count != character_count
+            or article.body_word_count != word_count
+        ):
+            article.body_character_count = character_count
+            article.body_word_count = word_count
+            updated += 1
+            pending += 1
+
+        if pending >= batch_size:
+            db.session.commit()
+            pending = 0
+
+    if pending:
+        db.session.commit()
+
+    return updated
 
 
 def _export_startup_svd_dimension_summaries(processor):
@@ -133,6 +254,13 @@ def _existing_data_needs_refresh(expected_years=None, allow_missing_body_text=Fa
         func.trim(func.coalesce(GuardianArticle.summary, "")) == "",
     ).limit(1).first() is not None
 
+    missing_length_metadata_exists = db.session.query(GuardianArticle.id).filter(
+        or_(
+            GuardianArticle.body_character_count <= 0,
+            GuardianArticle.body_word_count <= 0,
+        )
+    ).limit(1).first() is not None
+
     existing_years = {
         int(year)
         for (year,) in db.session.query(GuardianArticle.year).distinct().all()
@@ -144,6 +272,7 @@ def _existing_data_needs_refresh(expected_years=None, allow_missing_body_text=Fa
         missing_author_exists,
         missing_body_exists,
         missing_summary_exists,
+        missing_length_metadata_exists,
         short_body_exists,
         year_range_mismatch,
     ])
@@ -188,6 +317,18 @@ def _persist_guardian_articles(df, batch_size=DEFAULT_BATCH_SIZE, store_body_tex
         row_data = dict(zip(columns, row))
         authors = _clean_list(row_data.get("authors") or row_data.get("contributors"))
         author_display = ", ".join(authors)
+        body_text = _clean_str(row_data.get("body_text"))
+        body_character_count = _clean_count(
+            row_data.get("body_character_count"),
+            fallback=_clean_count(
+                row_data.get("body_text_length"),
+                fallback=_article_character_count(body_text),
+            ),
+        )
+        body_word_count = _clean_count(
+            row_data.get("body_word_count"),
+            fallback=_article_word_count(body_text),
+        )
         article = GuardianArticle(
             id=_clean_str(row_data.get("id")),
             title=_clean_str(row_data.get("title")),
@@ -198,7 +339,9 @@ def _persist_guardian_articles(df, batch_size=DEFAULT_BATCH_SIZE, store_body_tex
             contributors=authors,
             n_contributors=int(row_data.get("n_contributors") or len(authors)),
             keywords=_clean_list(row_data.get("keywords")),
-            body_text=_clean_str(row_data.get("body_text")) if store_body_text else "",
+            body_text=body_text if store_body_text else "",
+            body_character_count=body_character_count,
+            body_word_count=body_word_count,
             section_id="",
             section_name="",
             year=int(row_data.get("year") or 0),
@@ -424,11 +567,21 @@ def initialize_offline_data_pipeline(
     """
     with app.app_context():
         db.create_all()
+        _ensure_guardian_article_length_columns()
 
         store_body_text = _should_store_body_text()
         bundled_articles = _load_bundled_guardian_articles(years=years)
         existing_count = GuardianArticle.query.count()
         should_seed = existing_count == 0
+        if existing_count > 0:
+            updated_length_rows = _populate_missing_article_length_metadata(
+                bundled_articles=bundled_articles,
+            )
+            if updated_length_rows:
+                print(
+                    "Backfilled article length metadata for "
+                    f"{updated_length_rows} Guardian rows."
+                )
 
         if existing_count > 0 and _existing_data_needs_refresh(
             expected_years=years,
