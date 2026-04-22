@@ -3514,7 +3514,6 @@ function App(): JSX.Element {
     ...activeVisibleArticles.map(article => article.svd_dimensions),
     ...activeVisibleArticles.map(article => article.svd_article_query_dimensions),
   ])
-  const queryConceptBarMaxMagnitude = getMaxSvdMagnitude([querySvdDimensions])
   const llmIrrelevantArticles = articles.filter(isLlmIrrelevantArticle)
   const canExplainRanking = useLlm === true && retrievalModel === 'svd'
   const shouldShowEssayShortcut = useLlm && inputMode === 'essay' && !isSearchStageVisible
@@ -4429,61 +4428,6 @@ function App(): JSX.Element {
           ref={resultsSectionRef}
           className="results-paper-section visible"
         >
-          {!loading && !error && querySvdCorpusChartDimensions.length > 0 && (
-            <div className="results-query-concepts-shell">
-              <div className="results-query-concepts-wrap">
-                <details className="content-disclosure results-query-concepts-disclosure">
-                  <summary className="content-disclosure-summary">
-                    <span className="content-disclosure-copy">
-                      <span className="content-disclosure-title">Query concepts</span>
-                      <span className="content-disclosure-hint">
-                        Expand to inspect how your query loads onto the top 10 corpus concepts.
-                      </span>
-                    </span>
-                    <span className="content-disclosure-status" aria-hidden="true" />
-                  </summary>
-
-                  <div className="results-query-concepts">
-                    <div className="results-query-concepts-copy">
-                      <p className="results-query-concepts-eyebrow">Query concepts</p>
-                      <h3>Query on top 10 corpus concepts</h3>
-                      <p>
-                        This radar chart uses the shared top 10 corpus-level concepts and shows how strongly your query loads on those same axes.
-                      </p>
-                    </div>
-                    <SvdRadarChart
-                      dimensions={querySvdCorpusChartDimensions}
-                      primaryLabel="Query"
-                      primaryRole="query"
-                      maxMagnitude={sharedCorpusRadarMaxMagnitude}
-                      ariaLabel="Radar chart of your query across the top 10 corpus-level SVD concepts"
-                      caption="These axes are fixed to the first 10 corpus-level concepts, so this gives a corpus-frame view of the query before you compare it with individual articles."
-                      emptyCopy="No corpus-level SVD concept view is available for this query yet."
-                    />
-                    {querySvdDimensions.length > 0 && (
-                      <div className="results-query-concepts-bar-block">
-                        <div className="results-query-concepts-copy">
-                          <p className="results-query-concepts-eyebrow">Query top concepts</p>
-                          <h3>Top 10 concepts from your query</h3>
-                          <p>
-                            This bar chart keeps the query&apos;s own top 10 concepts and shows whether each concept loads positively or negatively.
-                          </p>
-                        </div>
-                        <SvdConceptBarChart
-                          dimensions={querySvdDimensions}
-                          primaryLabel="Query"
-                          primaryRole="query"
-                          maxMagnitude={queryConceptBarMaxMagnitude}
-                          emptyCopy="No query-specific SVD concepts are available yet."
-                        />
-                      </div>
-                    )}
-                  </div>
-                </details>
-              </div>
-            </div>
-          )}
-
           <div className="results-paper">
             <div className="results-paper-header">
               <p className="results-paper-eyebrow">Results</p>
