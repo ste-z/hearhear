@@ -495,25 +495,15 @@ const ResultsOverviewSources = ({
     <span className="results-overview-sources" aria-label="Sources">
       {resolvedSources.map((source) => {
         const label = `Result ${source.result_index}`
-        return source.url ? (
+        return (
           <a
             key={source.result_index}
             className="results-overview-source-chip"
-            href={source.url}
-            target="_blank"
-            rel="noreferrer"
+            href={`#result-${source.result_index}`}
             title={source.title}
           >
             {label}
           </a>
-        ) : (
-          <span
-            key={source.result_index}
-            className="results-overview-source-chip"
-            title={source.title}
-          >
-            {label}
-          </span>
         )
       })}
     </span>
@@ -4495,18 +4485,23 @@ function App(): JSX.Element {
                 )}
 
                 <div id="answer-box">
-                  {visibleArticles.map((article) => {
+                  {visibleArticles.map((article, visibleArticleIndex) => {
                   const articleTooltipBase = String(article.id).replace(/[^a-zA-Z0-9_-]/g, '-')
                   const articleRecencyWeight = article.recency_weight ?? recencyWeight
                   const svdDimensionLabelState = getSvdDimensionLabelState(article)
                   const isMarkedNotRelevant = isTopicFeedbackIrrelevantArticle(article)
+                  const visibleResultIndex = visibleArticleIndex + 1
                   const activeArticleRank = activeVisibleArticles.findIndex(activeArticle => (
                     getArticleIdKey(activeArticle) === getArticleIdKey(article)
                   )) + 1
 
                   if (isMarkedNotRelevant) {
                     return (
-                      <article key={article.id} className="article-item topic-feedback-collapsed-article">
+                      <article
+                        key={article.id}
+                        id={`result-${visibleResultIndex}`}
+                        className="article-item topic-feedback-collapsed-article"
+                      >
                         <div className="topic-feedback-collapsed-copy">
                           <p className="topic-feedback-state">Marked not relevant</p>
                           <h3 className="article-title">
@@ -4528,7 +4523,11 @@ function App(): JSX.Element {
                   }
 
                   return (
-                    <article key={article.id} className="article-item">
+                    <article
+                      key={article.id}
+                      id={`result-${visibleResultIndex}`}
+                      className="article-item"
+                    >
                       <p className="article-meta">
                         {article.author_display || article.author_raw || 'Unknown author'} | {formatDate(article.date)}
                       </p>
