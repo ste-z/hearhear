@@ -8,6 +8,15 @@ export type SvdLatentDimension = {
   label_text: string
 }
 
+export type VaderSentiment = {
+  compound: number
+  negative: number
+  neutral: number
+  positive: number
+  label: 'negative' | 'neutral' | 'positive'
+  method?: string | null
+}
+
 export type Article = {
   id: string | number
   title: string
@@ -44,6 +53,7 @@ export type Article = {
   llm_relevant_paragraphs?: LlmRelevantParagraph[] | null
   thesis_sentence?: string | null
   support_sentences?: string[] | null
+  vader_sentiment?: VaderSentiment | null
   svd_query_chart_dimensions?: SvdLatentDimension[] | null
   svd_chart_dimensions?: SvdLatentDimension[] | null
   svd_article_query_dimensions?: SvdLatentDimension[] | null

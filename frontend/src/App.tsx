@@ -25,6 +25,7 @@ import {
   SimilarArticlesResponse,
   SvdLatentDimension,
   TypoCorrectionSuggestion,
+  VaderSentiment,
 } from './types'
 import Chat from './Chat'
 
@@ -693,6 +694,12 @@ const scaleSvdMagnitude = (
 const formatSvdValue = (value: number): string => (
   `${value >= 0 ? '+' : ''}${value.toFixed(3)}`
 )
+
+const formatVaderScore = (value: number): string => (
+  `${value >= 0 ? '+' : ''}${value.toFixed(2)}`
+)
+
+const formatSentimentPercent = (value: number): string => `${Math.round(clampSvdMagnitude(value) * 100)}%`
 
 const formatThresholdValue = (value: number): string => value.toFixed(2)
 
@@ -3822,6 +3829,12 @@ function App(): JSX.Element {
     return 'Expand to see the article overview.'
   }
 
+  const getSentimentHint = (sentiment?: VaderSentiment | null): string => {
+    if (!sentiment) return 'Expand to see VADER sentiment.'
+    const label = sentiment.label.charAt(0).toUpperCase() + sentiment.label.slice(1)
+    return `${label} compound ${formatVaderScore(sentiment.compound)}`
+  }
+
   const getRankingExplanationKey = (article: Article): string => String(article.id)
 
   const getRankingExplanationState = (article: Article): {
@@ -5051,6 +5064,50 @@ function App(): JSX.Element {
                                   />
                                 </div>
                               )}
+                          </div>
+                        </details>
+                      )}
+
+                      {article.vader_sentiment && (
+                        <details className="content-disclosure sentiment-disclosure">
+                          <summary className="content-disclosure-summary">
+                            <span className="content-disclosure-copy">
+                              <span className="content-disclosure-title">Sentiment</span>
+                              <span className="content-disclosure-hint">{getSentimentHint(article.vader_sentiment)}</span>
+                            </span>
+                            <span className="content-disclosure-status" aria-hidden="true" />
+                          </summary>
+                          <div className="sentiment-panel">
+                            <div className="sentiment-score-row">
+                              <span className={`sentiment-label ${article.vader_sentiment.label}`}>
+                                {article.vader_sentiment.label}
+                              </span>
+                              <span className="sentiment-compound">
+                                {formatVaderScore(article.vader_sentiment.compound)}
+                              </span>
+                            </div>
+                            <div
+                              className="sentiment-meter"
+                              aria-label={`VADER sentiment: ${article.vader_sentiment.label}, compound ${formatVaderScore(article.vader_sentiment.compound)}`}
+                            >
+                              <span
+                                className="sentiment-meter-segment negative"
+                                style={{ width: formatSentimentPercent(article.vader_sentiment.negative) }}
+                              />
+                              <span
+                                className="sentiment-meter-segment neutral"
+                                style={{ width: formatSentimentPercent(article.vader_sentiment.neutral) }}
+                              />
+                              <span
+                                className="sentiment-meter-segment positive"
+                                style={{ width: formatSentimentPercent(article.vader_sentiment.positive) }}
+                              />
+                            </div>
+                            <div className="sentiment-breakdown">
+                              <span>Negative {formatSentimentPercent(article.vader_sentiment.negative)}</span>
+                              <span>Neutral {formatSentimentPercent(article.vader_sentiment.neutral)}</span>
+                              <span>Positive {formatSentimentPercent(article.vader_sentiment.positive)}</span>
+                            </div>
                           </div>
                         </details>
                       )}

@@ -4,6 +4,7 @@ from threading import Lock
 
 from backend.db.models import GuardianArticle
 from backend.runtime.runtime_debug import log_runtime_event
+from backend.text_processing.sentiment import vader_sentiment_scores
 from flask import current_app, has_app_context
 
 
@@ -189,6 +190,19 @@ def serialize_article(article, score=None):
         "character_count": character_count,
         "word_count": word_count,
     }
+    sentiment_text = _get_value(article, "body_text")
+    if not sentiment_text:
+        sentiment_text = " ".join(
+            str(part or "").strip()
+            for part in (
+                _get_value(article, "title"),
+                _get_value(article, "summary"),
+            )
+            if str(part or "").strip()
+        )
+    sentiment = vader_sentiment_scores(sentiment_text)
+    if sentiment is not None:
+        payload["vader_sentiment"] = sentiment
     if score is not None:
         payload["score"] = float(score)
     return payload

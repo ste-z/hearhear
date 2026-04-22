@@ -1651,6 +1651,95 @@
   margin-top: 10px;
 }
 
+.sentiment-disclosure {
+  margin-top: 10px;
+}
+
+.sentiment-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(138, 92, 0, 0.14);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.sentiment-score-row,
+.sentiment-breakdown {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sentiment-label {
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sentiment-label.negative {
+  color: #c5221f;
+}
+
+.sentiment-label.neutral {
+  color: #5f6368;
+}
+
+.sentiment-label.positive {
+  color: #1a3cff;
+}
+
+.sentiment-compound {
+  color: #1f1811;
+  font-family: 'Courier Prime', 'Courier New', monospace;
+  font-size: 0.96rem;
+  font-weight: 700;
+}
+
+.sentiment-meter {
+  display: flex;
+  width: 100%;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #b8b8b8;
+  box-shadow: inset 0 0 0 1px rgba(32, 33, 36, 0.08);
+}
+
+.sentiment-meter-segment {
+  display: block;
+  min-width: 0;
+  height: 100%;
+}
+
+.sentiment-meter-segment.negative {
+  background: #ff1a0a;
+}
+
+.sentiment-meter-segment.neutral {
+  background: #b9b9b9;
+}
+
+.sentiment-meter-segment.positive {
+  background: #1a32ff;
+}
+
+.sentiment-breakdown {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  color: #5f6368;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .svd-explainability-panel {
   display: flex;
   flex-direction: column;

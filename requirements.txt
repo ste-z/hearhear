@@ -15,4 +15,5 @@ python-dotenv
 openai
 spacy
 rapidfuzz
+vaderSentiment
 git+https://github.com/MrPeterss/infosci-spark-client.git
