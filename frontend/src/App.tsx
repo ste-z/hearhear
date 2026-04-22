@@ -17,6 +17,8 @@ import {
   EssayClaimCandidateResponse,
   EssayTextExtractionResponse,
   LlmRelevantParagraph,
+  QueryHelpResponse,
+  QueryRewriteAlternative,
   ResultsChatResponse,
   ResultsOverview,
   RetrievalModel,
@@ -36,6 +38,7 @@ type ChunkingMode = 'none' | 'paragraph' | 'semantic'
 type FrontendChunkingMode = Exclude<ChunkingMode, 'paragraph'>
 type LengthFilterUnit = 'characters' | 'words' | 'reading_time'
 type SettingsFocusTarget = 'topic-relevance' | 'agreement-scorer'
+type QueryAssistMode = 'menu' | 'rewrite' | 'suggestions'
 type SvdDimensionLabelMap = Record<number, string>
 type SvdChartSeriesRole = 'article' | 'query'
 type TopicFeedbackSearchOptions = {
@@ -303,6 +306,54 @@ const normalizeTypoCorrection = (value: unknown): TypoCorrectionSuggestion | nul
     options,
     corrections: Array.isArray(rawSuggestion.corrections) ? rawSuggestion.corrections : null,
   }
+}
+
+const normalizeQueryRewriteAlternatives = (value: unknown): QueryRewriteAlternative[] => {
+  if (!Array.isArray(value)) return []
+
+  const alternatives: QueryRewriteAlternative[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue
+    const rawAlternative = item as Partial<QueryRewriteAlternative>
+    const topic = typeof rawAlternative.topic === 'string' ? rawAlternative.topic.trim() : ''
+    const opinion = typeof rawAlternative.opinion === 'string' ? rawAlternative.opinion.trim() : ''
+    const query = typeof rawAlternative.query === 'string' ? rawAlternative.query.trim() : ''
+    if (!topic || !opinion || !query) continue
+
+    const key = `${topic.toLocaleLowerCase()}\u0000${opinion.toLocaleLowerCase()}`
+    if (seen.has(key)) continue
+
+    alternatives.push({
+      topic,
+      opinion,
+      query,
+      rationale: typeof rawAlternative.rationale === 'string' && rawAlternative.rationale.trim() !== ''
+        ? rawAlternative.rationale.trim()
+        : null,
+    })
+    seen.add(key)
+    if (alternatives.length >= 3) break
+  }
+
+  return alternatives
+}
+
+const normalizeQueryImproveSuggestions = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+
+  const suggestions: string[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    const suggestion = typeof item === 'string' ? item.trim() : ''
+    const key = suggestion.toLocaleLowerCase()
+    if (!suggestion || seen.has(key)) continue
+    suggestions.push(suggestion)
+    seen.add(key)
+    if (suggestions.length >= 6) break
+  }
+
+  return suggestions
 }
 
 const readApiJson = async <T,>(response: Response): Promise<T> => {
@@ -1654,6 +1705,12 @@ function App(): JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [emptyResultsMessage, setEmptyResultsMessage] = useState<string | null>(null)
   const [typoCorrection, setTypoCorrection] = useState<TypoCorrectionSuggestion | null>(null)
+  const [isQueryAssistOpen, setIsQueryAssistOpen] = useState<boolean>(false)
+  const [queryAssistMode, setQueryAssistMode] = useState<QueryAssistMode>('menu')
+  const [queryAssistLoading, setQueryAssistLoading] = useState<boolean>(false)
+  const [queryAssistError, setQueryAssistError] = useState<string | null>(null)
+  const [queryRewriteOptions, setQueryRewriteOptions] = useState<QueryRewriteAlternative[]>([])
+  const [queryImproveSuggestions, setQueryImproveSuggestions] = useState<string[]>([])
   const [isAboutOpen, setIsAboutOpen] = useState<boolean>(false)
   const [activeAboutTab, setActiveAboutTab] = useState<InputMode>('stance')
   const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false)
@@ -1678,6 +1735,7 @@ function App(): JSX.Element {
   const resultsSectionRef = useRef<HTMLDivElement | null>(null)
   const touchStartYRef = useRef<number | null>(null)
   const resultsOverviewRequestIdRef = useRef<number>(0)
+  const queryAssistRequestIdRef = useRef<number>(0)
   const lastAppliedFiltersRef = useRef<{
     yearStart: number | null
     yearEnd: number | null
@@ -2028,6 +2086,18 @@ function App(): JSX.Element {
   ])
 
   useEffect(() => {
+    queryAssistRequestIdRef.current += 1
+    if (inputMode !== 'stance') {
+      setIsQueryAssistOpen(false)
+    }
+    setQueryAssistLoading(false)
+    setQueryAssistError(null)
+    setQueryRewriteOptions([])
+    setQueryImproveSuggestions([])
+    setQueryAssistMode('menu')
+  }, [inputMode, opinion, retrievalModel, topic])
+
+  useEffect(() => {
     if (inputMode !== 'essay') {
       return
     }
@@ -2055,6 +2125,7 @@ function App(): JSX.Element {
       setIsAboutOpen(false)
       setIsFilterOpen(false)
       setIsSettingsOpen(false)
+      setIsQueryAssistOpen(false)
       setSettingsFocusTarget(null)
     }
 
@@ -2206,6 +2277,7 @@ function App(): JSX.Element {
   const trimmedEssayText = searchTerm.trim()
   const trimmedTopic = topic.trim()
   const trimmedOpinion = opinion.trim()
+  const hasQueryAssistInput = trimmedTopic !== '' || trimmedOpinion !== ''
   const trimmedCustomEssayThesis = essayCustomThesis.trim()
   const canSearchStance = inputMode === 'stance' && trimmedTopic !== '' && trimmedOpinion !== ''
   const canAnalyzeEssay = inputMode === 'essay' && trimmedEssayText !== ''
@@ -2235,6 +2307,14 @@ function App(): JSX.Element {
   const canUseChunking = canUseLlmAgreement && supportedChunkingModes.includes('semantic')
   const canToggleSvd = canUseSvd && canUseTfidf
   const isLexicalSearchMode = retrievalModel === 'tfidf'
+  const queryAssistDisabledReason = !hasQueryAssistInput
+    ? 'Add a topic or stance to use AI query help.'
+    : (useLlm !== true
+      ? 'AI query help is turned off in the backend config.'
+      : (!llmAgreementAvailable
+        ? 'AI query help needs SPARK_API_KEY or API_KEY in your backend environment.'
+        : ''))
+  const canUseQueryAssist = queryAssistDisabledReason === ''
   const activeWordsToAvoid = isLexicalSearchMode ? wordsToAvoid : []
   const activeWordsToAvoidKey = activeWordsToAvoid.join('\u0000')
   const currentAutoRerankThreshold = autoRerankThresholds[retrievalModel]
@@ -2921,6 +3001,71 @@ function App(): JSX.Element {
     } finally {
       setResultsChatLoading(false)
     }
+  }
+
+  const handleToggleQueryAssist = (): void => {
+    if (!canUseQueryAssist) return
+    setIsQueryAssistOpen(currentOpen => !currentOpen)
+  }
+
+  const requestQueryAssist = async (nextMode: Exclude<QueryAssistMode, 'menu'>): Promise<void> => {
+    if (!canUseQueryAssist || queryAssistLoading) return
+
+    const requestId = queryAssistRequestIdRef.current + 1
+    queryAssistRequestIdRef.current = requestId
+    setQueryAssistMode(nextMode)
+    setQueryAssistLoading(true)
+    setQueryAssistError(null)
+    setQueryRewriteOptions([])
+    setQueryImproveSuggestions([])
+
+    try {
+      const response = await fetch('/api/llm/query-help', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: nextMode === 'rewrite' ? 'rewrite' : 'suggest',
+          topic: trimmedTopic,
+          opinion: trimmedOpinion,
+          retrieval_model: retrievalModel,
+        }),
+      })
+
+      const data = await readApiJson<QueryHelpResponse>(response)
+      if (queryAssistRequestIdRef.current !== requestId) return
+
+      if (nextMode === 'rewrite') {
+        const alternatives = normalizeQueryRewriteAlternatives(data.alternatives)
+        if (alternatives.length === 0) {
+          throw new Error('No query alternatives were returned.')
+        }
+        setQueryRewriteOptions(alternatives)
+        return
+      }
+
+      const suggestions = normalizeQueryImproveSuggestions(data.suggestions)
+      if (suggestions.length === 0) {
+        throw new Error('No query suggestions were returned.')
+      }
+      setQueryImproveSuggestions(suggestions)
+    } catch (fetchError) {
+      if (queryAssistRequestIdRef.current !== requestId) return
+      console.error('Query help failed:', fetchError)
+      setQueryAssistError(fetchError instanceof Error ? fetchError.message : 'Query help failed.')
+    } finally {
+      if (queryAssistRequestIdRef.current === requestId) {
+        setQueryAssistLoading(false)
+      }
+    }
+  }
+
+  const handleApplyQueryRewrite = (alternative: QueryRewriteAlternative): void => {
+    setTopic(alternative.topic)
+    setOpinion(alternative.opinion)
+    setTypoCorrection(null)
+    setIsQueryAssistOpen(false)
   }
 
   const handleEssaySearch = (value: string): void => {
@@ -4204,6 +4349,21 @@ function App(): JSX.Element {
                 </span>
               )}
             </div>
+
+            {isSearchStageVisible && inputMode === 'stance' && (
+              <div className="query-assist-shell">
+                <button
+                  type="button"
+                  className="query-assist-link"
+                  onClick={handleToggleQueryAssist}
+                  disabled={!canUseQueryAssist}
+                  aria-expanded={isQueryAssistOpen}
+                  title={queryAssistDisabledReason || undefined}
+                >
+                  Help me improve my query with AI.
+                </button>
+              </div>
+            )}
           </div>
 
           {inputMode === 'essay' && isSearchStageVisible && (
@@ -5078,6 +5238,114 @@ function App(): JSX.Element {
       )}
 
       {shouldShowEssayShortcut && <Chat onSearchTerm={handleEssaySearch} />}
+
+      {isQueryAssistOpen && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setIsQueryAssistOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="modal-card query-assist-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="query-assist-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <p className="modal-eyebrow">AI query help</p>
+                <h3 id="query-assist-modal-title">Improve your query</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setIsQueryAssistOpen(false)}
+                aria-label="Close AI query help popup"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="query-assist-modal-body">
+              {queryAssistMode === 'menu' && (
+                <div className="query-assist-choice-grid">
+                  <button
+                    type="button"
+                    className="query-assist-choice"
+                    onClick={() => void requestQueryAssist('rewrite')}
+                    disabled={queryAssistLoading}
+                  >
+                    Let the AI rewrite the query for me
+                  </button>
+                  <button
+                    type="button"
+                    className="query-assist-choice"
+                    onClick={() => void requestQueryAssist('suggestions')}
+                    disabled={queryAssistLoading}
+                  >
+                    Tell me how to improve my query
+                  </button>
+                </div>
+              )}
+
+              {queryAssistLoading && (
+                <div className="query-assist-loading" role="status" aria-live="polite">
+                  Improving query...
+                </div>
+              )}
+
+              {!queryAssistLoading && queryAssistError && (
+                <div className="query-assist-error" role="alert">
+                  {queryAssistError}
+                </div>
+              )}
+
+              {!queryAssistLoading && queryAssistMode === 'rewrite' && queryRewriteOptions.length > 0 && (
+                <div className="query-rewrite-list">
+                  {queryRewriteOptions.map((alternative, index) => (
+                    <button
+                      key={`${alternative.topic}-${alternative.opinion}`}
+                      type="button"
+                      className="query-rewrite-option"
+                      onClick={() => handleApplyQueryRewrite(alternative)}
+                    >
+                      <span className="query-rewrite-option-label">{`Option ${index + 1}`}</span>
+                      <span className="query-rewrite-query">{alternative.query}</span>
+                      {alternative.rationale && (
+                        <span className="query-rewrite-rationale">{alternative.rationale}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {!queryAssistLoading && queryAssistMode === 'suggestions' && queryImproveSuggestions.length > 0 && (
+                <ul className="query-suggestion-list">
+                  {queryImproveSuggestions.map((suggestion) => (
+                    <li key={suggestion}>{suggestion}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {queryAssistMode !== 'menu' && !queryAssistLoading && (
+              <button
+                type="button"
+                className="query-assist-back"
+                onClick={() => {
+                  setQueryAssistMode('menu')
+                  setQueryAssistError(null)
+                  setQueryRewriteOptions([])
+                  setQueryImproveSuggestions([])
+                }}
+              >
+                Back
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {hasSubmittedSearch && !loading && !error && articles.length > 0 && (
         <aside

@@ -139,6 +139,19 @@ export type ResultsChatResponse = {
 
 export type RetrievalModel = 'tfidf' | 'svd'
 
+export type QueryRewriteAlternative = {
+  topic: string
+  opinion: string
+  query: string
+  rationale?: string | null
+}
+
+export type QueryHelpResponse = {
+  alternatives?: QueryRewriteAlternative[] | null
+  suggestions?: string[] | null
+  retrieval_model?: RetrievalModel | null
+}
+
 export type EssayClaimCandidate = {
   sentence_id: string
   sentence: string
