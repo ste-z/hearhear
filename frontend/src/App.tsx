@@ -4622,7 +4622,7 @@ function App(): JSX.Element {
                                   onClick={() => handleExplainRanking(article, activeArticleRank)}
                                   disabled={getRankingExplanationState(article).loading}
                                 >
-                                  {getRankingExplanationState(article).loading ? 'Explaining…' : 'Explain ranking'}
+                                  {getRankingExplanationState(article).loading ? 'Explaining…' : 'Explain ranking with AI'}
                                 </button>
                               </div>
                             )}
@@ -5037,7 +5037,7 @@ function App(): JSX.Element {
             >
               <span className="results-chat-launcher-mark" aria-hidden="true">?</span>
               <span className="results-chat-launcher-copy">
-                <span>Ask the results</span>
+                <span>Ask AI</span>
                 {resultsChatMessages.length > 0 && (
                   <span>{`${resultsChatMessages.length} messages`}</span>
                 )}
@@ -5047,7 +5047,7 @@ function App(): JSX.Element {
             <section className="results-chat-card">
               <div className="results-chat-header">
                 <div>
-                  <p className="results-overview-eyebrow">Ask the results</p>
+                  <p className="results-overview-eyebrow">Ask AI about the results</p>
                   <h3>Question the retrieved articles</h3>
                 </div>
                 <button
