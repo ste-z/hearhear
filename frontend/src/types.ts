@@ -8,13 +8,35 @@ export type SvdLatentDimension = {
   label_text: string
 }
 
-export type VaderSentiment = {
+export type SentimentLabel = 'negative' | 'neutral' | 'positive'
+
+export type VaderSentimentScore = {
   compound: number
   negative: number
   neutral: number
   positive: number
-  label: 'negative' | 'neutral' | 'positive'
+  label: SentimentLabel
   method?: string | null
+}
+
+export type VaderSentimentSnippet = {
+  text: string
+  compound: number
+  label: SentimentLabel
+}
+
+export type VaderSentiment = VaderSentimentScore & {
+  tone_strength?: 'mild' | 'moderate' | 'strong' | null
+  ranking_role?: 'display_only' | string | null
+  text_scores?: {
+    title?: VaderSentimentScore | null
+    summary?: VaderSentimentScore | null
+    article?: VaderSentimentScore | null
+  } | null
+  snippets?: {
+    negative?: VaderSentimentSnippet[] | null
+    positive?: VaderSentimentSnippet[] | null
+  } | null
 }
 
 export type Article = {

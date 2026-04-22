@@ -700,6 +700,16 @@ const formatVaderScore = (value: number): string => (
 
 const formatSentimentPercent = (value: number): string => `${Math.round(clampSvdMagnitude(value) * 100)}%`
 
+const formatSentimentLabel = (value?: string | null): string => {
+  const normalized = String(value || '').trim()
+  if (!normalized) return 'Neutral'
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
+
+const formatToneStrength = (value?: string | null): string => (
+  formatSentimentLabel(value)
+)
+
 const formatThresholdValue = (value: number): string => value.toFixed(2)
 
 const buildSvdDimensionLookup = (
@@ -5029,9 +5039,16 @@ function App(): JSX.Element {
                           </summary>
                           <div className="sentiment-panel">
                             <div className="sentiment-score-row">
-                              <span className={`sentiment-label ${article.vader_sentiment.label}`}>
-                                {article.vader_sentiment.label}
-                              </span>
+                              <div className="sentiment-score-copy">
+                                <span className={`sentiment-label ${article.vader_sentiment.label}`}>
+                                  {formatSentimentLabel(article.vader_sentiment.label)}
+                                </span>
+                                {article.vader_sentiment.tone_strength && (
+                                  <span className={`sentiment-strength ${article.vader_sentiment.tone_strength}`}>
+                                    {formatToneStrength(article.vader_sentiment.tone_strength)} tone
+                                  </span>
+                                )}
+                              </div>
                               <span className="sentiment-compound">
                                 {formatVaderScore(article.vader_sentiment.compound)}
                               </span>
@@ -5057,6 +5074,68 @@ function App(): JSX.Element {
                               <span>Negative {formatSentimentPercent(article.vader_sentiment.negative)}</span>
                               <span>Neutral {formatSentimentPercent(article.vader_sentiment.neutral)}</span>
                               <span>Positive {formatSentimentPercent(article.vader_sentiment.positive)}</span>
+                            </div>
+
+                            {article.vader_sentiment.text_scores && (
+                              <div className="sentiment-comparison">
+                                <div className="sentiment-section-title">Title vs full article</div>
+                                <div className="sentiment-source-grid">
+                                  {[
+                                    { label: 'Title', score: article.vader_sentiment.text_scores.title },
+                                    { label: 'Summary', score: article.vader_sentiment.text_scores.summary },
+                                    { label: 'Full article', score: article.vader_sentiment.text_scores.article },
+                                  ].map((item) => {
+                                    if (!item.score) return null
+                                    return (
+                                      <div key={item.label} className="sentiment-source-card">
+                                        <span>{item.label}</span>
+                                        <strong className={item.score.label}>
+                                          {formatVaderScore(item.score.compound)}
+                                        </strong>
+                                        <small>{formatSentimentLabel(item.score.label)}</small>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {(
+                              (article.vader_sentiment.snippets?.negative?.length ?? 0) > 0 ||
+                              (article.vader_sentiment.snippets?.positive?.length ?? 0) > 0
+                            ) && (
+                                <div className="sentiment-evidence">
+                                  {[
+                                    {
+                                      key: 'negative',
+                                      title: 'Most negative sentences',
+                                      snippets: article.vader_sentiment.snippets?.negative ?? [],
+                                    },
+                                    {
+                                      key: 'positive',
+                                      title: 'Most positive sentences',
+                                      snippets: article.vader_sentiment.snippets?.positive ?? [],
+                                    },
+                                  ].map((group) => (
+                                    group.snippets.length > 0 && (
+                                      <div key={group.key} className={`sentiment-evidence-group ${group.key}`}>
+                                        <div className="sentiment-section-title">{group.title}</div>
+                                        <ol className="sentiment-snippet-list">
+                                          {group.snippets.map((snippet, index) => (
+                                            <li key={`${article.id}-sentiment-${group.key}-${index}`}>
+                                              <span>{snippet.text}</span>
+                                              <strong>{formatVaderScore(snippet.compound)}</strong>
+                                            </li>
+                                          ))}
+                                        </ol>
+                                      </div>
+                                    )
+                                  ))}
+                                </div>
+                              )}
+
+                            <div className="sentiment-ranking-note">
+                              Display only. Not used for ranking.
                             </div>
                           </div>
                         </details>
