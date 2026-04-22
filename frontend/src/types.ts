@@ -102,9 +102,31 @@ export type SimilarArticlesResponse = {
   has_more?: boolean | null
 }
 
+export type ResultsOverviewSource = {
+  result_index: number
+  title: string
+  url?: string | null
+  article_id?: string | number | null
+}
+
+export type ResultsOverviewEvidence = {
+  evidence: string
+  source_indices?: number[] | null
+}
+
+export type ResultsOverviewArgument = {
+  argument: string
+  source_indices?: number[] | null
+  evidence?: ResultsOverviewEvidence[] | null
+}
+
 export type ResultsOverview = {
   overview: string
   key_points?: string[] | null
+  supporting_arguments?: ResultsOverviewArgument[] | null
+  opposing_arguments?: ResultsOverviewArgument[] | null
+  key_evidence?: ResultsOverviewEvidence[] | null
+  sources?: ResultsOverviewSource[] | null
   caveat?: string | null
 }
 

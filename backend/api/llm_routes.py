@@ -121,7 +121,102 @@ def _format_article_for_results_overview(article, index):
     return "\n".join(lines)
 
 
-def _parse_results_overview_response(raw_content):
+def _source_for_results_overview(article, index):
+    return {
+        "result_index": int(index) + 1,
+        "title": _clean_overview_text(article.get("title"), 240) or "Untitled",
+        "url": article.get("url"),
+        "article_id": article.get("id"),
+    }
+
+
+def _coerce_result_indices(value, max_index):
+    if max_index <= 0:
+        return []
+
+    raw_values = value if isinstance(value, list) else [value]
+    indices = []
+    seen = set()
+    for raw_value in raw_values:
+        try:
+            index = int(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if index < 1 or index > max_index or index in seen:
+            continue
+        indices.append(index)
+        seen.add(index)
+    return indices
+
+
+def _parse_results_overview_evidence_items(raw_items, max_index, max_items=5):
+    evidence_items = []
+    if not isinstance(raw_items, list):
+        return evidence_items
+
+    for item in raw_items[:max_items]:
+        if isinstance(item, str):
+            evidence = _clean_overview_text(item, 320)
+            source_indices = []
+        elif isinstance(item, dict):
+            evidence = _clean_overview_text(
+                item.get("evidence") or item.get("text") or item.get("claim"),
+                320,
+            )
+            source_indices = _coerce_result_indices(
+                item.get("source_indices") or item.get("sources") or item.get("result_indices"),
+                max_index,
+            )
+        else:
+            continue
+
+        if evidence:
+            evidence_items.append({
+                "evidence": evidence,
+                "source_indices": source_indices,
+            })
+
+    return evidence_items
+
+
+def _parse_results_overview_arguments(raw_items, max_index, max_items=4):
+    arguments = []
+    if not isinstance(raw_items, list):
+        return arguments
+
+    for item in raw_items[:max_items]:
+        if isinstance(item, str):
+            argument = _clean_overview_text(item, 360)
+            source_indices = []
+            evidence = []
+        elif isinstance(item, dict):
+            argument = _clean_overview_text(
+                item.get("argument") or item.get("claim") or item.get("point"),
+                360,
+            )
+            source_indices = _coerce_result_indices(
+                item.get("source_indices") or item.get("sources") or item.get("result_indices"),
+                max_index,
+            )
+            evidence = _parse_results_overview_evidence_items(
+                item.get("evidence") or item.get("key_evidence"),
+                max_index,
+                max_items=3,
+            )
+        else:
+            continue
+
+        if argument:
+            arguments.append({
+                "argument": argument,
+                "source_indices": source_indices,
+                "evidence": evidence,
+            })
+
+    return arguments
+
+
+def _parse_results_overview_response(raw_content, max_source_index=10):
     text = str(raw_content or "").strip()
     if not text:
         raise ValueError("Empty results overview response")
@@ -135,6 +230,9 @@ def _parse_results_overview_response(raw_content):
         return {
             "overview": text,
             "key_points": [],
+            "supporting_arguments": [],
+            "opposing_arguments": [],
+            "key_evidence": [],
             "caveat": "",
         }
 
@@ -160,6 +258,18 @@ def _parse_results_overview_response(raw_content):
     return {
         "overview": overview,
         "key_points": key_points,
+        "supporting_arguments": _parse_results_overview_arguments(
+            parsed.get("supporting_arguments"),
+            max_index=max_source_index,
+        ),
+        "opposing_arguments": _parse_results_overview_arguments(
+            parsed.get("opposing_arguments"),
+            max_index=max_source_index,
+        ),
+        "key_evidence": _parse_results_overview_evidence_items(
+            parsed.get("key_evidence"),
+            max_index=max_source_index,
+        ),
         "caveat": caveat,
     }
 
@@ -571,6 +681,10 @@ def register_chat_route(app, json_search):
             _format_article_for_results_overview(article, index)
             for index, article in enumerate(usable_articles)
         )
+        sources = [
+            _source_for_results_overview(article, index)
+            for index, article in enumerate(usable_articles)
+        ]
 
         system_prompt = (
             "You write a concise AI overview for a Guardian opinion article results page. "
@@ -578,11 +692,17 @@ def register_chat_route(app, json_search):
             "Use only the supplied search query and article result snippets. Do not add outside facts. "
             "Focus on the overall pattern: whether the results mostly support, oppose, complicate, or split on the user's view; "
             "what central claims repeat across articles; and where the retrieved articles differ from each other. "
+            "Include key arguments that support the user's view and key arguments that challenge or oppose it. "
+            "Attach source_indices to every argument and evidence item using the 1-based Result numbers from the snippets. "
+            "Only cite a Result number when that supplied snippet directly supports the argument or evidence. "
             "Do not write a bullet per article, do not list titles, and do not make claims about articles not shown. "
             "Be careful about uncertainty: describe patterns in the retrieved results, not the whole news landscape. "
-            "Return valid JSON only with keys: overview, key_points, caveat. "
+            "Return valid JSON only with keys: overview, key_points, supporting_arguments, opposing_arguments, key_evidence, caveat. "
             "overview must be 2-3 short sentences about the overall result set. "
             "key_points must be an array of 2-4 short strings covering shared themes, differences, or agreement patterns. "
+            "supporting_arguments and opposing_arguments must each be arrays of 1-3 objects shaped "
+            "{\"argument\":\"...\",\"source_indices\":[1],\"evidence\":[{\"evidence\":\"...\",\"source_indices\":[1]}]}. "
+            "key_evidence must be an array of 2-5 objects shaped {\"evidence\":\"...\",\"source_indices\":[1,2]}. "
             "caveat must be one short sentence about limits of the retrieved results."
         )
         user_prompt = (
@@ -597,9 +717,13 @@ def register_chat_route(app, json_search):
 
         try:
             response = client.chat(messages)
-            overview = _parse_results_overview_response(response.get("content"))
+            overview = _parse_results_overview_response(
+                response.get("content"),
+                max_source_index=len(usable_articles),
+            )
         except Exception:
             logger.exception("Results overview request failed")
             return jsonify({"error": "LLM results overview failed"}), 500
 
+        overview["sources"] = sources
         return jsonify(overview)

@@ -5403,6 +5403,95 @@
   background: #365741;
 }
 
+.results-overview-argument-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.results-overview-argument-group,
+.results-overview-evidence-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.results-overview-argument-group h4,
+.results-overview-evidence-group h4 {
+  margin: 0;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #365741;
+}
+
+.results-overview-argument-list,
+.results-overview-evidence-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.results-overview-argument-list > li,
+.results-overview-evidence-list > li {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: #3f3020;
+}
+
+.results-overview-argument-main,
+.results-overview-evidence-list > li {
+  min-width: 0;
+}
+
+.results-overview-evidence-list.nested {
+  gap: 7px;
+  padding-left: 14px;
+  border-left: 2px solid rgba(54, 87, 65, 0.18);
+}
+
+.results-overview-evidence-list.nested > li {
+  font-size: 0.88rem;
+  color: #574532;
+}
+
+.results-overview-sources {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-left: 8px;
+  vertical-align: baseline;
+}
+
+.results-overview-source-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(54, 87, 65, 0.24);
+  background: rgba(255, 255, 255, 0.72);
+  color: #365741;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+a.results-overview-source-chip:hover {
+  border-color: rgba(54, 87, 65, 0.42);
+  background: #fff;
+}
+
 .results-overview-caveat {
   padding-top: 2px;
   color: #6f5a43;
@@ -5922,6 +6011,20 @@
   .results-paper-section .article-item {
     padding: 22px 18px;
     border-radius: 22px;
+  }
+
+  .results-overview-card {
+    padding: 20px 18px;
+  }
+
+  .results-overview-argument-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .results-overview-sources {
+    display: flex;
+    margin-top: 7px;
+    margin-left: 0;
   }
 
   .topic-feedback-action-row,

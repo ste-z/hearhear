@@ -346,6 +346,218 @@ const readApiJson = async <T,>(response: Response): Promise<T> => {
   return (payload ?? null) as T
 }
 
+type ResultsOverviewSource = NonNullable<ResultsOverview['sources']>[number]
+type ResultsOverviewEvidence = NonNullable<ResultsOverview['key_evidence']>[number]
+type ResultsOverviewArgument = NonNullable<ResultsOverview['supporting_arguments']>[number]
+
+const normalizeResultsOverviewSourceIndices = (value: unknown): number[] => {
+  const rawValues = Array.isArray(value) ? value : [value]
+  const seen = new Set<number>()
+  const indices: number[] = []
+
+  rawValues.forEach((rawValue) => {
+    const index = Number(rawValue)
+    if (!Number.isInteger(index) || index < 1 || seen.has(index)) return
+    indices.push(index)
+    seen.add(index)
+  })
+
+  return indices
+}
+
+const normalizeResultsOverviewEvidence = (
+  value: unknown,
+  maxItems = 5,
+): ResultsOverviewEvidence[] => {
+  if (!Array.isArray(value)) return []
+
+  return value.slice(0, maxItems).reduce<ResultsOverviewEvidence[]>((items, item) => {
+    if (typeof item === 'string') {
+      const evidence = item.trim()
+      if (evidence) {
+        items.push({ evidence, source_indices: [] })
+      }
+      return items
+    }
+
+    if (!item || typeof item !== 'object') return items
+
+    const rawItem = item as Partial<ResultsOverviewEvidence> & {
+      text?: unknown
+      claim?: unknown
+      sources?: unknown
+      result_indices?: unknown
+    }
+    const evidence = typeof rawItem.evidence === 'string'
+      ? rawItem.evidence.trim()
+      : typeof rawItem.text === 'string'
+        ? rawItem.text.trim()
+        : typeof rawItem.claim === 'string'
+          ? rawItem.claim.trim()
+          : ''
+
+    if (!evidence) return items
+
+    items.push({
+      evidence,
+      source_indices: normalizeResultsOverviewSourceIndices(
+        rawItem.source_indices ?? rawItem.sources ?? rawItem.result_indices,
+      ),
+    })
+    return items
+  }, [])
+}
+
+const normalizeResultsOverviewArguments = (
+  value: unknown,
+): ResultsOverviewArgument[] => {
+  if (!Array.isArray(value)) return []
+
+  return value.slice(0, 3).reduce<ResultsOverviewArgument[]>((items, item) => {
+    if (typeof item === 'string') {
+      const argument = item.trim()
+      if (argument) {
+        items.push({ argument, source_indices: [], evidence: [] })
+      }
+      return items
+    }
+
+    if (!item || typeof item !== 'object') return items
+
+    const rawItem = item as Partial<ResultsOverviewArgument> & {
+      claim?: unknown
+      point?: unknown
+      sources?: unknown
+      result_indices?: unknown
+      key_evidence?: unknown
+    }
+    const argument = typeof rawItem.argument === 'string'
+      ? rawItem.argument.trim()
+      : typeof rawItem.claim === 'string'
+        ? rawItem.claim.trim()
+        : typeof rawItem.point === 'string'
+          ? rawItem.point.trim()
+          : ''
+
+    if (!argument) return items
+
+    items.push({
+      argument,
+      source_indices: normalizeResultsOverviewSourceIndices(
+        rawItem.source_indices ?? rawItem.sources ?? rawItem.result_indices,
+      ),
+      evidence: normalizeResultsOverviewEvidence(rawItem.evidence ?? rawItem.key_evidence, 3),
+    })
+    return items
+  }, [])
+}
+
+const normalizeResultsOverviewSources = (value: unknown): ResultsOverviewSource[] => {
+  if (!Array.isArray(value)) return []
+
+  return value.reduce<ResultsOverviewSource[]>((sources, source) => {
+    if (!source || typeof source !== 'object') return sources
+
+    const rawSource = source as Partial<ResultsOverviewSource>
+    const resultIndex = Number(rawSource.result_index)
+    const title = typeof rawSource.title === 'string' ? rawSource.title.trim() : ''
+    if (!Number.isInteger(resultIndex) || resultIndex < 1 || !title) return sources
+
+    sources.push({
+      result_index: resultIndex,
+      title,
+      url: typeof rawSource.url === 'string' ? rawSource.url : null,
+      article_id: rawSource.article_id ?? null,
+    })
+    return sources
+  }, [])
+}
+
+const ResultsOverviewSources = ({
+  sourceIndices,
+  sources,
+}: {
+  sourceIndices?: number[] | null
+  sources?: ResultsOverviewSource[] | null
+}): JSX.Element | null => {
+  const indices = normalizeResultsOverviewSourceIndices(sourceIndices)
+  if (indices.length === 0) return null
+
+  const sourceByIndex = new Map((sources ?? []).map(source => [source.result_index, source]))
+  const resolvedSources = indices.map(index => sourceByIndex.get(index) ?? {
+    result_index: index,
+    title: `Result ${index}`,
+    url: null,
+    article_id: null,
+  })
+
+  return (
+    <span className="results-overview-sources" aria-label="Sources">
+      {resolvedSources.map((source) => {
+        const label = `Result ${source.result_index}`
+        return source.url ? (
+          <a
+            key={source.result_index}
+            className="results-overview-source-chip"
+            href={source.url}
+            target="_blank"
+            rel="noreferrer"
+            title={source.title}
+          >
+            {label}
+          </a>
+        ) : (
+          <span
+            key={source.result_index}
+            className="results-overview-source-chip"
+            title={source.title}
+          >
+            {label}
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
+const ResultsOverviewArgumentList = ({
+  title,
+  items,
+  sources,
+}: {
+  title: string
+  items?: ResultsOverviewArgument[] | null
+  sources?: ResultsOverviewSource[] | null
+}): JSX.Element | null => {
+  if (!Array.isArray(items) || items.length === 0) return null
+
+  return (
+    <div className="results-overview-argument-group">
+      <h4>{title}</h4>
+      <ul className="results-overview-argument-list">
+        {items.map((item, index) => (
+          <li key={`${title}-${index}-${item.argument}`}>
+            <div className="results-overview-argument-main">
+              <span>{item.argument}</span>
+              <ResultsOverviewSources sourceIndices={item.source_indices} sources={sources} />
+            </div>
+            {Array.isArray(item.evidence) && item.evidence.length > 0 && (
+              <ul className="results-overview-evidence-list nested">
+                {item.evidence.map((evidence, evidenceIndex) => (
+                  <li key={`${item.argument}-evidence-${evidenceIndex}`}>
+                    <span>{evidence.evidence}</span>
+                    <ResultsOverviewSources sourceIndices={evidence.source_indices} sources={sources} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 const normalizeArticleSearchResponse = (
   payload: Article[] | ArticleSearchResponse | null,
 ): {
@@ -2590,6 +2802,10 @@ function App(): JSX.Element {
         key_points: Array.isArray(data.key_points)
           ? data.key_points.map(point => String(point).trim()).filter(Boolean).slice(0, 4)
           : [],
+        supporting_arguments: normalizeResultsOverviewArguments(data.supporting_arguments),
+        opposing_arguments: normalizeResultsOverviewArguments(data.opposing_arguments),
+        key_evidence: normalizeResultsOverviewEvidence(data.key_evidence),
+        sources: normalizeResultsOverviewSources(data.sources),
         caveat: typeof data.caveat === 'string' ? data.caveat.trim() : '',
       })
       setResultsOverviewError(null)
@@ -4237,6 +4453,34 @@ function App(): JSX.Element {
                               <li key={point}>{point}</li>
                             ))}
                           </ul>
+                        )}
+                        <div className="results-overview-argument-grid">
+                          <ResultsOverviewArgumentList
+                            title="Supports you"
+                            items={resultsOverview.supporting_arguments}
+                            sources={resultsOverview.sources}
+                          />
+                          <ResultsOverviewArgumentList
+                            title="Challenges you"
+                            items={resultsOverview.opposing_arguments}
+                            sources={resultsOverview.sources}
+                          />
+                        </div>
+                        {Array.isArray(resultsOverview.key_evidence) && resultsOverview.key_evidence.length > 0 && (
+                          <div className="results-overview-evidence-group">
+                            <h4>Key evidence</h4>
+                            <ul className="results-overview-evidence-list">
+                              {resultsOverview.key_evidence.map((evidence, evidenceIndex) => (
+                                <li key={`overview-evidence-${evidenceIndex}-${evidence.evidence}`}>
+                                  <span>{evidence.evidence}</span>
+                                  <ResultsOverviewSources
+                                    sourceIndices={evidence.source_indices}
+                                    sources={resultsOverview.sources}
+                                  />
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
                         )}
                         {resultsOverview.caveat && (
                           <p className="results-overview-caveat">{resultsOverview.caveat}</p>
