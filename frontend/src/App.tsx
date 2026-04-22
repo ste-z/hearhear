@@ -3750,18 +3750,20 @@ function App(): JSX.Element {
     }))
   }
 
-  const requestSvdDimensionLabels = async (article: Article): Promise<void> => {
+  const requestSvdDimensionLabels = async (article: Article): Promise<SvdDimensionLabelMap> => {
     const currentState = getSvdDimensionLabelState(article)
-    if (currentState.loading || Object.keys(currentState.labels).length > 0) return
+    if (currentState.loading || Object.keys(currentState.labels).length > 0) {
+      return currentState.labels
+    }
 
     const dimensions = getSvdDimensionsForLabeling(article)
-    if (dimensions.length === 0) return
+    if (dimensions.length === 0) return currentState.labels
 
     if (useLlm !== true) {
       setSvdDimensionLabelState(article, {
         error: 'LLM labels are turned off in the backend config.',
       })
-      return
+      return currentState.labels
     }
 
     setSvdDimensionLabelState(article, {
@@ -3798,11 +3800,13 @@ function App(): JSX.Element {
         error: null,
         labels: nextLabels,
       })
+      return nextLabels
     } catch (fetchError) {
       setSvdDimensionLabelState(article, {
         loading: false,
         error: fetchError instanceof Error ? fetchError.message : 'SVD concept labeling failed.',
       })
+      return currentState.labels
     }
   }
 
@@ -3831,6 +3835,11 @@ function App(): JSX.Element {
     }
 
     try {
+      const currentLabelState = getSvdDimensionLabelState(article)
+      const svdDimensionLabels = Object.keys(currentLabelState.labels).length > 0
+        ? currentLabelState.labels
+        : await requestSvdDimensionLabels(article)
+
       const response = await fetch('/api/llm/explain-ranking', {
         method: 'POST',
         headers: {
@@ -3841,6 +3850,7 @@ function App(): JSX.Element {
           article,
           position: rank,
           query_svd_dimensions: querySvdDimensions,
+          svd_dimension_labels: svdDimensionLabels,
         }),
       })
 
