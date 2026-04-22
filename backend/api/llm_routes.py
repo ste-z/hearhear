@@ -22,9 +22,14 @@ from backend.stance_processing.stance_rerank import (
     DEFAULT_CHUNKING_MODE,
     normalize_chunking_mode,
 )
+from backend.text_processing.search_helpers import (
+    DEFAULT_RETRIEVAL_MODEL,
+    normalize_retrieval_model,
+)
 from backend.text_processing.svd_dimension_labels import cached_svd_dimension_labels
 
 logger = logging.getLogger(__name__)
+QUERY_HELP_MAX_FIELD_CHARS = 220
 
 
 def _coerce_bool(value, default=False):
@@ -92,6 +97,170 @@ def _clean_overview_text(value, max_chars=500):
     if max_chars <= 0 or len(text) <= max_chars:
         return text
     return f"{text[:max_chars - 3].rstrip()}..."
+
+
+def _clean_query_help_text(value, max_chars=QUERY_HELP_MAX_FIELD_CHARS):
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    text = text.strip(" \t\r\n\"'")
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip()
+
+
+def _format_stance_query(topic, opinion):
+    return f"Regarding {topic}, I believe {opinion}"
+
+
+def _parse_stance_query(value):
+    text = _clean_query_help_text(value, max_chars=600)
+    match = re.match(
+        r"^regarding\s+(.+?)\s*,?\s+i\s+believe\s+(.+?)\.?\s*$",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return None, None
+    return (
+        _clean_query_help_text(match.group(1)),
+        _clean_query_help_text(match.group(2)),
+    )
+
+
+def _llm_json_object(raw_content, response_label):
+    text = str(raw_content or "").strip()
+    if not text:
+        raise ValueError(f"Empty {response_label} response")
+
+    fence_match = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    candidate = fence_match.group(1).strip() if fence_match else text
+    parsed = json.loads(candidate)
+    if isinstance(parsed, list):
+        return {"alternatives": parsed, "suggestions": parsed}
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{response_label} response must be a JSON object")
+    return parsed
+
+
+def _query_help_key(value):
+    return re.sub(r"[\W_]+", " ", str(value or "").lower()).strip()
+
+
+def _normalize_query_rewrite_alternatives(raw_alternatives, fallback_topic, fallback_opinion):
+    if isinstance(raw_alternatives, dict):
+        raw_alternatives = list(raw_alternatives.values())
+    if not isinstance(raw_alternatives, list):
+        return []
+
+    alternatives = []
+    seen = set()
+    for item in raw_alternatives:
+        topic = ""
+        opinion = ""
+        rationale = ""
+
+        if isinstance(item, dict):
+            topic = _clean_query_help_text(
+                item.get("topic")
+                or item.get("regarding")
+                or item.get("regarding_clause")
+                or item.get("subject")
+            )
+            opinion = _clean_query_help_text(
+                item.get("opinion")
+                or item.get("belief")
+                or item.get("stance")
+                or item.get("i_believe")
+                or item.get("i_believe_clause")
+                or item.get("believe")
+            )
+            rationale = _clean_overview_text(
+                item.get("rationale")
+                or item.get("why")
+                or item.get("reason")
+                or item.get("explanation"),
+                240,
+            )
+            if not topic or not opinion:
+                parsed_topic, parsed_opinion = _parse_stance_query(
+                    item.get("query") or item.get("formatted_query") or item.get("full_query")
+                )
+                topic = topic or parsed_topic or ""
+                opinion = opinion or parsed_opinion or ""
+        elif isinstance(item, str):
+            topic, opinion = _parse_stance_query(item)
+
+        if not topic and opinion:
+            topic = fallback_topic
+        if not opinion and topic:
+            opinion = fallback_opinion
+        topic = _clean_query_help_text(topic)
+        opinion = _clean_query_help_text(opinion)
+
+        if not topic or not opinion:
+            continue
+
+        if (
+            _query_help_key(topic) == _query_help_key(fallback_topic)
+            and _query_help_key(opinion) == _query_help_key(fallback_opinion)
+        ):
+            continue
+
+        key = (topic.lower(), opinion.lower())
+        if key in seen:
+            continue
+
+        alternatives.append({
+            "topic": topic,
+            "opinion": opinion,
+            "query": _format_stance_query(topic, opinion),
+            "rationale": rationale,
+        })
+        seen.add(key)
+
+        if len(alternatives) >= 3:
+            break
+
+    return alternatives
+
+
+def _normalize_query_improvement_suggestions(raw_suggestions):
+    if not isinstance(raw_suggestions, list):
+        return []
+
+    suggestions = []
+    seen = set()
+    for item in raw_suggestions:
+        if isinstance(item, dict):
+            suggestion = _clean_overview_text(
+                item.get("suggestion") or item.get("tip") or item.get("text"),
+                360,
+            )
+        else:
+            suggestion = _clean_overview_text(item, 360)
+        key = suggestion.lower()
+        if not suggestion or key in seen:
+            continue
+        suggestions.append(suggestion)
+        seen.add(key)
+        if len(suggestions) >= 6:
+            break
+
+    return suggestions
+
+
+def _query_help_method_guidance(retrieval_model):
+    if retrieval_model == "tfidf":
+        return (
+            "The first stage uses lexical TF-IDF cosine similarity over article text. "
+            "The Regarding field should contain concrete words and phrases likely to appear in relevant Guardian opinion articles: "
+            "policy nouns, actors, institutions, events, and high-signal synonyms. Avoid vague placeholders, pronouns, and overly broad one-word topics."
+        )
+
+    return (
+        "The first stage uses cosine similarity after projecting TF-IDF vectors into truncated-SVD latent semantic dimensions. "
+        "The Regarding field should name the broad issue plus a few semantically related concepts so it lands near the intended latent theme. "
+        "Avoid keyword stuffing, but include enough context to distinguish the issue from neighboring themes."
+    )
 
 
 def _format_article_for_results_overview(article, index):
@@ -529,6 +698,142 @@ def register_chat_route(app, json_search):
             return jsonify({"error": "LLM agreement scoring failed"}), 500
 
         return jsonify({"scores": scores})
+
+    @app.route("/api/llm/query-help", methods=["POST"])
+    def query_help():
+        payload = request.get_json(silent=True) or {}
+        topic = _clean_query_help_text(payload.get("topic"))
+        opinion = _clean_query_help_text(payload.get("opinion"))
+        action = str(payload.get("action") or "rewrite").strip().lower()
+
+        if not topic and not opinion:
+            return jsonify({"error": "Add a topic or stance before asking for AI query help."}), 400
+        if action not in {"rewrite", "suggest"}:
+            return jsonify({"error": "Unsupported query help action."}), 400
+
+        try:
+            retrieval_model = normalize_retrieval_model(
+                payload.get("retrieval_model") or DEFAULT_RETRIEVAL_MODEL
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        api_key = os.getenv("SPARK_API_KEY") or os.getenv("API_KEY")
+        if not api_key:
+            return jsonify({"error": "SPARK_API_KEY or API_KEY not set — add it to your .env file"}), 500
+
+        try:
+            client = create_spark_client(api_key=api_key)
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 500
+
+        method_guidance = _query_help_method_guidance(retrieval_model)
+        existing_query = _format_stance_query(topic or "[missing topic]", opinion or "[missing stance]")
+        base_context = (
+            f"Retrieval method: {retrieval_model}\n"
+            f"{method_guidance}\n\n"
+            "The interface has exactly two user-editable fields:\n"
+            f"- Regarding: {topic or '[blank]'}\n"
+            f"- I believe: {opinion or '[blank]'}\n\n"
+            f"Current formatted query: {existing_query}\n"
+            "The Regarding field drives topic retrieval. The I believe field drives stance/agreement scoring after retrieval. "
+            "You may improve both fields, but the I believe clause must preserve the user's original position."
+        )
+
+        if action == "rewrite":
+            system_prompt = (
+                "You improve two-part search queries for a Guardian opinion article retrieval system. "
+                "Return valid JSON only. Return exactly three alternatives under an alternatives array. "
+                "Each alternative must include topic, opinion, query, and rationale. "
+                "The query string must follow this exact template with no trailing punctuation: "
+                "\"Regarding <topic>, I believe <opinion>\". "
+                "Every alternative must be meaningfully different from the current formatted query. "
+                "Rewrite the Regarding clause to improve retrieval with concrete topical language. "
+                "Rewrite the I believe clause only to make the same stance clearer, more explicit, and easier to score for agreement. "
+                "Do not flip, soften, intensify, broaden, narrow, or add a materially new belief beyond what the user implied. "
+                "Keep both clauses concise, specific, and natural. Do not add facts not implied by the user's text; "
+                "if one field is blank, infer only a minimal compatible completion from the other field."
+            )
+            user_prompt = (
+                f"{base_context}\n\n"
+                "Generate three stronger alternatives that should retrieve better first-stage topic matches for the selected retrieval method, "
+                "while preserving the user's intended stance exactly. Do not return the current query unchanged."
+            )
+        else:
+            system_prompt = (
+                "You coach users on improving two-part search queries for a Guardian opinion article retrieval system. "
+                "Return valid JSON only with a suggestions array of 4 to 6 short strings. "
+                "Suggestions must be specific to the selected retrieval method and the user's current Regarding / I believe fields. "
+                "Tell users they can clarify the I believe clause for agreement scoring, but should not change the underlying stance."
+            )
+            user_prompt = (
+                f"{base_context}\n\n"
+                "Tell the user how to improve this query for the selected retrieval method. "
+                "Make the advice actionable and specific to these fields."
+            )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        try:
+            response = client.chat(messages)
+            parsed = _llm_json_object(response.get("content"), "query help")
+            if action == "rewrite":
+                alternatives = _normalize_query_rewrite_alternatives(
+                    parsed.get("alternatives") or parsed.get("queries") or parsed.get("options"),
+                    fallback_topic=topic,
+                    fallback_opinion=opinion,
+                )
+                if len(alternatives) < 3:
+                    retry_messages = [
+                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "user",
+                            "content": (
+                                f"{base_context}\n\n"
+                                "Your previous answer did not produce three usable changed alternatives. "
+                                "Return JSON only in this exact shape: "
+                                "{\"alternatives\":["
+                                "{\"topic\":\"...\",\"opinion\":\"...\",\"query\":\"Regarding ..., I believe ...\",\"rationale\":\"...\"},"
+                                "{\"topic\":\"...\",\"opinion\":\"...\",\"query\":\"Regarding ..., I believe ...\",\"rationale\":\"...\"},"
+                                "{\"topic\":\"...\",\"opinion\":\"...\",\"query\":\"Regarding ..., I believe ...\",\"rationale\":\"...\"}"
+                                "]}. "
+                                "All three alternatives must be different from the current query, and each must preserve the user's stance."
+                            ),
+                        },
+                    ]
+                    retry_response = client.chat(retry_messages)
+                    retry_parsed = _llm_json_object(retry_response.get("content"), "query help retry")
+                    retry_alternatives = _normalize_query_rewrite_alternatives(
+                        retry_parsed.get("alternatives")
+                        or retry_parsed.get("queries")
+                        or retry_parsed.get("options"),
+                        fallback_topic=topic,
+                        fallback_opinion=opinion,
+                    )
+                    if len(retry_alternatives) > len(alternatives):
+                        alternatives = retry_alternatives
+                if len(alternatives) < 1:
+                    raise ValueError("No usable query alternatives returned")
+                return jsonify({
+                    "alternatives": alternatives[:3],
+                    "retrieval_model": retrieval_model,
+                })
+
+            suggestions = _normalize_query_improvement_suggestions(
+                parsed.get("suggestions") or parsed.get("tips") or parsed.get("advice"),
+            )
+            if not suggestions:
+                raise ValueError("No usable query suggestions returned")
+            return jsonify({
+                "suggestions": suggestions,
+                "retrieval_model": retrieval_model,
+            })
+        except Exception:
+            logger.exception("Query help request failed")
+            return jsonify({"error": "LLM query help failed."}), 500
 
     @app.route("/api/llm/explain-ranking", methods=["POST"])
     def explain_ranking():

@@ -4503,6 +4503,195 @@
   gap: 14px;
 }
 
+.query-assist-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: min(100%, 980px);
+  margin-left: 0;
+  gap: 0;
+  z-index: 24;
+}
+
+.query-assist-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--editorial-accent-strong);
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-thickness: 0.06em;
+  text-underline-offset: 0.18em;
+  cursor: pointer;
+}
+
+.query-assist-link:hover:not(:disabled),
+.query-assist-link:focus-visible {
+  color: #ffffff;
+}
+
+.query-assist-link:disabled {
+  cursor: not-allowed;
+  color: rgba(246, 241, 232, 0.42);
+}
+
+.query-assist-modal {
+  width: min(680px, 100%);
+  max-height: min(760px, calc(100dvh - 40px));
+  overflow: hidden;
+}
+
+.query-assist-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  gap: 12px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.query-assist-back {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid rgba(241, 220, 197, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.86);
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.query-assist-choice-grid,
+.query-rewrite-list {
+  display: grid;
+  gap: 8px;
+}
+
+.query-assist-choice,
+.query-rewrite-option {
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(241, 220, 197, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #f7eadc;
+  text-align: left;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.query-assist-choice:hover:not(:disabled),
+.query-rewrite-option:hover:not(:disabled),
+.query-assist-back:hover {
+  border-color: rgba(241, 220, 197, 0.48);
+  background: rgba(241, 220, 197, 0.14);
+}
+
+.query-assist-choice:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.query-assist-error,
+.query-suggestion-list {
+  margin: 0;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  letter-spacing: 0;
+}
+
+.query-assist-thinking-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  min-height: 142px;
+  padding: 22px 24px;
+  border-radius: 8px;
+  border: 1px solid rgba(241, 220, 197, 0.2);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--editorial-text);
+}
+
+.query-assist-thinking-card .results-thinking-label {
+  color: var(--editorial-text);
+}
+
+.query-assist-thinking-card .results-thinking-dots span {
+  background: var(--editorial-accent-strong);
+}
+
+.query-assist-thinking-copy {
+  margin: 0;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--editorial-muted);
+}
+
+.query-assist-error {
+  color: #f1b6a8;
+}
+
+.query-rewrite-option {
+  display: grid;
+  gap: 6px;
+}
+
+.query-rewrite-option-label {
+  color: rgba(241, 220, 197, 0.82);
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.query-rewrite-query,
+.query-rewrite-rationale {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.query-rewrite-query {
+  color: #ffffff;
+}
+
+.query-rewrite-rationale {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.query-suggestion-list {
+  display: grid;
+  gap: 8px;
+  padding-left: 18px;
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.query-assist-back {
+  justify-self: start;
+}
+
 .landing-essay-panel {
   width: min(980px, 100%);
   margin-top: 0;
@@ -6004,6 +6193,11 @@ a.results-overview-source-chip:hover {
   .landing-essay-panel,
   .intro-shell.search-active .landing-prompt-shell {
     margin-top: 0;
+  }
+
+  .query-assist-shell {
+    width: 100%;
+    margin-left: 0;
   }
 
   .inline-typo-popover {
