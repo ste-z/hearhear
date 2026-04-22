@@ -25,7 +25,6 @@ import {
   SimilarArticlesResponse,
   SvdLatentDimension,
   TypoCorrectionSuggestion,
-  VaderSentiment,
 } from './types'
 import Chat from './Chat'
 
@@ -3813,28 +3812,6 @@ function App(): JSX.Element {
     return `This article is on your topic and was compared against your statement.${recencyNote}`
   }
 
-  const getOverviewHint = (article: Article): string => {
-    const hasThesis = Boolean(article.thesis_sentence)
-    const hasSupport = Boolean(article.support_sentences && article.support_sentences.length > 0)
-
-    if (hasThesis && hasSupport) {
-      return 'Expand to see the thesis and support sentences.'
-    }
-    if (hasThesis) {
-      return 'Expand to see the thesis sentence.'
-    }
-    if (hasSupport) {
-      return 'Expand to see the support sentences.'
-    }
-    return 'Expand to see the article overview.'
-  }
-
-  const getSentimentHint = (sentiment?: VaderSentiment | null): string => {
-    if (!sentiment) return 'Expand to see VADER sentiment.'
-    const label = sentiment.label.charAt(0).toUpperCase() + sentiment.label.slice(1)
-    return `${label} compound ${formatVaderScore(sentiment.compound)}`
-  }
-
   const getRankingExplanationKey = (article: Article): string => String(article.id)
 
   const getRankingExplanationState = (article: Article): {
@@ -4017,31 +3994,6 @@ function App(): JSX.Element {
         error: fetchError instanceof Error ? fetchError.message : 'Ranking explanation failed.',
       })
     }
-  }
-
-  const getSvdExplainabilityHint = (article: Article): string => {
-    const queryChartCount = article.svd_query_chart_dimensions?.length ?? 0
-    const sharedDimensionCount = article.svd_chart_dimensions?.length ?? 0
-    const articleDimensionCount = article.svd_dimensions?.length ?? 0
-    if (queryChartCount > 0 && sharedDimensionCount > 0 && articleDimensionCount > 0) {
-      return `Expand to compare this article against the query concepts, the corpus concepts, and its top ${articleDimensionCount} signed concepts.`
-    }
-    if (queryChartCount > 0 && articleDimensionCount > 0) {
-      return `Expand to compare this article against the query concepts and inspect its top ${articleDimensionCount} signed concepts.`
-    }
-    if (sharedDimensionCount > 0 && articleDimensionCount > 0) {
-      return `Expand to compare this article on ${sharedDimensionCount} corpus concepts and inspect its top ${articleDimensionCount} signed concepts.`
-    }
-    if (queryChartCount > 0) {
-      return `Expand to compare this article against the query's top ${queryChartCount} concepts.`
-    }
-    if (sharedDimensionCount > 0) {
-      return `Expand to compare this article on ${sharedDimensionCount} shared corpus concepts.`
-    }
-    if (articleDimensionCount > 0) {
-      return `Expand to inspect this article's top ${articleDimensionCount} signed latent concepts.`
-    }
-    return 'Expand to inspect the latent concepts behind this match.'
   }
 
   const resultsDescription = useMemo(() => {
@@ -4982,7 +4934,6 @@ function App(): JSX.Element {
                           <summary className="content-disclosure-summary">
                             <span className="content-disclosure-copy">
                               <span className="content-disclosure-title">Latent concepts</span>
-                              <span className="content-disclosure-hint">{getSvdExplainabilityHint(article)}</span>
                             </span>
                             <span className="content-disclosure-status" aria-hidden="true" />
                           </summary>
@@ -5073,7 +5024,6 @@ function App(): JSX.Element {
                           <summary className="content-disclosure-summary">
                             <span className="content-disclosure-copy">
                               <span className="content-disclosure-title">Sentiment</span>
-                              <span className="content-disclosure-hint">{getSentimentHint(article.vader_sentiment)}</span>
                             </span>
                             <span className="content-disclosure-status" aria-hidden="true" />
                           </summary>
@@ -5117,7 +5067,6 @@ function App(): JSX.Element {
                           <summary className="content-disclosure-summary">
                             <span className="content-disclosure-copy">
                               <span className="content-disclosure-title">Overview</span>
-                              <span className="content-disclosure-hint">{getOverviewHint(article)}</span>
                             </span>
                             <span className="content-disclosure-status" aria-hidden="true" />
                           </summary>
