@@ -5290,8 +5290,14 @@ function App(): JSX.Element {
               )}
 
               {queryAssistLoading && (
-                <div className="query-assist-loading" role="status" aria-live="polite">
-                  Improving query...
+                <div className="query-assist-thinking-card" role="status" aria-live="polite">
+                  <p className="results-thinking-label">Thinking</p>
+                  <div className="results-thinking-dots" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <p className="query-assist-thinking-copy">Improving your query...</p>
                 </div>
               )}
 
