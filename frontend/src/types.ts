@@ -130,6 +130,13 @@ export type ResultsOverview = {
   caveat?: string | null
 }
 
+export type ResultsChatResponse = {
+  answer: string
+  source_indices?: number[] | null
+  sources?: ResultsOverviewSource[] | null
+  follow_up_questions?: string[] | null
+}
+
 export type RetrievalModel = 'tfidf' | 'svd'
 
 export type EssayClaimCandidate = {

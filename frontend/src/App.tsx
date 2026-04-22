@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type SyntheticEvent,
@@ -16,6 +17,7 @@ import {
   EssayClaimCandidateResponse,
   EssayTextExtractionResponse,
   LlmRelevantParagraph,
+  ResultsChatResponse,
   ResultsOverview,
   RetrievalModel,
   SimilarArticlesResponse,
@@ -41,6 +43,13 @@ type TopicFeedbackSearchOptions = {
   markTopicFeedbackApplied?: boolean
   topicOverride?: string
   skipTypoCorrection?: boolean
+}
+type ResultsChatMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  source_indices?: number[] | null
+  sources?: ResultsOverviewSource[] | null
 }
 
 type ConfigResponse = {
@@ -1620,6 +1629,11 @@ function App(): JSX.Element {
   const [resultsOverview, setResultsOverview] = useState<ResultsOverview | null>(null)
   const [resultsOverviewLoading, setResultsOverviewLoading] = useState<boolean>(false)
   const [resultsOverviewError, setResultsOverviewError] = useState<string | null>(null)
+  const [resultsChatMessages, setResultsChatMessages] = useState<ResultsChatMessage[]>([])
+  const [resultsChatInput, setResultsChatInput] = useState<string>('')
+  const [resultsChatLoading, setResultsChatLoading] = useState<boolean>(false)
+  const [resultsChatError, setResultsChatError] = useState<string | null>(null)
+  const [isResultsChatMinimized, setIsResultsChatMinimized] = useState<boolean>(true)
   const [topicFeedbackIrrelevantArticleIds, setTopicFeedbackIrrelevantArticleIds] = useState<string[]>([])
   const [appliedTopicFeedbackArticleIds, setAppliedTopicFeedbackArticleIds] = useState<string[]>([])
   const [querySvdCorpusChartDimensions, setQuerySvdCorpusChartDimensions] = useState<SvdLatentDimension[]>([])
@@ -2736,6 +2750,15 @@ function App(): JSX.Element {
     setResultsOverview(null)
     setResultsOverviewError(null)
     setResultsOverviewLoading(false)
+    resetResultsChat()
+  }
+
+  const resetResultsChat = (): void => {
+    setResultsChatMessages([])
+    setResultsChatInput('')
+    setResultsChatError(null)
+    setResultsChatLoading(false)
+    setIsResultsChatMinimized(true)
   }
 
   const requestResultsOverview = async (
@@ -2808,6 +2831,95 @@ function App(): JSX.Element {
       if (resultsOverviewRequestIdRef.current === requestId) {
         setResultsOverviewLoading(false)
       }
+    }
+  }
+
+  const buildResultsChatQuery = (): string => {
+    if (inputMode === 'essay') {
+      return [
+        resolvedEssayThesis ? `Thesis: ${resolvedEssayThesis}` : null,
+        essayPreparedText.trim() ? `Essay: ${essayPreparedText.trim()}` : null,
+      ].filter(Boolean).join('\n')
+    }
+
+    return [
+      topic.trim() ? `Topic: ${topic.trim()}` : null,
+      opinion.trim() ? `Stance: ${opinion.trim()}` : null,
+    ].filter(Boolean).join('\n')
+  }
+
+  const handleSubmitResultsChat = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault()
+
+    const question = resultsChatInput.trim()
+    if (!question || resultsChatLoading) return
+
+    if (useLlm !== true) {
+      setResultsChatError('Results chat is turned off in the backend config.')
+      return
+    }
+
+    if (!llmAgreementAvailable) {
+      setResultsChatError('Results chat needs SPARK_API_KEY or API_KEY in your backend environment.')
+      return
+    }
+
+    const resultArticles = visibleArticles.slice(0, 10)
+    if (resultArticles.length === 0) {
+      setResultsChatError('There are no results available to chat about.')
+      return
+    }
+
+    const userMessage: ResultsChatMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: question,
+    }
+    const nextMessages = [...resultsChatMessages, userMessage]
+    setResultsChatMessages(nextMessages)
+    setResultsChatInput('')
+    setResultsChatError(null)
+    setResultsChatLoading(true)
+
+    try {
+      const response = await fetch('/api/llm/results-chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          question,
+          query: buildResultsChatQuery(),
+          mode: inputMode,
+          articles: resultArticles,
+          history: resultsChatMessages.slice(-6).map(message => ({
+            role: message.role,
+            content: message.content,
+          })),
+        }),
+      })
+
+      const data = await readApiJson<ResultsChatResponse>(response)
+      if (!data || typeof data.answer !== 'string' || data.answer.trim() === '') {
+        throw new Error('Invalid response from the results chat API.')
+      }
+
+      setResultsChatMessages([
+        ...nextMessages,
+        {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          content: data.answer.trim(),
+          source_indices: normalizeResultsOverviewSourceIndices(data.source_indices),
+          sources: normalizeResultsOverviewSources(data.sources),
+        },
+      ])
+    } catch (fetchError) {
+      console.error('Results chat failed:', fetchError)
+      setResultsChatMessages(nextMessages)
+      setResultsChatError(fetchError instanceof Error ? fetchError.message : 'Results chat failed.')
+    } finally {
+      setResultsChatLoading(false)
     }
   }
 
@@ -4966,6 +5078,93 @@ function App(): JSX.Element {
       )}
 
       {shouldShowEssayShortcut && <Chat onSearchTerm={handleEssaySearch} />}
+
+      {hasSubmittedSearch && !loading && !error && articles.length > 0 && (
+        <aside
+          className={`results-chat-popout ${isResultsChatMinimized ? 'minimized' : 'open'}`}
+          aria-label="Ask questions about these results"
+        >
+          {isResultsChatMinimized ? (
+            <button
+              type="button"
+              className="results-chat-launcher"
+              onClick={() => setIsResultsChatMinimized(false)}
+              aria-label="Open results chat"
+            >
+              <span className="results-chat-launcher-mark" aria-hidden="true">?</span>
+              <span className="results-chat-launcher-copy">
+                <span>Ask the results</span>
+                {resultsChatMessages.length > 0 && (
+                  <span>{`${resultsChatMessages.length} messages`}</span>
+                )}
+              </span>
+            </button>
+          ) : (
+            <section className="results-chat-card">
+              <div className="results-chat-header">
+                <div>
+                  <p className="results-overview-eyebrow">Ask the results</p>
+                  <h3>Question the retrieved articles</h3>
+                </div>
+                <button
+                  type="button"
+                  className="results-chat-minimize-button"
+                  onClick={() => setIsResultsChatMinimized(true)}
+                  aria-label="Minimize results chat"
+                >
+                  _
+                </button>
+              </div>
+
+              <div className="results-chat-body">
+                {resultsChatMessages.length > 0 ? (
+                  <div className="results-chat-thread" aria-live="polite">
+                    {resultsChatMessages.map((message) => (
+                      <div
+                        key={message.id}
+                        className={`results-chat-message ${message.role}`}
+                      >
+                        <p>{message.content}</p>
+                        {message.role === 'assistant' && (
+                          <ResultsOverviewSources
+                            sourceIndices={message.source_indices}
+                            sources={message.sources}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="results-chat-empty">
+                    Ask what the results agree on, where they split, or which pieces best support your claim.
+                  </p>
+                )}
+              </div>
+
+              {resultsChatError && (
+                <p className="results-overview-error">{resultsChatError}</p>
+              )}
+
+              <form className="results-chat-form" onSubmit={handleSubmitResultsChat}>
+                <input
+                  type="text"
+                  value={resultsChatInput}
+                  onChange={(event) => setResultsChatInput(event.target.value)}
+                  placeholder="Ask about these results..."
+                  aria-label="Ask a question about the current results"
+                  disabled={resultsChatLoading}
+                />
+                <button
+                  type="submit"
+                  disabled={resultsChatLoading || resultsChatInput.trim() === ''}
+                >
+                  {resultsChatLoading ? 'Asking...' : 'Ask'}
+                </button>
+              </form>
+            </section>
+          )}
+        </aside>
+      )}
 
       {similarArticleSource && (
         <div

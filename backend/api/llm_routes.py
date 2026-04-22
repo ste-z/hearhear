@@ -216,6 +216,48 @@ def _parse_results_overview_arguments(raw_items, max_index, max_items=4):
     return arguments
 
 
+def _parse_results_chat_response(raw_content, max_source_index=10):
+    text = str(raw_content or "").strip()
+    if not text:
+        raise ValueError("Empty results chat response")
+
+    fence_match = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    candidate = fence_match.group(1).strip() if fence_match else text
+
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return {
+            "answer": _clean_overview_text(text, 1600),
+            "source_indices": [],
+            "follow_up_questions": [],
+        }
+
+    if not isinstance(parsed, dict):
+        raise ValueError("Results chat response must be a JSON object")
+
+    answer = _clean_overview_text(parsed.get("answer"), 1800)
+    if not answer:
+        raise ValueError("Results chat response is missing an answer")
+
+    follow_ups = []
+    raw_follow_ups = parsed.get("follow_up_questions")
+    if isinstance(raw_follow_ups, list):
+        for item in raw_follow_ups[:3]:
+            question = _clean_overview_text(item, 180)
+            if question:
+                follow_ups.append(question)
+
+    return {
+        "answer": answer,
+        "source_indices": _coerce_result_indices(
+            parsed.get("source_indices") or parsed.get("sources") or parsed.get("result_indices"),
+            max_source_index,
+        ),
+        "follow_up_questions": follow_ups,
+    }
+
+
 def _parse_results_overview_response(raw_content, max_source_index=10):
     text = str(raw_content or "").strip()
     if not text:
@@ -727,3 +769,88 @@ def register_chat_route(app, json_search):
 
         overview["sources"] = sources
         return jsonify(overview)
+
+    @app.route("/api/llm/results-chat", methods=["POST"])
+    def results_chat():
+        payload = request.get_json(silent=True) or {}
+        question = str(payload.get("question") or payload.get("message") or "").strip()
+        query = str(payload.get("query") or "").strip()
+        articles = payload.get("articles") or payload.get("results") or []
+        mode = str(payload.get("mode") or "search").strip().lower()
+        history = payload.get("history") or []
+
+        if not question:
+            return jsonify({"error": "Question text is required."}), 400
+        if not isinstance(articles, list) or not articles:
+            return jsonify({"error": "A non-empty articles list is required."}), 400
+
+        api_key = os.getenv("SPARK_API_KEY") or os.getenv("API_KEY")
+        if not api_key:
+            return jsonify({"error": "SPARK_API_KEY or API_KEY not set — add it to your .env file"}), 500
+
+        try:
+            client = create_spark_client(api_key=api_key)
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 500
+
+        usable_articles = [
+            article for article in articles
+            if isinstance(article, dict) and not bool(article.get("llm_irrelevant"))
+        ][:10]
+        if not usable_articles:
+            return jsonify({"error": "No relevant articles are available for chat."}), 400
+
+        context_text = "\n\n---\n\n".join(
+            _format_article_for_results_overview(article, index)
+            for index, article in enumerate(usable_articles)
+        )
+        sources = [
+            _source_for_results_overview(article, index)
+            for index, article in enumerate(usable_articles)
+        ]
+
+        history_lines = []
+        if isinstance(history, list):
+            for item in history[-6:]:
+                if not isinstance(item, dict):
+                    continue
+                role = str(item.get("role") or "").strip().lower()
+                content = _clean_overview_text(item.get("content"), 500)
+                if role in {"user", "assistant"} and content:
+                    history_lines.append(f"{role}: {content}")
+        history_text = "\n".join(history_lines) if history_lines else "None"
+
+        system_prompt = (
+            "You answer follow-up questions about a Guardian opinion article results page. "
+            "Use only the supplied search query, prior chat, and article result snippets. "
+            "Do not add outside facts or claim you read the full articles. "
+            "When the answer depends on specific results, cite them with source_indices using the 1-based Result numbers. "
+            "If the snippets do not contain enough information, say what is missing and answer only what can be inferred. "
+            "Return valid JSON only with keys: answer, source_indices, follow_up_questions. "
+            "answer must be concise but useful. source_indices must list every Result number that directly supports the answer. "
+            "follow_up_questions must be an array of 0-3 short suggested questions."
+        )
+        user_prompt = (
+            f"Search mode: {mode}\n"
+            f"Original search query:\n{query or 'Not provided'}\n\n"
+            f"Prior chat:\n{history_text}\n\n"
+            f"Top retrieved article snippets:\n\n{context_text}\n\n"
+            f"User question:\n{question}"
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        try:
+            response = client.chat(messages)
+            answer = _parse_results_chat_response(
+                response.get("content"),
+                max_source_index=len(usable_articles),
+            )
+        except Exception:
+            logger.exception("Results chat request failed")
+            return jsonify({"error": "LLM results chat failed"}), 500
+
+        answer["sources"] = sources
+        return jsonify(answer)
