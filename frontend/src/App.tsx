@@ -5222,7 +5222,7 @@ function App(): JSX.Element {
                                 <div className="svd-section-copy-block">
                                   <div className="svd-section-title">Query top 10 concepts</div>
                                   <p className="svd-section-copy">
-                                    This radar uses the 10 concepts most activated by the query, then shows how strongly this article aligns with each one.
+                                    This chart shows the main ideas in your query, and how strongly this article relates to each of them.
                                   </p>
                                 </div>
                                 <SvdRadarChart
@@ -5244,7 +5244,7 @@ function App(): JSX.Element {
                                 <div className="svd-section-copy-block">
                                   <div className="svd-section-title">Shared top 10 corpus concepts</div>
                                   <p className="svd-section-copy">
-                                    This radar plots every article against the same 10 broad corpus concepts, so differences in shape reflect differences in topic emphasis.
+                                    This chart compares the article to a common set of broad topics used across all results, so you can see how its focus differs from others.
                                   </p>
                                 </div>
                                 <SvdRadarChart
@@ -5268,7 +5268,10 @@ function App(): JSX.Element {
                                   <div className="svd-section-copy-block">
                                     <div className="svd-section-title">Top concepts for this article</div>
                                     <p className="svd-section-copy">
-                                      These bars show the article&apos;s top 10 concepts overall. Concepts extend left for negative loadings and right for positive loadings.
+                                      Longer bars mean the article is more strongly associated with that concept.
+                                    </p>
+                                    <p className='svd-section-copy'>
+                                      The direction (left vs. right) shows which side of the concept the article falls on. SVD dimensions capture contrasts between related themes, so opposite directions correspond to different but related topics.
                                     </p>
                                   </div>
 
