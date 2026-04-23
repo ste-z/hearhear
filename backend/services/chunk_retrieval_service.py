@@ -8,6 +8,12 @@ import numpy as np
 import pandas as pd
 
 from backend.runtime.runtime_debug import log_runtime_event
+from backend.text_processing.minilm_processor import (
+    DEFAULT_MINILM_CHUNK_INDEX_NAME,
+    MiniLmEmbeddingIndex,
+    load_minilm_chunk_index,
+    preprocess_minilm_indexes,
+)
 from backend.text_processing.paragraph_splitter import (
     normalize_paragraph_text,
     split_into_paragraphs,
@@ -68,6 +74,7 @@ CHUNK_INDEX_SCHEMA_VERSION = 2
 DEFAULT_CHUNK_AUTO_THRESHOLDS = {
     "tfidf": 0.12,
     "svd": 0.35,
+    "minilm": 0.45,
 }
 CHUNK_SCORE_WEIGHTS = {
     "max": 0.5,
@@ -76,7 +83,7 @@ CHUNK_SCORE_WEIGHTS = {
 }
 WORD_COUNT_PATTERN = re.compile(r"\b[\w'-]+\b")
 
-SUPPORTED_CHUNK_RETRIEVAL_MODELS = ("tfidf", "svd")
+SUPPORTED_CHUNK_RETRIEVAL_MODELS = ("tfidf", "svd", "minilm")
 SUPPORTED_CHUNK_INDEX_MODES = ("paragraph", "semantic")
 
 _chunk_indexes = {}
@@ -755,7 +762,7 @@ class ChunkRetrievalIndex:
             raise ValueError(f"Chunk retrieval does not support {retrieval_model!r}.")
         self.chunking_mode = normalize_chunk_index_mode(chunking_mode)
         self.processor = processor
-        self.vectorizer = processor.vectorizer
+        self.vectorizer = getattr(processor, "vectorizer", None)
         self.chunk_rows = list(chunk_rows)
         self.chunk_matrix = chunk_matrix
         self.n_chunks = len(self.chunk_rows)
@@ -764,9 +771,9 @@ class ChunkRetrievalIndex:
             if self.retrieval_model == "svd" and hasattr(processor, "components")
             else None
         )
-        self._normalized_svd_chunk_embeddings = (
-            np.asarray(processor.normalized_doc_embeddings, dtype=np.float32)
-            if self.retrieval_model == "svd"
+        self._normalized_dense_chunk_embeddings = (
+            np.asarray(processor.normalized_doc_embeddings)
+            if self.retrieval_model in {"svd", "minilm"}
             and hasattr(processor, "normalized_doc_embeddings")
             and int(getattr(processor, "n_docs", self.n_chunks)) == self.n_chunks
             else None
@@ -788,10 +795,12 @@ class ChunkRetrievalIndex:
             dtype=np.int32,
         )
 
-    def _svd_chunk_embeddings(self):
+    def _dense_chunk_embeddings(self):
+        if self.retrieval_model == "minilm":
+            return self._normalized_dense_chunk_embeddings
         if self.svd_components is None:
             return None
-        if self._normalized_svd_chunk_embeddings is None:
+        if self._normalized_dense_chunk_embeddings is None:
             if self.chunk_matrix is None:
                 return None
             log_runtime_event(
@@ -799,13 +808,13 @@ class ChunkRetrievalIndex:
                 chunk_count=self.n_chunks,
             )
             embeddings = self.chunk_matrix @ self.svd_components.T
-            self._normalized_svd_chunk_embeddings = _normalize_dense_rows(embeddings)
+            self._normalized_dense_chunk_embeddings = _normalize_dense_rows(embeddings)
             log_runtime_event(
                 "chunk_index.svd_project_done",
                 chunk_count=self.n_chunks,
-                n_components=int(self._normalized_svd_chunk_embeddings.shape[1]),
+                n_components=int(self._normalized_dense_chunk_embeddings.shape[1]),
             )
-        return self._normalized_svd_chunk_embeddings
+        return self._normalized_dense_chunk_embeddings
 
     def _candidate_filter_mask(
         self,
@@ -871,22 +880,25 @@ class ChunkRetrievalIndex:
             return []
 
         resolved_top_n = normalize_chunk_candidate_top_k(top_n)
-        query_vec = self.vectorizer.transform([resolved_query])
-        if int(getattr(query_vec, "nnz", 0)) <= 0:
-            return []
-
-        if self.retrieval_model == "svd":
-            embeddings = self._svd_chunk_embeddings()
+        if self.retrieval_model in {"svd", "minilm"}:
+            embeddings = self._dense_chunk_embeddings()
             if embeddings is None:
                 return []
-            projected = query_vec @ self.svd_components.T
-            query_embedding = _normalize_dense_vector(projected)
+            if not hasattr(self.processor, "project_query"):
+                return []
+            query_embedding = self.processor.project_query(query, normalize=True)
             if query_embedding is None:
                 return []
-            scores = np.asarray(embeddings @ query_embedding, dtype=np.float32)
+            scores = np.asarray(
+                embeddings @ np.asarray(query_embedding, dtype=embeddings.dtype),
+                dtype=np.float32,
+            )
             candidate_indices = np.flatnonzero(scores > 0)
             candidate_scores = scores[candidate_indices]
         else:
+            query_vec = self.vectorizer.transform([resolved_query])
+            if int(getattr(query_vec, "nnz", 0)) <= 0:
+                return []
             score_matrix = query_vec @ self.chunk_matrix.T
             if int(getattr(score_matrix, "nnz", 0)) <= 0:
                 return []
@@ -958,33 +970,68 @@ def build_chunk_retrieval_index(
     chunking_mode=DEFAULT_CHUNK_RETRIEVAL_CHUNKING_MODE,
 ):
     resolved_model = normalize_retrieval_model(retrieval_model)
-    if resolved_model != "svd":
-        raise ValueError("Chunk retrieval uses the precomputed SVD chunk index.")
+    if resolved_model not in {"svd", "minilm"}:
+        raise ValueError("Chunk retrieval uses a precomputed semantic chunk index.")
     resolved_chunking_mode = normalize_chunk_index_mode(chunking_mode)
     cache_key = (resolved_model, resolved_chunking_mode)
+    index_name = (
+        DEFAULT_CHUNK_SVD_INDEX_NAME
+        if resolved_model == "svd"
+        else DEFAULT_MINILM_CHUNK_INDEX_NAME
+    )
 
     cached = _chunk_indexes.get(cache_key)
     if cached is not None:
-        return cached
+        if resolved_model == "svd":
+            current_meta = _load_index_meta(
+                TruncatedSvdIndex.artifact_paths(DEFAULT_INDEX_DIR, index_name)["meta"]
+            )
+        else:
+            current_meta = _load_index_meta(
+                MiniLmEmbeddingIndex.artifact_paths(DEFAULT_INDEX_DIR, index_name)["meta"]
+            )
+        if current_meta.get("saved_at_utc") == getattr(cached, "index_saved_at_utc", None):
+            return cached
+        _chunk_indexes.pop(cache_key, None)
 
     with _chunk_index_lock:
         cached = _chunk_indexes.get(cache_key)
         if cached is not None:
-            return cached
+            if resolved_model == "svd":
+                current_meta = _load_index_meta(
+                    TruncatedSvdIndex.artifact_paths(DEFAULT_INDEX_DIR, index_name)["meta"]
+                )
+            else:
+                current_meta = _load_index_meta(
+                    MiniLmEmbeddingIndex.artifact_paths(DEFAULT_INDEX_DIR, index_name)["meta"]
+                )
+            if current_meta.get("saved_at_utc") == getattr(cached, "index_saved_at_utc", None):
+                return cached
+            _chunk_indexes.pop(cache_key, None)
 
         log_runtime_event(
             "chunk_index.load_start",
             retrieval_model=resolved_model,
             chunking_mode=resolved_chunking_mode,
-            index_name=DEFAULT_CHUNK_SVD_INDEX_NAME,
+            index_name=index_name,
         )
-        processor, meta = load_chunk_svd_index(
-            index_name=DEFAULT_CHUNK_SVD_INDEX_NAME,
-            load_articles=True,
-        )
+        if resolved_model == "svd":
+            processor, meta = load_chunk_svd_index(
+                index_name=DEFAULT_CHUNK_SVD_INDEX_NAME,
+                load_articles=True,
+            )
+        else:
+            preprocess_minilm_indexes(
+                index_dir=DEFAULT_INDEX_DIR,
+                force_rebuild=False,
+            )
+            processor, meta = load_minilm_chunk_index(
+                index_name=DEFAULT_MINILM_CHUNK_INDEX_NAME,
+                load_articles=True,
+            )
         chunk_rows = _chunk_rows_from_svd_processor(processor)
         if not chunk_rows:
-            raise RuntimeError("The precomputed chunk SVD index has no chunk rows.")
+            raise RuntimeError("The precomputed chunk retrieval index has no chunk rows.")
 
         index = ChunkRetrievalIndex(
             retrieval_model=resolved_model,
@@ -992,12 +1039,13 @@ def build_chunk_retrieval_index(
             processor=processor,
             chunk_rows=chunk_rows,
         )
+        index.index_saved_at_utc = meta.get("saved_at_utc")
         _chunk_indexes[cache_key] = index
         log_runtime_event(
             "chunk_index.load_done",
             retrieval_model=resolved_model,
             chunking_mode=resolved_chunking_mode,
-            index_name=DEFAULT_CHUNK_SVD_INDEX_NAME,
+            index_name=index_name,
             meta_chunking_mode=meta.get("chunking_mode"),
             chunk_count=index.n_chunks,
         )
@@ -1137,7 +1185,10 @@ def chunk_retrieval_search(
         threshold=threshold,
     )
     if not chunks:
-        retrieval_label = "SVD" if resolved_model == "svd" else "TF-IDF"
+        retrieval_label = (
+            "SVD" if resolved_model == "svd"
+            else ("Enhanced Semantic" if resolved_model == "minilm" else "TF-IDF")
+        )
         threshold_copy = (
             f" above the {threshold:.2f} chunk relevance threshold"
             if threshold is not None

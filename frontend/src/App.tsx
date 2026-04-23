@@ -38,7 +38,7 @@ type StanceMethod = 'nli' | 'llm'
 type ChunkingMode = 'none' | 'paragraph' | 'semantic'
 type FrontendChunkingMode = Exclude<ChunkingMode, 'paragraph'>
 type LengthFilterUnit = 'characters' | 'words' | 'reading_time'
-type SettingsFocusTarget = 'topic-relevance' | 'agreement-scorer'
+type SettingsFocusTarget = 'retrieval-granularity' | 'topic-relevance' | 'agreement-scorer'
 type QueryAssistMode = 'menu' | 'rewrite' | 'suggestions'
 type SvdDimensionLabelMap = Record<number, string>
 type SvdChartSeriesRole = 'article' | 'query'
@@ -124,7 +124,7 @@ const introClaimsByTopic: Record<IntroTopic, readonly string[]> = {
 const finalIntroTopic = introTopicSequence[introTopicSequence.length - 1]
 const introClaimSequence = introClaimsByTopic[finalIntroTopic]
 const landingSeenStorageKey = 'hearhear.hasSeenLanding'
-const defaultSupportedRetrievalModels: RetrievalModel[] = ['svd', 'tfidf']
+const defaultSupportedRetrievalModels: RetrievalModel[] = ['svd', 'minilm', 'tfidf']
 const defaultRerankSelectionMode: RerankSelectionMode = 'automatic'
 const defaultStanceMethod: StanceMethod = 'nli'
 const defaultSupportedStanceMethods: StanceMethod[] = ['nli', 'llm']
@@ -133,10 +133,12 @@ const defaultSupportedChunkingModes: FrontendChunkingMode[] = ['none', 'semantic
 const defaultAutoRerankThresholds: Record<RetrievalModel, number> = {
   tfidf: 0.3,
   svd: 0.6,
+  minilm: 0.4,
 }
 const defaultChunkAutoRerankThresholds: Record<RetrievalModel, number> = {
   tfidf: 0.12,
   svd: 0.35,
+  minilm: 0.45,
 }
 const defaultMaxAutoRerankCandidates = 100
 const defaultChunkCandidateTopK = 300
@@ -145,7 +147,7 @@ const defaultMaxChunkCandidateTopK = 2000
 const similarArticlesPageSize = 5
 
 const isRetrievalModel = (value: unknown): value is RetrievalModel => (
-  value === 'tfidf' || value === 'svd'
+  value === 'tfidf' || value === 'svd' || value === 'minilm'
 )
 
 const normalizeRetrievalModels = (value: unknown): RetrievalModel[] => {
@@ -182,6 +184,44 @@ const normalizeChunkingModes = (value: unknown): FrontendChunkingMode[] => {
   const filtered = value.filter(isFrontendChunkingMode)
   const unique = Array.from(new Set(filtered))
   return unique.length > 0 ? unique : defaultSupportedChunkingModes
+}
+
+const resolvePreferredStanceMethod = (
+  preferredMethod: StanceMethod,
+  supportedMethods: StanceMethod[],
+  llmAvailable: boolean,
+): StanceMethod => {
+  const fallbackMethod = supportedMethods.includes('nli')
+    ? 'nli'
+    : (supportedMethods[0] ?? defaultSupportedStanceMethods[0])
+
+  if (preferredMethod === 'llm') {
+    return llmAvailable && supportedMethods.includes('llm') ? 'llm' : fallbackMethod
+  }
+
+  if (supportedMethods.includes(preferredMethod)) {
+    return preferredMethod
+  }
+
+  return llmAvailable && supportedMethods.includes('llm')
+    ? 'llm'
+    : fallbackMethod
+}
+
+const resolvePreferredChunkingMode = (
+  preferredMode: FrontendChunkingMode,
+  supportedModes: FrontendChunkingMode[],
+  llmAvailable: boolean,
+): FrontendChunkingMode => {
+  const fallbackMode = supportedModes.includes('none')
+    ? 'none'
+    : (supportedModes[0] ?? defaultChunkingMode)
+
+  if (preferredMode === 'semantic') {
+    return llmAvailable && supportedModes.includes('semantic') ? 'semantic' : fallbackMode
+  }
+
+  return supportedModes.includes(preferredMode) ? preferredMode : fallbackMode
 }
 
 const clampAutoRerankThreshold = (value: number): number => (
@@ -1947,6 +1987,7 @@ function App(): JSX.Element {
   const [essayActiveStep, setEssayActiveStep] = useState<EssayStep>(1)
   const essayOptionsRef = useRef<HTMLDivElement | null>(null)
   const settingsScrollPaneRef = useRef<HTMLDivElement | null>(null)
+  const retrievalGranularitySettingsRef = useRef<HTMLDivElement | null>(null)
   const topicSettingsRef = useRef<HTMLDivElement | null>(null)
   const agreementSettingsRef = useRef<HTMLDivElement | null>(null)
   const resultsSectionRef = useRef<HTMLDivElement | null>(null)
@@ -1983,6 +2024,7 @@ function App(): JSX.Element {
         const supportedModels = normalizeRetrievalModels(data.supported_retrieval_models)
         const supportedAgreementMethods = normalizeStanceMethods(data.supported_stance_methods)
         const supportedChunkingOptions = normalizeChunkingModes(data.supported_chunking_modes)
+        const llmAvailable = Boolean(data.llm_agreement_available)
         const preferredModel = isRetrievalModel(data.default_retrieval_model)
           ? data.default_retrieval_model
           : supportedModels[0]
@@ -1991,18 +2033,20 @@ function App(): JSX.Element {
           : supportedModels[0]
         const preferredStanceMethod = isStanceMethod(data.default_stance_method)
           ? data.default_stance_method
-          : defaultStanceMethod
-        const resolvedStanceMethod = supportedAgreementMethods.includes(preferredStanceMethod)
-          ? preferredStanceMethod
-          : supportedAgreementMethods[0]
+          : 'llm'
+        const resolvedStanceMethod = resolvePreferredStanceMethod(
+          preferredStanceMethod,
+          supportedAgreementMethods,
+          llmAvailable,
+        )
         const preferredChunkingMode = isFrontendChunkingMode(data.default_chunking_mode)
           ? data.default_chunking_mode
           : (data.default_use_chunking ? 'semantic' : defaultChunkingMode)
-        const resolvedChunkingMode = supportedChunkingOptions.includes(preferredChunkingMode)
-          ? preferredChunkingMode
-          : (supportedChunkingOptions.includes(defaultChunkingMode)
-            ? defaultChunkingMode
-            : supportedChunkingOptions[0])
+        const resolvedChunkingMode = resolvePreferredChunkingMode(
+          preferredChunkingMode,
+          supportedChunkingOptions,
+          llmAvailable,
+        )
         const nextMinArticleYear = normalizeConfigYear(data.min_article_year)
         const nextMaxArticleYear = normalizeConfigYear(data.max_article_year)
         const nextMinArticleCharacters = normalizeConfigInteger(data.min_article_characters)
@@ -2014,16 +2058,12 @@ function App(): JSX.Element {
         setSupportedRetrievalModels(supportedModels)
         setSupportedStanceMethods(supportedAgreementMethods)
         setSupportedChunkingModes(supportedChunkingOptions)
-        setLlmAgreementAvailable(Boolean(data.llm_agreement_available))
+        setLlmAgreementAvailable(llmAvailable)
         setRetrievalModel(currentModel => (
           supportedModels.includes(currentModel) ? currentModel : resolvedModel
         ))
-        setStanceMethod(currentMethod => (
-          supportedAgreementMethods.includes(currentMethod) ? currentMethod : resolvedStanceMethod
-        ))
-        setChunkingMode(currentMode => (
-          supportedChunkingOptions.includes(currentMode) ? currentMode : resolvedChunkingMode
-        ))
+        setStanceMethod(resolvedStanceMethod)
+        setChunkingMode(resolvedChunkingMode)
         setRerankSelectionMode(currentMode => (
           isRerankSelectionMode(data.default_rerank_selection_mode)
             ? data.default_rerank_selection_mode
@@ -2140,8 +2180,8 @@ function App(): JSX.Element {
         if (!isActive) return
         setUseLlm(false)
         setRerankSelectionMode(defaultRerankSelectionMode)
-        setStanceMethod(defaultStanceMethod)
-        setChunkingMode(defaultChunkingMode)
+        setStanceMethod(resolvePreferredStanceMethod(defaultStanceMethod, defaultSupportedStanceMethods, false))
+        setChunkingMode(resolvePreferredChunkingMode(defaultChunkingMode, defaultSupportedChunkingModes, false))
         setSupportedStanceMethods(defaultSupportedStanceMethods)
         setSupportedChunkingModes(defaultSupportedChunkingModes)
         setLlmAgreementAvailable(false)
@@ -2384,9 +2424,11 @@ function App(): JSX.Element {
     }
 
     const frameId = window.requestAnimationFrame(() => {
-      const target = settingsFocusTarget === 'topic-relevance'
-        ? topicSettingsRef.current
-        : agreementSettingsRef.current
+      const target = settingsFocusTarget === 'retrieval-granularity'
+        ? retrievalGranularitySettingsRef.current
+        : (settingsFocusTarget === 'topic-relevance'
+          ? topicSettingsRef.current
+          : agreementSettingsRef.current)
       const pane = settingsScrollPaneRef.current
       if (!target || !pane) return
 
@@ -2546,13 +2588,25 @@ function App(): JSX.Element {
   const isUsingCustomEssayThesis = essayThesisMode === 'custom'
   const essayWorkflowStep = shouldUseEssayThesisStep && isEssayStepTwoAvailable ? essayActiveStep : 1
   const canUseSvd = supportedRetrievalModels.includes('svd')
+  const canUseMiniLm = supportedRetrievalModels.includes('minilm')
   const canUseTfidf = supportedRetrievalModels.includes('tfidf')
   const canUseNliAgreement = supportedStanceMethods.includes('nli')
   const canUseLlmAgreement = supportedStanceMethods.includes('llm') && llmAgreementAvailable
   const canUseChunking = canUseLlmAgreement && supportedChunkingModes.includes('semantic')
   const canUseLexicalRetrieval = canUseTfidf && !useChunking
-  const effectiveRetrievalModel: RetrievalModel = useChunking ? 'svd' : retrievalModel
-  const canToggleSvd = canUseSvd && canUseTfidf && !useChunking
+  const firstSemanticRetrievalModel: RetrievalModel | null = canUseSvd
+    ? 'svd'
+    : (canUseMiniLm ? 'minilm' : null)
+  const effectiveRetrievalModel: RetrievalModel = (
+    useChunking && retrievalModel === 'tfidf' && firstSemanticRetrievalModel
+      ? firstSemanticRetrievalModel
+      : retrievalModel
+  )
+  const effectiveRetrievalLabel = (
+    effectiveRetrievalModel === 'tfidf'
+      ? 'Lexical'
+      : (effectiveRetrievalModel === 'minilm' ? 'Enhanced Semantic' : 'Semantic')
+  )
   const isLexicalSearchMode = !useChunking && retrievalModel === 'tfidf'
   const queryAssistDisabledReason = !hasQueryAssistInput
     ? 'Add a topic or stance to use AI query help.'
@@ -2569,10 +2623,10 @@ function App(): JSX.Element {
   )[effectiveRetrievalModel]
 
   useEffect(() => {
-    if (useChunking && retrievalModel !== 'svd' && canUseSvd) {
-      setRetrievalModel('svd')
+    if (useChunking && retrievalModel === 'tfidf' && firstSemanticRetrievalModel) {
+      setRetrievalModel(firstSemanticRetrievalModel)
     }
-  }, [canUseSvd, retrievalModel, useChunking])
+  }, [firstSemanticRetrievalModel, retrievalModel, useChunking])
 
   const availableYears = useMemo(() => {
     if (minArticleYear === null || maxArticleYear === null || minArticleYear > maxArticleYear) {
@@ -3827,6 +3881,17 @@ function App(): JSX.Element {
     setRetrievalModel(nextModel)
   }
 
+  const handleChunkingModeChange = (nextUseChunking: boolean): void => {
+    if (nextUseChunking) {
+      if (!canUseChunking) return
+      setChunkingMode('semantic')
+      setStanceMethod('llm')
+      return
+    }
+
+    setChunkingMode('none')
+  }
+
   const handleAgreementSearchModeChange = (nextMethod: StanceMethod): void => {
     if (!supportedStanceMethods.includes(nextMethod)) return
     if (nextMethod === 'llm') {
@@ -3835,8 +3900,8 @@ function App(): JSX.Element {
       return
     }
 
+    if (useChunking) return
     if (!canUseNliAgreement) return
-    setChunkingMode('none')
     setStanceMethod('nli')
   }
 
@@ -3896,13 +3961,8 @@ function App(): JSX.Element {
     return plural ? 'paragraphs' : 'Paragraph'
   }
   const getParagraphEvidenceHint = (article: Article): string => {
-    const relatedCount = article.llm_related_chunk_count ?? article.llm_relevant_paragraphs?.length ?? 0
-    const totalCount = article.llm_chunk_count ?? 0
-    const chunkNoun = getLlmChunkNoun(article)
-    if (relatedCount > 0 && totalCount > 0) {
-      return `Expand to inspect the strongest ${Math.min(relatedCount, article.llm_relevant_paragraphs?.length ?? relatedCount)} of ${relatedCount} related ${chunkNoun}.`
-    }
-    return `Expand to inspect the ${chunkNoun} behind this LLM score.`
+    void article
+    return ''
   }
   const paragraphKey = (
     article: Article,
@@ -4433,72 +4493,116 @@ function App(): JSX.Element {
                 </button>
               </div>
 
-              <div className="top-search-mode-toolbar" aria-label="Search scoring modes">
-                <div className="top-search-mode-group">
+              <div className="top-search-controls" aria-label="Search controls">
+                <div className="top-search-mode-group top-search-mode-group-compact">
                   <div className="top-search-mode-heading">
-                    <span>Topic Relevance Search Mode</span>
+                    <span>Search Granularity</span>
                     <button
                       type="button"
                       className="top-search-mode-help"
-                      onClick={() => openSettingsAt('topic-relevance')}
-                      aria-label="Open topic relevance mode settings"
+                      onClick={() => openSettingsAt('retrieval-granularity')}
+                      aria-label="Open search granularity settings"
                     >
                       ?
                     </button>
                   </div>
-                  <div className="top-search-mode-segments" role="group" aria-label="Topic relevance search mode">
+                  <div className="top-search-mode-segments" role="group" aria-label="Search granularity">
                     <button
                       type="button"
-                      className={`top-search-mode-segment ${!useChunking && retrievalModel === 'tfidf' ? 'active' : ''}`}
-                      aria-pressed={!useChunking && retrievalModel === 'tfidf'}
-                      onClick={() => handleTopicSearchModeChange('tfidf')}
-                      disabled={!canUseLexicalRetrieval}
+                      className={`top-search-mode-segment ${!useChunking ? 'active' : ''}`}
+                      aria-pressed={!useChunking}
+                      onClick={() => handleChunkingModeChange(false)}
                     >
-                      Lexical
+                      Article
                     </button>
                     <button
                       type="button"
-                      className={`top-search-mode-segment ${effectiveRetrievalModel === 'svd' ? 'active' : ''}`}
-                      aria-pressed={effectiveRetrievalModel === 'svd'}
-                      onClick={() => handleTopicSearchModeChange('svd')}
-                      disabled={!canUseSvd}
+                      className={`top-search-mode-segment ${useChunking ? 'active' : ''}`}
+                      aria-pressed={useChunking}
+                      onClick={() => handleChunkingModeChange(true)}
+                      disabled={!canUseChunking}
                     >
-                      Semantic
+                      Chunks
                     </button>
                   </div>
                 </div>
 
-                <div className="top-search-mode-group">
-                  <div className="top-search-mode-heading">
-                    <span>Stance Agreement Search Mode</span>
-                    <button
-                      type="button"
-                      className="top-search-mode-help"
-                      onClick={() => openSettingsAt('agreement-scorer')}
-                      aria-label="Open stance agreement mode settings"
-                    >
-                      ?
-                    </button>
+                <div className="top-search-mode-toolbar" aria-label="Search methods">
+                  <div className="top-search-mode-group">
+                    <div className="top-search-mode-heading">
+                      <span>Topic Relevance Search Method</span>
+                      <button
+                        type="button"
+                        className="top-search-mode-help"
+                        onClick={() => openSettingsAt('topic-relevance')}
+                        aria-label="Open topic relevance settings"
+                      >
+                        ?
+                      </button>
+                    </div>
+                    <div className="top-search-mode-segments" role="group" aria-label="Topic relevance search method">
+                      <button
+                        type="button"
+                        className={`top-search-mode-segment ${!useChunking && retrievalModel === 'tfidf' ? 'active' : ''}`}
+                        aria-pressed={!useChunking && retrievalModel === 'tfidf'}
+                        onClick={() => handleTopicSearchModeChange('tfidf')}
+                        disabled={!canUseLexicalRetrieval}
+                      >
+                        Lexical
+                      </button>
+                      <button
+                        type="button"
+                        className={`top-search-mode-segment ${effectiveRetrievalModel === 'svd' ? 'active' : ''}`}
+                        aria-pressed={effectiveRetrievalModel === 'svd'}
+                        onClick={() => handleTopicSearchModeChange('svd')}
+                        disabled={!canUseSvd}
+                      >
+                        Semantic
+                      </button>
+                      <button
+                        type="button"
+                        className={`top-search-mode-segment ${effectiveRetrievalModel === 'minilm' ? 'active' : ''}`}
+                        aria-pressed={effectiveRetrievalModel === 'minilm'}
+                        onClick={() => handleTopicSearchModeChange('minilm')}
+                        disabled={!canUseMiniLm}
+                      >
+                        Enhanced
+                      </button>
+                    </div>
                   </div>
-                  <div className="top-search-mode-segments" role="group" aria-label="Stance agreement search mode">
-                    <button
-                      type="button"
-                      className={`top-search-mode-segment ${effectiveStanceMethod === 'nli' ? 'active' : ''}`}
-                      aria-pressed={effectiveStanceMethod === 'nli'}
-                      onClick={() => handleAgreementSearchModeChange('nli')}
-                      disabled={!canUseNliAgreement}
-                    >
-                      Fast
-                    </button>
-                    <button
-                      type="button"
-                      className={`top-search-mode-segment ${effectiveStanceMethod === 'llm' ? 'active' : ''}`}
-                      aria-pressed={effectiveStanceMethod === 'llm'}
-                      onClick={() => handleAgreementSearchModeChange('llm')}
-                      disabled={!canUseLlmAgreement}
-                    >
-                      Enhanced
-                    </button>
+
+                  <div className="top-search-mode-group">
+                    <div className="top-search-mode-heading">
+                      <span>Stance Agreement Search Method</span>
+                      <button
+                        type="button"
+                        className="top-search-mode-help"
+                        onClick={() => openSettingsAt('agreement-scorer')}
+                        aria-label="Open stance agreement settings"
+                      >
+                        ?
+                      </button>
+                    </div>
+                    <div className="top-search-mode-segments" role="group" aria-label="Stance agreement search method">
+                      <button
+                        type="button"
+                        className={`top-search-mode-segment ${effectiveStanceMethod === 'nli' ? 'active' : ''}`}
+                        aria-pressed={effectiveStanceMethod === 'nli'}
+                        onClick={() => handleAgreementSearchModeChange('nli')}
+                        disabled={!canUseNliAgreement || useChunking}
+                      >
+                        Fast
+                      </button>
+                      <button
+                        type="button"
+                        className={`top-search-mode-segment ${effectiveStanceMethod === 'llm' ? 'active' : ''}`}
+                        aria-pressed={effectiveStanceMethod === 'llm'}
+                        onClick={() => handleAgreementSearchModeChange('llm')}
+                        disabled={!canUseLlmAgreement}
+                      >
+                        Enhanced
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -6383,7 +6487,7 @@ function App(): JSX.Element {
                   {isLexicalSearchMode
                     ? 'Exclude tagged words from lexical TF-IDF results.'
                     : (useChunking
-                      ? 'Unavailable while semantic chunking is on.'
+                      ? 'Unavailable while Search Granularity is set to Chunks.'
                       : 'Switch Topic Relevance Search Mode to Lexical to use this filter.')}
                 </p>
               </div>
@@ -6422,6 +6526,68 @@ function App(): JSX.Element {
             <div className="settings-scroll-pane" ref={settingsScrollPaneRef}>
               <section className="settings-stage-section">
                 <div className="settings-stage-heading">
+                  <span>Pipeline</span>
+                  <h4>Search granularity</h4>
+                </div>
+                <div className="modal-settings-grid">
+                  <div
+                    className="weight-card full-row settings-selection-card settings-scroll-target"
+                    ref={retrievalGranularitySettingsRef}
+                    tabIndex={-1}
+                  >
+                    <span>Search Granularity</span>
+                    <div className="retrieval-model-grid">
+                      <button
+                        type="button"
+                        className={`retrieval-model-button ${!useChunking ? 'active' : ''}`}
+                        onClick={() => handleChunkingModeChange(false)}
+                      >
+                        <strong>Article</strong>
+                        <p>Search and score each article as a whole.</p>
+                      </button>
+                      <button
+                        type="button"
+                        className={`retrieval-model-button ${useChunking ? 'active' : ''}`}
+                        onClick={() => handleChunkingModeChange(true)}
+                        disabled={!canUseChunking}
+                      >
+                        <strong>Chunks</strong>
+                        <p>
+                          {canUseChunking
+                            ? 'Search over semantic chunks in Stage 1, then send the top chunks to the LLM in Stage 2.'
+                            : 'Add SPARK_API_KEY or API_KEY to enable chunk-level search.'}
+                        </p>
+                      </button>
+                    </div>
+                    {useChunking && (
+                      <label className="settings-inline-field settings-range-field">
+                        <div className="settings-range-header">
+                          <span>Global chunk pool</span>
+                          <strong className="settings-range-value">{chunkCandidateTopK}</strong>
+                        </div>
+                        <input
+                          type="range"
+                          min="25"
+                          max={maxChunkCandidateTopK}
+                          step="25"
+                          value={chunkCandidateTopK}
+                          onChange={(e) => setChunkCandidateTopK(parseChunkCandidateTopKInput(e.target.value, chunkCandidateTopK))}
+                        />
+                        <div className="settings-range-scale" aria-hidden="true">
+                          <span>25</span>
+                          <span>{maxChunkCandidateTopK}</span>
+                        </div>
+                        <p className="setting-help-text">
+                          Search this many top chunks globally before grouping them back into articles. The LLM receives the top {chunkArticleTopK} chunks per article.
+                        </p>
+                      </label>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              <section className="settings-stage-section">
+                <div className="settings-stage-heading">
                   <span>Stage 1</span>
                   <h4>Topic retrieval</h4>
                 </div>
@@ -6438,10 +6604,10 @@ function App(): JSX.Element {
                           type="button"
                           className={`retrieval-model-button ${!useChunking && retrievalModel === 'tfidf' ? 'active' : ''}`}
                           onClick={() => handleTopicSearchModeChange('tfidf')}
-                          disabled={!canUseLexicalRetrieval || !canToggleSvd}
+                          disabled={!canUseLexicalRetrieval}
                         >
                           <strong>Lexical</strong>
-                          <p>{useChunking ? 'Disabled while semantic chunking is on.' : 'Pure TF-IDF term matching with cosine similarity.'}</p>
+                          <p>{useChunking ? 'Disabled while Search Granularity is set to Chunks.' : 'Pure TF-IDF term matching with cosine similarity.'}</p>
                         </button>
                       )}
                       {canUseSvd && (
@@ -6449,10 +6615,21 @@ function App(): JSX.Element {
                           type="button"
                           className={`retrieval-model-button ${effectiveRetrievalModel === 'svd' ? 'active' : ''}`}
                           onClick={() => handleTopicSearchModeChange('svd')}
-                          disabled={!canUseSvd || (!useChunking && !canToggleSvd)}
+                          disabled={!canUseSvd}
                         >
                           <strong>Semantic</strong>
                           <p>Truncated-SVD on TF-IDF to compare articles in latent concept space with cosine similarity.</p>
+                        </button>
+                      )}
+                      {canUseMiniLm && (
+                        <button
+                          type="button"
+                          className={`retrieval-model-button ${effectiveRetrievalModel === 'minilm' ? 'active' : ''}`}
+                          onClick={() => handleTopicSearchModeChange('minilm')}
+                          disabled={!canUseMiniLm}
+                        >
+                          <strong>Enhanced Semantic</strong>
+                          <p>MiniLM dense embeddings over semantic chunks or pooled article embeddings with cosine similarity.</p>
                         </button>
                       )}
                     </div>
@@ -6532,7 +6709,7 @@ function App(): JSX.Element {
                     ) : (
                       <label className="settings-inline-field settings-range-field">
                         <div className="settings-range-header">
-                          <span>{`Relevance Sensitivity (${effectiveRetrievalModel === 'svd' ? 'Semantic' : 'Lexical'})`}</span>
+                          <span>{`Relevance Sensitivity (${effectiveRetrievalLabel})`}</span>
                           <strong className="settings-range-value">{formatThresholdValue(currentAutoRerankThreshold)}</strong>
                         </div>
                         <input
@@ -6568,69 +6745,6 @@ function App(): JSX.Element {
                   <h4>Agreement scoring</h4>
                 </div>
                 <div className="modal-settings-grid">
-                  <div className="weight-card full-row settings-toggle-card">
-                    <div className="settings-toggle-row">
-                      <div className="settings-toggle-copy">
-                        <span>Semantic chunking</span>
-                        <p className="setting-help-text">
-                          Chunking: retrieve the strongest matching chunks first, group them into articles, and send the top chunks to the LLM.
-                        </p>
-                        <p className="setting-help-text">
-                          Article-level: Treat each article as a whole when scoring relevance.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        className={`settings-switch-button ${useChunking ? 'active' : ''}`}
-                        aria-pressed={useChunking}
-                        onClick={() => {
-                          if (!canUseChunking) return
-                          setChunkingMode(currentMode => {
-                            const nextMode = currentMode === 'semantic' ? 'none' : 'semantic'
-                            if (nextMode === 'semantic') {
-                              setStanceMethod('llm')
-                            }
-                            return nextMode
-                          })
-                        }}
-                        disabled={!canUseChunking}
-                      >
-                        <span className="settings-switch-label">
-                          {useChunking ? 'Chunking' : 'Article-level'}
-                        </span>
-                        <span className="retrieval-toggle-switch" aria-hidden="true">
-                          <span className="retrieval-toggle-thumb" />
-                        </span>
-                      </button>
-                    </div>
-                    {!llmAgreementAvailable && supportedChunkingModes.includes('semantic') && (
-                      <p className="setting-help-text">Add SPARK_API_KEY or API_KEY to enable semantic chunking.</p>
-                    )}
-                    {useChunking && (
-                      <label className="settings-inline-field settings-range-field">
-                        <div className="settings-range-header">
-                          <span>Global chunk pool</span>
-                          <strong className="settings-range-value">{chunkCandidateTopK}</strong>
-                        </div>
-                        <input
-                          type="range"
-                          min="25"
-                          max={maxChunkCandidateTopK}
-                          step="25"
-                          value={chunkCandidateTopK}
-                          onChange={(e) => setChunkCandidateTopK(parseChunkCandidateTopKInput(e.target.value, chunkCandidateTopK))}
-                        />
-                        <div className="settings-range-scale" aria-hidden="true">
-                          <span>25</span>
-                          <span>{maxChunkCandidateTopK}</span>
-                        </div>
-                        <p className="setting-help-text">
-                          Search this many top chunks globally before grouping them back into articles. The LLM receives the top {chunkArticleTopK} chunks per article.
-                        </p>
-                      </label>
-                    )}
-                  </div>
-
                   <div
                     className="weight-card full-row settings-selection-card settings-scroll-target"
                     ref={agreementSettingsRef}
@@ -6641,7 +6755,7 @@ function App(): JSX.Element {
                       {canUseNliAgreement && (
                         <button
                           type="button"
-                          className={`retrieval-model-button ${stanceMethod === 'nli' ? 'active' : ''}`}
+                          className={`retrieval-model-button ${effectiveStanceMethod === 'nli' ? 'active' : ''}`}
                           onClick={() => {
                             if (!useChunking) {
                               setStanceMethod('nli')
@@ -6650,13 +6764,13 @@ function App(): JSX.Element {
                           disabled={useChunking}
                         >
                           <strong>Fast</strong>
-                          <p>{useChunking ? 'Disabled while chunking is on.' : 'Uses Natural Language Inference (DeBERTa) to compare your thesis with the article.'}</p>
+                          <p>{useChunking ? 'Disabled while Search Granularity is set to Chunks.' : 'Uses Natural Language Inference (DeBERTa) to compare your thesis with the article.'}</p>
                         </button>
                       )}
                       {supportedStanceMethods.includes('llm') && (
                         <button
                           type="button"
-                          className={`retrieval-model-button ${stanceMethod === 'llm' ? 'active' : ''}`}
+                          className={`retrieval-model-button ${effectiveStanceMethod === 'llm' ? 'active' : ''}`}
                           onClick={() => {
                             if (canUseLlmAgreement) {
                               setStanceMethod('llm')

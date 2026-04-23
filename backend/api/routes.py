@@ -372,18 +372,24 @@ def register_routes(app):
         min_article_characters, max_article_characters = available_article_character_range()
         min_article_words, max_article_words = available_article_word_range()
         min_article_reading_minutes, max_article_reading_minutes = available_article_reading_time_range()
+        llm_agreement_available = bool(
+            (os.getenv("SPARK_API_KEY") or os.getenv("API_KEY") or "").strip()
+        )
+        default_stance_method = (
+            "llm"
+            if llm_agreement_available and "llm" in SUPPORTED_STANCE_METHODS
+            else DEFAULT_STANCE_METHOD
+        )
         return jsonify({
             "use_llm": USE_LLM,
             "default_retrieval_model": DEFAULT_RETRIEVAL_MODEL,
             "default_normalize_topic_scores": DEFAULT_NORMALIZE_TOPIC_SCORES,
-            "default_stance_method": DEFAULT_STANCE_METHOD,
+            "default_stance_method": default_stance_method,
             "supported_stance_methods": list(SUPPORTED_STANCE_METHODS),
             "default_use_chunking": False,
             "default_chunking_mode": DEFAULT_CHUNKING_MODE,
             "supported_chunking_modes": list(SUPPORTED_CHUNKING_MODES),
-            "llm_agreement_available": bool(
-                (os.getenv("SPARK_API_KEY") or os.getenv("API_KEY") or "").strip()
-            ),
+            "llm_agreement_available": llm_agreement_available,
             "supported_retrieval_models": list(SUPPORTED_RETRIEVAL_MODELS),
             "default_rerank_selection_mode": DEFAULT_RERANK_SELECTION_MODE,
             "supported_rerank_selection_modes": list(SUPPORTED_RERANK_SELECTION_MODES),

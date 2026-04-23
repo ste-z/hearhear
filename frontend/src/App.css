@@ -308,36 +308,40 @@
   box-shadow: 0 8px 18px rgba(244, 180, 0, 0.14);
 }
 
-.top-search-mode-toolbar {
+.top-search-controls {
   width: min(980px, 100%);
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: center;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   align-self: flex-start;
+}
+
+.top-search-mode-toolbar {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .top-search-mode-group {
   width: 100%;
   min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  justify-content: stretch;
-  gap: 8px;
-  padding: 6px 6px 6px 14px;
-  border: 1px solid var(--editorial-border);
-  border-radius: 999px;
-  background: var(--editorial-panel);
-  box-shadow: var(--editorial-shadow);
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.top-search-mode-group.top-search-mode-group-compact {
+  width: 100%;
 }
 
 .top-search-mode-heading {
   display: inline-flex;
   align-items: center;
-  justify-self: start;
   gap: 8px;
-  min-width: 0;
+  flex: 0 0 auto;
   color: var(--editorial-muted);
 }
 
@@ -379,7 +383,6 @@
 .top-search-mode-segments {
   display: inline-flex;
   align-items: center;
-  justify-self: end;
   gap: 3px;
   padding: 3px;
   border-radius: 999px;
@@ -411,7 +414,7 @@
   border-color: rgba(219, 192, 160, 0.32);
   background: rgba(219, 192, 160, 0.16);
   color: var(--editorial-accent-strong);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
 }
 
 .top-search-mode-segment:disabled {
@@ -420,15 +423,14 @@
 }
 
 @media (max-width: 960px) {
-  .top-search-mode-toolbar {
-    grid-template-columns: 1fr;
+  .top-search-controls {
+    width: 100%;
   }
 }
 
 @media (max-width: 400px) {
   .top-search-mode-group {
-    grid-template-columns: 1fr;
-    border-radius: 22px;
+    align-items: flex-start;
   }
 
   .top-search-mode-heading span {
@@ -6550,20 +6552,23 @@ a.results-overview-source-chip:hover {
     margin-top: 8px;
   }
 
+  .top-search-controls {
+    width: 100%;
+    gap: 8px;
+  }
+
   .top-search-mode-toolbar {
     width: 100%;
-    grid-template-columns: 1fr;
     align-items: stretch;
   }
 
   .top-search-mode-group {
     width: 100%;
-    justify-content: space-between;
-    border-radius: 22px;
+    justify-content: flex-start;
   }
 
   .top-search-mode-heading {
-    flex: 1 1 150px;
+    flex: 0 0 auto;
   }
 
   .top-search-mode-heading span {
@@ -6571,7 +6576,7 @@ a.results-overview-source-chip:hover {
   }
 
   .top-search-mode-segments {
-    flex: 0 0 auto;
+    flex: 0 1 auto;
   }
 
   .top-search-mode-segment {

@@ -71,7 +71,7 @@ def essay_search(
             "empty_results_message": None,
         }
     resolved_model = normalize_retrieval_model(retrieval_model)
-    if use_chunking and str(chunking_mode or "none") != "none":
+    if use_chunking and str(chunking_mode or "none") != "none" and resolved_model == "tfidf":
         resolved_model = "svd"
     resolved_selection_mode = normalize_rerank_selection_mode(rerank_selection_mode)
 

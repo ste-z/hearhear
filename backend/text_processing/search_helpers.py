@@ -9,7 +9,7 @@ from flask import current_app, has_app_context
 
 
 DEFAULT_RETRIEVAL_MODEL = "svd"
-SUPPORTED_RETRIEVAL_MODELS = ("tfidf", "svd")
+SUPPORTED_RETRIEVAL_MODELS = ("tfidf", "svd", "minilm")
 DEFAULT_SVD_EXPLAINABILITY_TOP_N = 15
 DEFAULT_SVD_CHART_TOP_N = 10
 DEFAULT_SVD_POLE_TOP_N = 5
@@ -22,6 +22,12 @@ _RETRIEVAL_MODEL_ALIASES = {
     "truncated_svd": "svd",
     "truncated-svd": "svd",
     "lsa": "svd",
+    "minilm": "minilm",
+    "mini_lm": "minilm",
+    "mini-lm": "minilm",
+    "enhanced_semantic": "minilm",
+    "enhanced-semantic": "minilm",
+    "dense": "minilm",
 }
 
 _vector_processors = {}
@@ -83,6 +89,37 @@ def _retrieval_model_config(retrieval_model):
             "load_kwargs": {
                 "load_articles": False,
                 "allow_matrix_fallback": False,
+            },
+        }
+
+    if resolved_model == "minilm":
+        from backend.text_processing.minilm_processor import (
+            DEFAULT_MINILM_ARTICLE_INDEX_NAME,
+            DEFAULT_MINILM_CHUNK_INDEX_NAME,
+            MiniLmEmbeddingIndex,
+            load_minilm_article_index,
+            preprocess_minilm_indexes,
+        )
+        from backend.text_processing.indexing.corpus import DEFAULT_INDEX_DIR
+
+        def preprocess_minilm_article_index(**kwargs):
+            resolved_kwargs = dict(kwargs)
+            resolved_kwargs.pop("index_name", None)
+            return preprocess_minilm_indexes(
+                article_index_name=DEFAULT_MINILM_ARTICLE_INDEX_NAME,
+                chunk_index_name=DEFAULT_MINILM_CHUNK_INDEX_NAME,
+                **resolved_kwargs,
+            )
+
+        return {
+            "retrieval_model": resolved_model,
+            "index_dir": DEFAULT_INDEX_DIR,
+            "index_name": DEFAULT_MINILM_ARTICLE_INDEX_NAME,
+            "preprocess": preprocess_minilm_article_index,
+            "load": load_minilm_article_index,
+            "has_artifacts": MiniLmEmbeddingIndex.has_artifacts,
+            "load_kwargs": {
+                "load_articles": False,
             },
         }
 

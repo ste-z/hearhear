@@ -197,7 +197,7 @@ def _normalize_dense_vector(vector):
     return resolved / magnitude
 
 
-def _build_rocchio_svd_query_vector(query, processor, irrelevant_article_ids):
+def _build_rocchio_dense_query_vector(query, processor, irrelevant_article_ids):
     if not hasattr(processor, "project_query") or not hasattr(processor, "get_doc_vector"):
         return None
 
@@ -229,7 +229,7 @@ def _build_rocchio_svd_query_vector(query, processor, irrelevant_article_ids):
     return normalized
 
 
-def _search_svd_by_query_vector(processor, query_vector, top_n):
+def _search_dense_by_query_vector(processor, query_vector, top_n):
     scores = processor.normalized_doc_embeddings @ query_vector
     candidate_doc_indices = np.flatnonzero(np.asarray(scores) > 0)
     if candidate_doc_indices.size == 0:
@@ -259,14 +259,15 @@ def build_rocchio_processor_searcher(
     if not feedback_ids:
         return lambda top_n: processor.search(query, top_n=top_n)
 
-    if retrieval_model == "svd":
-        query_vector = _build_rocchio_svd_query_vector(query, processor, feedback_ids)
+    if retrieval_model in {"svd", "minilm"}:
+        query_vector = _build_rocchio_dense_query_vector(query, processor, feedback_ids)
         if query_vector is not None:
             log_runtime_event(
-                "rocchio_search.svd_ready",
+                "rocchio_search.dense_ready",
+                retrieval_model=retrieval_model,
                 irrelevant_count=len(feedback_ids),
             )
-            return lambda top_n: _search_svd_by_query_vector(
+            return lambda top_n: _search_dense_by_query_vector(
                 processor,
                 query_vector,
                 top_n,

@@ -469,6 +469,7 @@ def _warm_runtime_assets():
     retrieval_labels = {
         "tfidf": "TF-IDF",
         "svd": "SVD",
+        "minilm": "Enhanced Semantic (MiniLM)",
     }
     try:
         from backend.text_processing.search_helpers import (
@@ -487,6 +488,13 @@ def _warm_runtime_assets():
         ]
 
         for retrieval_model in ordered_models:
+            if retrieval_model == "minilm":
+                log_runtime_event(
+                    "startup_warm.vector_index_skipped",
+                    retrieval_model=retrieval_model,
+                    reason="lazy_precompute",
+                )
+                continue
             label = retrieval_labels.get(
                 retrieval_model,
                 retrieval_model.replace("_", " ").upper(),

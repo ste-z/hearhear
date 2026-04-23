@@ -57,6 +57,7 @@ DEFAULT_RERANK_SELECTION_MODE = "automatic"
 DEFAULT_AUTO_RERANK_THRESHOLDS = {
     "tfidf": 0.3,
     "svd": 0.6,
+    "minilm": 0.4,
 }
 MAX_AUTO_RERANK_CANDIDATES = 100
 
@@ -134,7 +135,7 @@ def select_rerank_candidates(
     resolved_selection_mode = normalize_rerank_selection_mode(rerank_selection_mode)
     resolved_top_n = max(1, int(top_n))
     resolved_use_chunking = bool(use_chunking) and str(chunking_mode or "none") != "none"
-    if resolved_use_chunking and resolved_model != "svd":
+    if resolved_use_chunking and resolved_model == "tfidf":
         log_runtime_event(
             "rerank_candidates.chunk_force_svd",
             requested_retrieval_model=resolved_model,
@@ -250,7 +251,10 @@ def select_rerank_candidates(
     )[:MAX_AUTO_RERANK_CANDIDATES]
     empty_results_message = None
     if not selected_matches:
-        retrieval_label = "SVD" if resolved_model == "svd" else "TF-IDF"
+        retrieval_label = (
+            "SVD" if resolved_model == "svd"
+            else ("Enhanced Semantic" if resolved_model == "minilm" else "TF-IDF")
+        )
         empty_results_message = (
             f"No relevant articles found above the {resolved_threshold:.2f} "
             f"topic relevance threshold for {retrieval_label}."
@@ -939,7 +943,7 @@ def stance_search(
             "empty_results_message": None,
         }
     resolved_model = normalize_retrieval_model(retrieval_model)
-    if use_chunking and str(chunking_mode or "none") != "none":
+    if use_chunking and str(chunking_mode or "none") != "none" and resolved_model == "tfidf":
         resolved_model = "svd"
     resolved_selection_mode = normalize_rerank_selection_mode(rerank_selection_mode)
 

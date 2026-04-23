@@ -191,7 +191,7 @@ export type ResultsChatResponse = {
   follow_up_questions?: string[] | null
 }
 
-export type RetrievalModel = 'tfidf' | 'svd'
+export type RetrievalModel = 'tfidf' | 'svd' | 'minilm'
 
 export type QueryRewriteAlternative = {
   topic: string

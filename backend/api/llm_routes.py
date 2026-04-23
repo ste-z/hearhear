@@ -337,6 +337,12 @@ def _query_help_method_guidance(retrieval_model):
             "The Regarding field should contain concrete words and phrases likely to appear in relevant Guardian opinion articles: "
             "policy nouns, actors, institutions, events, and high-signal synonyms. Avoid vague placeholders, pronouns, and overly broad one-word topics."
         )
+    if retrieval_model == "minilm":
+        return (
+            "The first stage uses a dense MiniLM embedding model over semantic chunks or pooled article embeddings. "
+            "The Regarding field should name the issue clearly and include a few concrete concepts, actors, or policy terms so the query lands near the intended semantic neighborhood. "
+            "You do not need keyword stuffing, but you should avoid vague one-word topics."
+        )
 
     return (
         "The first stage uses cosine similarity after projecting TF-IDF vectors into truncated-SVD latent semantic dimensions. "
