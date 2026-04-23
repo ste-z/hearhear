@@ -14,6 +14,7 @@ import logging
 from flask import request, jsonify, Response, stream_with_context
 
 from backend.stance_processing.llm_processor import (
+    _article_body_text_lookup as article_body_text_lookup,
     create_spark_client,
     score_llm_article_agreement,
     score_llm_article_agreement_by_paragraphs,
@@ -344,7 +345,56 @@ def _query_help_method_guidance(retrieval_model):
     )
 
 
+def _result_index_for_article(article, fallback_index):
+    fallback = int(fallback_index) + 1
+    if not isinstance(article, dict):
+        return fallback
+
+    for key in ("result_index", "resultIndex", "source_index", "sourceIndex"):
+        try:
+            result_index = int(article.get(key))
+        except (TypeError, ValueError):
+            continue
+        if result_index >= 1:
+            return result_index
+    return fallback
+
+
+def _max_source_index(sources, fallback_count):
+    indices = []
+    for source in sources or []:
+        if not isinstance(source, dict):
+            continue
+        try:
+            result_index = int(source.get("result_index"))
+        except (TypeError, ValueError):
+            continue
+        if result_index >= 1:
+            indices.append(result_index)
+    return max(indices) if indices else int(fallback_count)
+
+
+def _remap_result_indices(source_indices, articles):
+    ordinal_to_result_index = {
+        index + 1: _result_index_for_article(article, index)
+        for index, article in enumerate(articles or [])
+    }
+    allowed_result_indices = set(ordinal_to_result_index.values())
+    remapped = []
+    seen = set()
+    for source_index in source_indices or []:
+        result_index = ordinal_to_result_index.get(source_index, source_index)
+        if result_index not in allowed_result_indices:
+            continue
+        if result_index in seen:
+            continue
+        remapped.append(result_index)
+        seen.add(result_index)
+    return remapped
+
+
 def _format_article_for_results_overview(article, index):
+    result_index = _result_index_for_article(article, index)
     title = _clean_overview_text(article.get("title"), 240)
     summary = _clean_overview_text(article.get("summary"), 700)
     claim = _clean_overview_text(article.get("central_claim_summary"), 500)
@@ -357,7 +407,7 @@ def _format_article_for_results_overview(article, index):
         or article.get("score")
     )
 
-    lines = [f"Result {index + 1}: {title or 'Untitled'}"]
+    lines = [f"Result {result_index}: {title or 'Untitled'}"]
     if summary:
         lines.append(f"Summary: {summary}")
     if claim:
@@ -371,9 +421,160 @@ def _format_article_for_results_overview(article, index):
     return "\n".join(lines)
 
 
+def _clean_results_chat_list(value, max_items=6, max_chars=320):
+    if not isinstance(value, list):
+        return []
+
+    items = []
+    for raw_item in value[:max_items]:
+        if isinstance(raw_item, dict):
+            raw_text = raw_item.get("text") or raw_item.get("sentence") or raw_item.get("evidence")
+        else:
+            raw_text = raw_item
+        text = _clean_overview_text(raw_text, max_chars)
+        if text:
+            items.append(text)
+    return items
+
+
+def _append_results_chat_list(lines, label, items):
+    if not items:
+        return
+    lines.append(f"{label}:")
+    lines.extend(f"- {item}" for item in items)
+
+
+def _format_svd_context_group(label, dimensions, limit=5):
+    if not isinstance(dimensions, list) or not dimensions:
+        return ""
+    formatted = _format_svd_dimensions(dimensions[:limit])
+    if not formatted or formatted == "None":
+        return ""
+    return f"{label}:\n{formatted}"
+
+
+def _format_article_for_results_chat(article, index, body_text=None, max_body_chars=5000):
+    result_index = _result_index_for_article(article, index)
+    title = _clean_overview_text(article.get("title"), 240)
+    article_id = _clean_overview_text(article.get("id"), 180)
+    author = _clean_overview_text(
+        article.get("author_display") or article.get("author_raw"),
+        180,
+    )
+    date = _clean_overview_text(article.get("date"), 80)
+    url = _clean_overview_text(article.get("url"), 320)
+    summary = _clean_overview_text(article.get("summary"), 900)
+    claim = _clean_overview_text(article.get("central_claim_summary"), 700)
+    thesis = _clean_overview_text(article.get("thesis_sentence"), 520)
+    keywords = [
+        _clean_overview_text(keyword, 80)
+        for keyword in (article.get("keywords") or [])[:12]
+        if _clean_overview_text(keyword, 80)
+    ]
+
+    lines = [f"Result {result_index}: {title or 'Untitled'}"]
+    if article_id:
+        lines.append(f"Article ID: {article_id}")
+    if author:
+        lines.append(f"Author: {author}")
+    if date:
+        lines.append(f"Date: {date}")
+    if url:
+        lines.append(f"URL: {url}")
+    if keywords:
+        lines.append(f"Keywords: {', '.join(keywords)}")
+    if article.get("character_count") is not None:
+        lines.append(f"Character count: {article.get('character_count')}")
+    if article.get("word_count") is not None:
+        lines.append(f"Word count: {article.get('word_count')}")
+    if summary:
+        lines.append(f"Summary: {summary}")
+    if claim:
+        lines.append(f"Central claim: {claim}")
+    if thesis:
+        lines.append(f"Thesis sentence: {thesis}")
+
+    _append_results_chat_list(
+        lines,
+        "Support sentences",
+        _clean_results_chat_list(article.get("support_sentences"), max_items=8, max_chars=360),
+    )
+
+    resolved_body_text = _clean_overview_text(
+        body_text or article.get("body_text"),
+        max_body_chars,
+    )
+    if resolved_body_text:
+        lines.append(f"Body text excerpt: {resolved_body_text}")
+
+    stance = _clean_overview_text(article.get("stance_label"), 80)
+    if stance:
+        lines.append(f"Agreement label: {stance}")
+    if article.get("llm_agreement_score") is not None:
+        lines.append(f"LLM agreement score: {article.get('llm_agreement_score')}")
+    if article.get("combined_score") is not None:
+        lines.append(f"Combined ranking score: {article.get('combined_score')}")
+    if article.get("topic_score_display") is not None:
+        lines.append(f"Topic score: {article.get('topic_score_display')}")
+    if article.get("stance_score_normalized") is not None:
+        lines.append(f"Agreement score: {article.get('stance_score_normalized')}")
+    if article.get("recency_score_normalized") is not None:
+        lines.append(f"Recency score: {article.get('recency_score_normalized')}")
+
+    stance_probs = [
+        ("support", article.get("stance_entailment_prob")),
+        ("neutral", article.get("stance_neutral_prob")),
+        ("contradict", article.get("stance_contradiction_prob")),
+    ]
+    if any(value is not None for _, value in stance_probs):
+        lines.append(
+            "Stance probabilities: "
+            + ", ".join(f"{label}={value}" for label, value in stance_probs if value is not None)
+        )
+
+    relevant_paragraphs = article.get("llm_relevant_paragraphs")
+    if isinstance(relevant_paragraphs, list) and relevant_paragraphs:
+        lines.append("Relevant article excerpts:")
+        for paragraph in relevant_paragraphs[:8]:
+            if not isinstance(paragraph, dict):
+                continue
+            text = _clean_overview_text(paragraph.get("text"), 520)
+            if not text:
+                continue
+            score = paragraph.get("agreement_score")
+            score_text = f" agreement_score={score};" if score is not None else ""
+            lines.append(f"-{score_text} {text}")
+
+    sentiment = article.get("vader_sentiment")
+    if isinstance(sentiment, dict):
+        sentiment_parts = []
+        for key in ("label", "tone_strength", "compound", "negative", "neutral", "positive"):
+            value = sentiment.get(key)
+            if value is not None:
+                sentiment_parts.append(f"{key}={value}")
+        if sentiment_parts:
+            lines.append(f"Sentiment: {', '.join(sentiment_parts)}")
+        snippets = sentiment.get("snippets")
+        if isinstance(snippets, dict):
+            for label in ("negative", "positive"):
+                _append_results_chat_list(
+                    lines,
+                    f"Most {label} sentiment sentences",
+                    _clean_results_chat_list(snippets.get(label), max_items=3, max_chars=260),
+                )
+
+    svd_groups = [
+        _format_svd_context_group("Query-anchored latent concepts", article.get("svd_query_chart_dimensions")),
+        _format_svd_context_group("Shared corpus latent concepts", article.get("svd_chart_dimensions")),
+        _format_svd_context_group("Top article latent concepts", article.get("svd_dimensions")),
+    ]
+    lines.extend(group for group in svd_groups if group)
+    return "\n".join(lines)
+
+
 def _source_for_results_overview(article, index):
     return {
-        "result_index": int(index) + 1,
+        "result_index": _result_index_for_article(article, index),
         "title": _clean_overview_text(article.get("title"), 240) or "Untitled",
         "url": article.get("url"),
         "article_id": article.get("id"),
@@ -1193,7 +1394,7 @@ def register_chat_route(app, json_search):
             response = client.chat(messages)
             overview = _parse_results_overview_response(
                 response.get("content"),
-                max_source_index=len(usable_articles),
+                max_source_index=_max_source_index(sources, len(usable_articles)),
             )
         except Exception:
             logger.exception("Results overview request failed")
@@ -1209,6 +1410,7 @@ def register_chat_route(app, json_search):
         query = str(payload.get("query") or "").strip()
         articles = payload.get("articles") or payload.get("results") or []
         mode = str(payload.get("mode") or "search").strip().lower()
+        article_scope = str(payload.get("article_scope") or payload.get("scope") or "").strip().lower()
         history = payload.get("history") or []
 
         if not question:
@@ -1232,14 +1434,40 @@ def register_chat_route(app, json_search):
         if not usable_articles:
             return jsonify({"error": "No relevant articles are available for chat."}), 400
 
-        context_text = "\n\n---\n\n".join(
-            _format_article_for_results_overview(article, index)
-            for index, article in enumerate(usable_articles)
-        )
         sources = [
             _source_for_results_overview(article, index)
             for index, article in enumerate(usable_articles)
         ]
+        is_selected_article_scope = article_scope in {
+            "selected",
+            "selected_articles",
+            "attached",
+            "attachments",
+        }
+        body_lookup = {}
+        if is_selected_article_scope:
+            try:
+                body_lookup = article_body_text_lookup(usable_articles)
+            except Exception:
+                logger.exception("Selected article body lookup failed")
+                body_lookup = {}
+
+        max_body_chars = 7000 if len(usable_articles) <= 2 else 4200 if len(usable_articles) <= 5 else 2600
+        if is_selected_article_scope:
+            context_text = "\n\n---\n\n".join(
+                _format_article_for_results_chat(
+                    article,
+                    index,
+                    body_text=body_lookup.get(str(article.get("id") or "").strip()),
+                    max_body_chars=max_body_chars,
+                )
+                for index, article in enumerate(usable_articles)
+            )
+        else:
+            context_text = "\n\n---\n\n".join(
+                _format_article_for_results_overview(article, index)
+                for index, article in enumerate(usable_articles)
+            )
 
         history_lines = []
         if isinstance(history, list):
@@ -1254,8 +1482,9 @@ def register_chat_route(app, json_search):
 
         system_prompt = (
             "You answer follow-up questions about a Guardian opinion article results page. "
-            "Use only the supplied search query, prior chat, and article result snippets. "
-            "Do not add outside facts or claim you read the full articles. "
+            "Use only the supplied search query, prior chat, and article context. "
+            "Do not add outside facts or claim you know article details beyond the supplied context. "
+            "If article attachments are supplied, focus on those selected articles. "
             "When the answer depends on specific results, cite them with source_indices using the 1-based Result numbers. "
             "If the snippets do not contain enough information, say what is missing and answer only what can be inferred. "
             "Return valid JSON only with keys: answer, source_indices, follow_up_questions. "
@@ -1264,9 +1493,10 @@ def register_chat_route(app, json_search):
         )
         user_prompt = (
             f"Search mode: {mode}\n"
+            f"Article scope: {'selected article attachments' if is_selected_article_scope else 'top retrieved results'}\n"
             f"Original search query:\n{query or 'Not provided'}\n\n"
             f"Prior chat:\n{history_text}\n\n"
-            f"Top retrieved article snippets:\n\n{context_text}\n\n"
+            f"Article context:\n\n{context_text}\n\n"
             f"User question:\n{question}"
         )
         messages = [
@@ -1278,8 +1508,13 @@ def register_chat_route(app, json_search):
             response = client.chat(messages)
             answer = _parse_results_chat_response(
                 response.get("content"),
-                max_source_index=len(usable_articles),
+                max_source_index=_max_source_index(sources, len(usable_articles)),
             )
+            if is_selected_article_scope:
+                answer["source_indices"] = _remap_result_indices(
+                    answer.get("source_indices"),
+                    usable_articles,
+                )
         except Exception:
             logger.exception("Results chat request failed")
             return jsonify({"error": "LLM results chat failed"}), 500

@@ -41,6 +41,7 @@ export type VaderSentiment = VaderSentimentScore & {
 
 export type Article = {
   id: string | number
+  result_index?: number | null
   title: string
   url: string
   summary: string

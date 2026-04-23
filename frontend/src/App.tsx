@@ -52,8 +52,14 @@ type ResultsChatMessage = {
   id: string
   role: 'user' | 'assistant'
   content: string
+  attachments?: ResultsChatAttachment[] | null
   source_indices?: number[] | null
   sources?: ResultsOverviewSource[] | null
+}
+type ResultsChatAttachment = {
+  articleId: string
+  resultIndex: number
+  title: string
 }
 
 type ConfigResponse = {
@@ -1872,6 +1878,7 @@ function App(): JSX.Element {
   const [resultsOverviewError, setResultsOverviewError] = useState<string | null>(null)
   const [resultsChatMessages, setResultsChatMessages] = useState<ResultsChatMessage[]>([])
   const [resultsChatInput, setResultsChatInput] = useState<string>('')
+  const [resultsChatArticleIds, setResultsChatArticleIds] = useState<string[]>([])
   const [resultsChatLoading, setResultsChatLoading] = useState<boolean>(false)
   const [resultsChatError, setResultsChatError] = useState<string | null>(null)
   const [isResultsChatMinimized, setIsResultsChatMinimized] = useState<boolean>(true)
@@ -3026,6 +3033,7 @@ function App(): JSX.Element {
   const resetResultsChat = (): void => {
     setResultsChatMessages([])
     setResultsChatInput('')
+    setResultsChatArticleIds([])
     setResultsChatError(null)
     setResultsChatLoading(false)
     setIsResultsChatMinimized(true)
@@ -3134,20 +3142,25 @@ function App(): JSX.Element {
       return
     }
 
-    const resultArticles = visibleArticles.slice(0, 10)
+    const resultArticles = getResultsChatContextArticles()
     if (resultArticles.length === 0) {
       setResultsChatError('There are no results available to chat about.')
       return
     }
 
+    const userAttachments = resultsChatAttachments.length > 0 ? resultsChatAttachments : null
     const userMessage: ResultsChatMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
       content: question,
+      attachments: userAttachments,
     }
     const nextMessages = [...resultsChatMessages, userMessage]
     setResultsChatMessages(nextMessages)
     setResultsChatInput('')
+    if (userAttachments) {
+      setResultsChatArticleIds([])
+    }
     setResultsChatError(null)
     setResultsChatLoading(true)
 
@@ -3161,6 +3174,7 @@ function App(): JSX.Element {
           question,
           query: buildResultsChatQuery(),
           mode: inputMode,
+          article_scope: resultsChatAttachments.length > 0 ? 'selected' : 'top_results',
           articles: resultArticles,
           history: resultsChatMessages.slice(-6).map(message => ({
             role: message.role,
@@ -3835,8 +3849,32 @@ function App(): JSX.Element {
     topicFeedbackIrrelevantIdSet.has(getArticleIdKey(article))
   )
   const visibleArticles = articles.filter(article => !isLlmIrrelevantArticle(article))
+  const getVisibleArticleResultIndex = (article: Article): number => {
+    const index = visibleArticles.findIndex(visibleArticle => (
+      getArticleIdKey(visibleArticle) === getArticleIdKey(article)
+    ))
+    return index >= 0 ? index + 1 : 1
+  }
   const topicFeedbackIrrelevantArticles = visibleArticles.filter(isTopicFeedbackIrrelevantArticle)
   const activeVisibleArticles = visibleArticles.filter(article => !isTopicFeedbackIrrelevantArticle(article))
+  const selectedResultsChatArticles = resultsChatArticleIds
+    .map(articleId => visibleArticles.find(article => getArticleIdKey(article) === articleId))
+    .filter((article): article is Article => Boolean(article))
+  const resultsChatAttachments = selectedResultsChatArticles.map((article) => ({
+    articleId: getArticleIdKey(article),
+    resultIndex: getVisibleArticleResultIndex(article),
+    title: article.title || 'Untitled article',
+  }))
+  const getResultsChatContextArticles = (): Article[] => {
+    const contextArticles = selectedResultsChatArticles.length > 0
+      ? selectedResultsChatArticles
+      : visibleArticles.slice(0, 10)
+
+    return contextArticles.map(article => ({
+      ...article,
+      result_index: getVisibleArticleResultIndex(article),
+    }))
+  }
   const queryTopRadarMaxMagnitude = getMaxSvdMagnitude([
     querySvdDimensions,
     ...activeVisibleArticles.map(article => article.svd_query_chart_dimensions),
@@ -3963,6 +4001,23 @@ function App(): JSX.Element {
 
   const handleFindSimilarArticles = (article: Article): void => {
     void fetchSimilarArticles(article, 0)
+  }
+
+  const handleAskAiAboutArticle = (article: Article): void => {
+    const articleId = getArticleIdKey(article)
+    setResultsChatArticleIds(currentIds => (
+      currentIds.includes(articleId) ? currentIds : [...currentIds, articleId]
+    ))
+    setResultsChatError(null)
+    setIsResultsChatMinimized(false)
+  }
+
+  const handleRemoveResultsChatArticle = (articleId: string): void => {
+    setResultsChatArticleIds(currentIds => currentIds.filter(currentId => currentId !== articleId))
+  }
+
+  const handleClearResultsChatArticles = (): void => {
+    setResultsChatArticleIds([])
   }
 
   const handleLoadMoreSimilarArticles = (): void => {
@@ -4886,6 +4941,7 @@ function App(): JSX.Element {
                   const activeArticleRank = activeVisibleArticles.findIndex(activeArticle => (
                     getArticleIdKey(activeArticle) === getArticleIdKey(article)
                   )) + 1
+                  const isArticleAttachedToResultsChat = resultsChatArticleIds.includes(getArticleIdKey(article))
 
                   if (isMarkedNotRelevant) {
                     return (
@@ -5411,6 +5467,15 @@ function App(): JSX.Element {
                             ? 'Finding similar...'
                             : 'Find similar articles'}
                         </button>
+                        <button
+                          type="button"
+                          className="topic-feedback-button ask-ai"
+                          onClick={() => handleAskAiAboutArticle(article)}
+                          aria-pressed={isArticleAttachedToResultsChat}
+                          aria-label={`Ask AI about ${article.title}`}
+                        >
+                          Ask AI
+                        </button>
                       </div>
                     </article>
                   )
@@ -5608,7 +5673,7 @@ function App(): JSX.Element {
               <div className="results-chat-header">
                 <div>
                   <p className="results-overview-eyebrow">Ask AI about the results</p>
-                  <h3>Question the retrieved articles</h3>
+                  <h3>{resultsChatAttachments.length > 0 ? 'Question selected articles' : 'Question the retrieved articles'}</h3>
                 </div>
                 <button
                   type="button"
@@ -5629,6 +5694,21 @@ function App(): JSX.Element {
                         className={`results-chat-message ${message.role}`}
                       >
                         <p>{message.content}</p>
+                        {message.attachments && message.attachments.length > 0 && (
+                          <div className="results-chat-message-attachments" aria-label="Attached articles">
+                            {message.attachments.map((attachment) => (
+                              <a
+                                key={`${message.id}-${attachment.articleId}`}
+                                className="results-chat-message-attachment"
+                                href={`#result-${attachment.resultIndex}`}
+                                title={attachment.title}
+                                onClick={(event) => handleResultsOverviewSourceClick(event, attachment.resultIndex)}
+                              >
+                                {`Result ${attachment.resultIndex}: ${attachment.title}`}
+                              </a>
+                            ))}
+                          </div>
+                        )}
                         {message.role === 'assistant' && (
                           <ResultsOverviewSources
                             sourceIndices={message.source_indices}
@@ -5645,6 +5725,44 @@ function App(): JSX.Element {
                 )}
               </div>
 
+              {resultsChatAttachments.length > 0 && (
+                <div className="results-chat-attachments" aria-label="Article attachments">
+                  <div className="results-chat-attachments-header">
+                    <span>
+                      {`${resultsChatAttachments.length} ${resultsChatAttachments.length === 1 ? 'article' : 'articles'} attached`}
+                    </span>
+                    <button
+                      type="button"
+                      className="results-chat-attachment-clear-button"
+                      onClick={handleClearResultsChatArticles}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="results-chat-attachment-list">
+                    {resultsChatAttachments.map((attachment) => (
+                      <div key={attachment.articleId} className="results-chat-attachment-chip">
+                        <a
+                          href={`#result-${attachment.resultIndex}`}
+                          title={attachment.title}
+                          onClick={(event) => handleResultsOverviewSourceClick(event, attachment.resultIndex)}
+                        >
+                          {`Result ${attachment.resultIndex}: ${attachment.title}`}
+                        </a>
+                        <button
+                          type="button"
+                          className="results-chat-attachment-remove-button"
+                          onClick={() => handleRemoveResultsChatArticle(attachment.articleId)}
+                          aria-label={`Remove ${attachment.title} from AI chat`}
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {resultsChatError && (
                 <p className="results-overview-error">{resultsChatError}</p>
               )}
@@ -5654,7 +5772,7 @@ function App(): JSX.Element {
                   type="text"
                   value={resultsChatInput}
                   onChange={(event) => setResultsChatInput(event.target.value)}
-                  placeholder="Ask about these results..."
+                  placeholder={resultsChatAttachments.length > 0 ? 'Ask about attached articles...' : 'Ask about these results...'}
                   aria-label="Ask a question about the current results"
                   disabled={resultsChatLoading}
                 />

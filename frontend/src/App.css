@@ -1180,6 +1180,22 @@
   transform: translateY(-1px);
 }
 
+.topic-feedback-button.ask-ai {
+  border-color: rgba(54, 87, 65, 0.28);
+  background: #365741;
+  color: #fff;
+}
+
+.topic-feedback-button.ask-ai:hover:not(:disabled) {
+  border-color: rgba(54, 87, 65, 0.4);
+  background: #294734;
+  color: #fff;
+}
+
+.topic-feedback-button.ask-ai[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.32);
+}
+
 .topic-feedback-refresh-button:disabled {
   opacity: 0.58;
   cursor: wait;
@@ -1345,22 +1361,22 @@
 }
 
 .explain-ranking-button {
-  border: 1px solid #d7dbe3;
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(54, 87, 65, 0.28);
+  background: #365741;
   border-radius: 999px;
   padding: 10px 16px;
   font-family: 'Open Sans', sans-serif;
   font-size: 0.92rem;
   font-weight: 700;
-  color: #4b5563;
+  color: #fff;
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
-.explain-ranking-button:hover {
-  border-color: #bfc8d8;
-  background: #f8fafc;
-  color: #202124;
+.explain-ranking-button:hover:not(:disabled) {
+  border-color: rgba(54, 87, 65, 0.4);
+  background: #294734;
+  color: #fff;
 }
 
 
@@ -6010,6 +6026,28 @@ a.results-overview-source-chip:hover {
   margin: 0;
 }
 
+.results-chat-message-attachments {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.results-chat-message-attachment {
+  display: block;
+  overflow: hidden;
+  max-width: 100%;
+  border-radius: 10px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  color: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .results-chat-message.user {
   justify-self: end;
   background: #365741;
@@ -6026,6 +6064,88 @@ a.results-overview-source-chip:hover {
 .results-chat-message.assistant .results-overview-sources {
   margin-top: 8px;
   margin-left: 0;
+}
+
+.results-chat-attachments {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(54, 87, 65, 0.14);
+  border-radius: 16px;
+  background: rgba(246, 250, 244, 0.82);
+  padding: 10px;
+}
+
+.results-chat-attachments-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #365741;
+}
+
+.results-chat-attachment-clear-button,
+.results-chat-attachment-remove-button {
+  border: 0;
+  background: transparent;
+  color: #365741;
+  font-family: 'Open Sans', sans-serif;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.results-chat-attachment-clear-button {
+  padding: 2px 0;
+  font-size: 0.78rem;
+}
+
+.results-chat-attachment-list {
+  display: grid;
+  gap: 7px;
+}
+
+.results-chat-attachment-chip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  border: 1px solid rgba(54, 87, 65, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.76);
+  padding: 5px 5px 5px 10px;
+}
+
+.results-chat-attachment-chip a {
+  overflow: hidden;
+  color: #1f1811;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.results-chat-attachment-chip a:hover {
+  color: #365741;
+}
+
+.results-chat-attachment-remove-button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.results-chat-attachment-remove-button:hover,
+.results-chat-attachment-clear-button:hover {
+  background: rgba(54, 87, 65, 0.08);
 }
 
 .results-chat-form {
@@ -6227,6 +6347,18 @@ a.results-overview-source-chip:hover {
   border-color: rgba(138, 92, 0, 0.26);
   background: rgba(255, 248, 240, 0.92);
   color: #8a5c00;
+}
+
+.results-paper-section .topic-feedback-button.ask-ai {
+  border-color: rgba(54, 87, 65, 0.28);
+  background: #365741;
+  color: #fff;
+}
+
+.results-paper-section .topic-feedback-button.ask-ai:hover:not(:disabled) {
+  border-color: rgba(54, 87, 65, 0.4);
+  background: #294734;
+  color: #fff;
 }
 
 .results-paper-section .metric-info-tooltip {
