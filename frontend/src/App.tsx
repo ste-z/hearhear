@@ -141,9 +141,9 @@ const defaultChunkAutoRerankThresholds: Record<RetrievalModel, number> = {
   minilm: 0.45,
 }
 const defaultMaxAutoRerankCandidates = 100
-const defaultChunkCandidateTopK = 300
+const defaultChunkCandidateTopK = 100
 const defaultChunkArticleTopK = 5
-const defaultMaxChunkCandidateTopK = 2000
+const defaultMaxChunkCandidateTopK = 500
 const similarArticlesPageSize = 5
 
 const isRetrievalModel = (value: unknown): value is RetrievalModel => (
@@ -6663,6 +6663,15 @@ function App(): JSX.Element {
                     </div>
                   </div>
 
+                </div>
+              </section>
+
+              <section className="settings-stage-section">
+                <div className="settings-stage-heading">
+                  <span>Stage 2</span>
+                  <h4>Agreement scoring</h4>
+                </div>
+                <div className="modal-settings-grid">
                   <div className="weight-card full-row settings-selection-card">
                     <span>Candidate selection</span>
                     <div className="retrieval-model-grid">
@@ -6736,15 +6745,7 @@ function App(): JSX.Element {
                           : `Articles at or above this raw topic relevance threshold move into the agreement reranking stage, with at most ${maxAutoRerankCandidates} articles reranked.`)}
                     </p>
                   </div>
-                </div>
-              </section>
 
-              <section className="settings-stage-section">
-                <div className="settings-stage-heading">
-                  <span>Stage 2</span>
-                  <h4>Agreement scoring</h4>
-                </div>
-                <div className="modal-settings-grid">
                   <div
                     className="weight-card full-row settings-selection-card settings-scroll-target"
                     ref={agreementSettingsRef}
