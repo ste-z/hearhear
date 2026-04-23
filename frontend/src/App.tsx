@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ChangeEvent,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -47,6 +48,24 @@ type TopicFeedbackSearchOptions = {
   markTopicFeedbackApplied?: boolean
   topicOverride?: string
   skipTypoCorrection?: boolean
+}
+type SearchFocusWordSnapshot = {
+  text: string
+  startX: number
+  startY: number
+  driftX: number
+  driftY: number
+  fontFamily: string
+  fontSize: number
+  fontWeight: string
+  lineHeight: number
+}
+type SearchFocusSnapshot = {
+  key: number
+  text: string
+  mode: InputMode
+  words: SearchFocusWordSnapshot[]
+  clearing: boolean
 }
 type ResultsChatMessage = {
   id: string
@@ -145,6 +164,9 @@ const defaultChunkCandidateTopK = 100
 const defaultChunkArticleTopK = 5
 const defaultMaxChunkCandidateTopK = 500
 const similarArticlesPageSize = 5
+const searchFocusMinimumMs = 0
+const searchFocusClearMs = 850
+const searchFocusMaxWords = 34
 
 const isRetrievalModel = (value: unknown): value is RetrievalModel => (
   value === 'tfidf' || value === 'svd' || value === 'minilm'
@@ -310,6 +332,196 @@ const markLandingAsSeen = (): void => {
 const summarizeApiText = (value: string, maxLength = 180): string => (
   value.replace(/\s+/g, ' ').trim().slice(0, maxLength)
 )
+
+const searchFocusWordPattern = /[\p{L}\p{N}]+(?:[-'][\p{L}\p{N}]+)*/gu
+
+const getSearchFocusWords = (value: string): string[] => {
+  const words = [...value.matchAll(searchFocusWordPattern)]
+    .map(match => match[0])
+    .filter(Boolean)
+    .slice(0, searchFocusMaxWords)
+
+  return words.length > 0 ? words : ['Searching']
+}
+
+const getCanvasTextMeasure = (): CanvasRenderingContext2D | null => {
+  if (typeof document === 'undefined') return null
+  const canvas = document.createElement('canvas')
+  return canvas.getContext('2d')
+}
+
+const getElementFont = (element: HTMLElement): {
+  font: string
+  fontFamily: string
+  fontSize: number
+  fontWeight: string
+  lineHeight: number
+} => {
+  const style = window.getComputedStyle(element)
+  const fontSize = Number.parseFloat(style.fontSize) || 24
+  const lineHeight = style.lineHeight === 'normal'
+    ? fontSize * 1.08
+    : (Number.parseFloat(style.lineHeight) || fontSize * 1.08)
+  const fontWeight = style.fontWeight || '400'
+  const fontFamily = style.fontFamily || 'Kanit, sans-serif'
+  const font = [
+    style.fontStyle && style.fontStyle !== 'normal' ? style.fontStyle : '',
+    style.fontVariant && style.fontVariant !== 'normal' ? style.fontVariant : '',
+    fontWeight,
+    `${fontSize}px`,
+    fontFamily,
+  ].filter(Boolean).join(' ')
+
+  return {
+    font,
+    fontFamily,
+    fontSize,
+    fontWeight,
+    lineHeight,
+  }
+}
+
+const measureSearchFocusSourceWords = (
+  text: string,
+  element: HTMLElement | null,
+  options: {
+    maxWords?: number
+    wrap?: boolean
+  } = {},
+): SearchFocusWordSnapshot[] => {
+  const words = getSearchFocusWords(text).slice(0, options.maxWords ?? searchFocusMaxWords)
+  if (!element || words.length === 0 || typeof window === 'undefined') return []
+
+  const rect = element.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return []
+
+  const style = window.getComputedStyle(element)
+  const paddingLeft = Number.parseFloat(style.paddingLeft) || 0
+  const paddingTop = Number.parseFloat(style.paddingTop) || 0
+  const paddingRight = Number.parseFloat(style.paddingRight) || 0
+  const font = getElementFont(element)
+  const measure = getCanvasTextMeasure()
+  if (measure) {
+    measure.font = font.font
+  }
+
+  const measureText = (value: string): number => (
+    measure ? measure.measureText(value).width : value.length * font.fontSize * 0.56
+  )
+  const spaceWidth = measureText(' ')
+  const maxLineWidth = Math.max(24, rect.width - paddingLeft - paddingRight)
+  const shouldWrap = Boolean(options.wrap)
+  const baselineTop = rect.top + (shouldWrap ? paddingTop : Math.max(0, (rect.height - font.lineHeight) / 2))
+  let cursorX = 0
+  let lineIndex = 0
+
+  return words.map((word) => {
+    const wordWidth = measureText(word)
+    if (shouldWrap && cursorX > 0 && cursorX + wordWidth > maxLineWidth) {
+      cursorX = 0
+      lineIndex += 1
+    }
+
+    const startX = rect.left + paddingLeft + cursorX
+    const startY = baselineTop + lineIndex * font.lineHeight
+    cursorX += wordWidth + spaceWidth
+
+    return {
+      text: word,
+      startX,
+      startY,
+      driftX: 0,
+      driftY: 0,
+      fontFamily: font.fontFamily,
+      fontSize: font.fontSize,
+      fontWeight: font.fontWeight,
+      lineHeight: font.lineHeight,
+    }
+  })
+}
+
+const addSearchFocusDrift = (words: SearchFocusWordSnapshot[]): SearchFocusWordSnapshot[] => {
+  if (words.length === 0 || typeof window === 'undefined') return words
+
+  const centers = words.map(word => ({
+    x: word.startX + (word.text.length * word.fontSize * 0.28),
+    y: word.startY + word.lineHeight / 2,
+  }))
+  const minX = Math.min(...centers.map(center => center.x))
+  const maxX = Math.max(...centers.map(center => center.x))
+  const minY = Math.min(...centers.map(center => center.y))
+  const maxY = Math.max(...centers.map(center => center.y))
+  const centerX = (minX + maxX) / 2
+  const centerY = (minY + maxY) / 2
+  const viewportWidth = window.innerWidth || 1024
+  const viewportHeight = window.innerHeight || 768
+  const padding = Math.min(96, Math.max(28, viewportWidth * 0.04))
+  const maxRightScale = maxX === centerX ? 2.4 : (viewportWidth - padding - centerX) / (maxX - centerX)
+  const maxLeftScale = minX === centerX ? 2.4 : (centerX - padding) / (centerX - minX)
+  const maxBottomScale = maxY === centerY ? 2.4 : (viewportHeight - padding - centerY) / (maxY - centerY)
+  const maxTopScale = minY === centerY ? 2.4 : (centerY - padding) / (centerY - minY)
+  const boundedScale = Math.min(maxRightScale, maxLeftScale, maxBottomScale, maxTopScale)
+  const finalScale = Math.max(1.5, Math.min(3.85, boundedScale * 1.18))
+  const driftScale = finalScale - 1
+
+  return words.map((word, index) => {
+    const center = centers[index]
+    let vectorX = center.x - centerX
+    let vectorY = center.y - centerY
+
+    if (Math.abs(vectorX) < 4 && Math.abs(vectorY) < 4) {
+      const angle = (index / Math.max(1, words.length)) * Math.PI * 2
+      vectorX = Math.cos(angle) * 34
+      vectorY = Math.sin(angle) * 34
+    }
+
+    return {
+      ...word,
+      driftX: vectorX * driftScale,
+      driftY: vectorY * driftScale,
+    }
+  })
+}
+
+const buildFallbackSearchFocusWords = (
+  text: string,
+  mode: InputMode,
+): SearchFocusWordSnapshot[] => {
+  if (typeof window === 'undefined') return []
+
+  const words = getSearchFocusWords(text)
+  const fontSize = mode === 'essay'
+    ? Math.max(18, Math.min(34, window.innerWidth * 0.033))
+    : Math.max(24, Math.min(56, window.innerWidth * 0.052))
+  const lineHeight = fontSize * 1.05
+  const rowWidth = Math.min(window.innerWidth - 48, Math.max(320, words.length * fontSize * 2.6))
+  let x = (window.innerWidth - rowWidth) / 2
+  let y = window.innerHeight / 2 - lineHeight / 2
+
+  const positionedWords = words.map((word) => {
+    const wordWidth = word.length * fontSize * 0.56
+    if (x + wordWidth > window.innerWidth - 24) {
+      x = (window.innerWidth - rowWidth) / 2
+      y += lineHeight * 1.24
+    }
+
+    const snapshot: SearchFocusWordSnapshot = {
+      text: word,
+      startX: x,
+      startY: y,
+      driftX: 0,
+      driftY: 0,
+      fontFamily: "'Kanit', sans-serif",
+      fontSize,
+      fontWeight: '400',
+      lineHeight,
+    }
+    x += wordWidth + fontSize * 0.38
+    return snapshot
+  })
+
+  return addSearchFocusDrift(positionedWords)
+}
 
 const getArticleIdKey = (article: Pick<Article, 'id'>): string => String(article.id)
 const typoTokenPattern = /[\p{L}]+(?:[-'][\p{L}]+)*/gu
@@ -1857,6 +2069,57 @@ function RankingWeightSlider(
   )
 }
 
+const FloatingSearchFocus = ({
+  mode,
+  words,
+  clearing,
+}: {
+  mode: InputMode
+  words: SearchFocusWordSnapshot[]
+  clearing: boolean
+}): JSX.Element => {
+  const densityClass = words.length > 22
+    ? 'dense'
+    : (words.length > 14 ? 'balanced' : 'spacious')
+
+  return (
+    <section
+      className={`search-focus-overlay ${clearing ? 'clearing' : ''}`}
+      role="status"
+      aria-live="polite"
+      aria-label={`${mode === 'essay' ? 'Essay search' : 'Stance search'} in progress`}
+    >
+      <div className="search-focus-glow" aria-hidden="true" />
+      <div className={`search-focus-field ${densityClass}`} aria-hidden="true">
+        {words.map((word, index) => {
+          const duration = 12.4 + (index % 5) * 0.34
+
+          return (
+            <span
+              key={`${word.text}-${index}`}
+              className="search-focus-word"
+              style={{
+                left: `${word.startX}px`,
+                top: `${word.startY}px`,
+                fontSize: `${word.fontSize}px`,
+                fontWeight: word.fontWeight,
+                lineHeight: `${word.lineHeight}px`,
+                '--focus-font-family': word.fontFamily,
+                '--drift-x': `${word.driftX}px`,
+                '--drift-y': `${word.driftY}px`,
+                '--word-delay': `${index * 18}ms`,
+                '--word-duration': `${duration}s`,
+              } as CSSProperties}
+            >
+              {word.text}
+            </span>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 function App(): JSX.Element {
   const hasSeenLandingRef = useRef<boolean>(hasSeenLanding())
   const [useLlm, setUseLlm] = useState<boolean | null>(null)
@@ -1959,6 +2222,7 @@ function App(): JSX.Element {
   const [isImportingPdf, setIsImportingPdf] = useState<boolean>(false)
   const [importedPdfName, setImportedPdfName] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
+  const [searchFocusSnapshot, setSearchFocusSnapshot] = useState<SearchFocusSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [emptyResultsMessage, setEmptyResultsMessage] = useState<string | null>(null)
   const [typoCorrection, setTypoCorrection] = useState<TypoCorrectionSuggestion | null>(null)
@@ -1986,6 +2250,12 @@ function App(): JSX.Element {
   const [essayThesisMode, setEssayThesisMode] = useState<EssayThesisMode>('candidate')
   const [essayActiveStep, setEssayActiveStep] = useState<EssayStep>(1)
   const essayOptionsRef = useRef<HTMLDivElement | null>(null)
+  const topicPromptLabelRef = useRef<HTMLSpanElement | null>(null)
+  const opinionPromptLabelRef = useRef<HTMLSpanElement | null>(null)
+  const topicInputRef = useRef<HTMLInputElement | null>(null)
+  const opinionInputRef = useRef<HTMLInputElement | null>(null)
+  const essayTextAreaRef = useRef<HTMLTextAreaElement | null>(null)
+  const essaySubmitCopyRef = useRef<HTMLParagraphElement | null>(null)
   const settingsScrollPaneRef = useRef<HTMLDivElement | null>(null)
   const retrievalGranularitySettingsRef = useRef<HTMLDivElement | null>(null)
   const topicSettingsRef = useRef<HTMLDivElement | null>(null)
@@ -1994,6 +2264,9 @@ function App(): JSX.Element {
   const touchStartYRef = useRef<number | null>(null)
   const resultsOverviewRequestIdRef = useRef<number>(0)
   const queryAssistRequestIdRef = useRef<number>(0)
+  const searchFocusKeyRef = useRef<number>(0)
+  const searchFocusStartedAtRef = useRef<number>(0)
+  const searchFocusTimeoutRef = useRef<number | null>(null)
   const lastAppliedFiltersRef = useRef<{
     yearStart: number | null
     yearEnd: number | null
@@ -2011,6 +2284,125 @@ function App(): JSX.Element {
   const [hasSubmittedSearch, setHasSubmittedSearch] = useState<boolean>(false)
   const [shouldScrollToResults, setShouldScrollToResults] = useState<boolean>(true)
   const useChunking = chunkingMode !== 'none'
+
+  const clearSearchFocusTimer = (): void => {
+    if (typeof window !== 'undefined' && searchFocusTimeoutRef.current !== null) {
+      window.clearTimeout(searchFocusTimeoutRef.current)
+    }
+    searchFocusTimeoutRef.current = null
+  }
+
+  const startSearchFocus = (
+    text: string,
+    mode: InputMode,
+    positionedWords: SearchFocusWordSnapshot[] = [],
+  ): void => {
+    clearSearchFocusTimer()
+    const nextKey = searchFocusKeyRef.current + 1
+    const fallbackText = mode === 'essay'
+      ? 'Searching this essay'
+      : 'Regarding this topic I believe this stance'
+    const resolvedText = summarizeApiText(text, 220) || fallbackText
+    const resolvedWords = positionedWords.length > 0
+      ? addSearchFocusDrift(positionedWords)
+      : buildFallbackSearchFocusWords(resolvedText, mode)
+
+    searchFocusKeyRef.current = nextKey
+    searchFocusStartedAtRef.current = Date.now()
+    setSearchFocusSnapshot({
+      key: nextKey,
+      text: resolvedText,
+      mode,
+      words: resolvedWords,
+      clearing: false,
+    })
+  }
+
+  const finishSearchFocus = (): void => {
+    const activeKey = searchFocusKeyRef.current
+    const elapsedMs = Date.now() - searchFocusStartedAtRef.current
+    const remainingMs = Math.max(0, searchFocusMinimumMs - elapsedMs)
+
+    if (typeof window === 'undefined') {
+      setSearchFocusSnapshot(null)
+      return
+    }
+
+    clearSearchFocusTimer()
+    searchFocusTimeoutRef.current = window.setTimeout(() => {
+      setSearchFocusSnapshot(currentSnapshot => (
+        currentSnapshot?.key === activeKey
+          ? { ...currentSnapshot, clearing: true }
+          : currentSnapshot
+      ))
+      searchFocusTimeoutRef.current = window.setTimeout(() => {
+        setSearchFocusSnapshot(currentSnapshot => (
+          currentSnapshot?.key === activeKey ? null : currentSnapshot
+        ))
+        searchFocusTimeoutRef.current = null
+      }, searchFocusClearMs)
+    }, remainingMs)
+  }
+
+  useEffect(() => (
+    () => clearSearchFocusTimer()
+  ), [])
+
+  const buildStanceSearchFocusWords = (
+    nextTopic: string,
+    nextOpinion: string,
+  ): SearchFocusWordSnapshot[] => {
+    const topicLabelWords = measureSearchFocusSourceWords(
+      'Regarding',
+      topicPromptLabelRef.current,
+      { maxWords: 1 },
+    )
+    const topicWords = measureSearchFocusSourceWords(
+      nextTopic,
+      topicInputRef.current,
+      { maxWords: 14 },
+    )
+    const opinionLabelWords = measureSearchFocusSourceWords(
+      'I believe',
+      opinionPromptLabelRef.current,
+      { maxWords: 2 },
+    )
+    const remainingWordCount = Math.max(
+      4,
+      searchFocusMaxWords - topicLabelWords.length - topicWords.length - opinionLabelWords.length,
+    )
+    const opinionWords = measureSearchFocusSourceWords(
+      nextOpinion,
+      opinionInputRef.current,
+      { maxWords: remainingWordCount },
+    )
+
+    return [
+      ...topicLabelWords,
+      ...topicWords,
+      ...opinionLabelWords,
+      ...opinionWords,
+    ].slice(0, searchFocusMaxWords)
+  }
+
+  const buildEssaySearchFocusWords = (
+    nextEssayText: string,
+    nextThesisSentence: string,
+  ): SearchFocusWordSnapshot[] => {
+    const sourceElement = nextThesisSentence
+      ? essaySubmitCopyRef.current
+      : essayTextAreaRef.current
+    const sourceText = nextThesisSentence || summarizeApiText(nextEssayText, 170)
+
+    return measureSearchFocusSourceWords(
+      sourceText,
+      sourceElement,
+      {
+        maxWords: searchFocusMaxWords,
+        wrap: true,
+      },
+    )
+  }
 
   useEffect(() => {
     let isActive = true
@@ -3487,6 +3879,14 @@ function App(): JSX.Element {
     if (typeof document !== 'undefined') {
       document.body.style.overflow = ''
     }
+    startSearchFocus(
+      [
+        nextTopic ? `Regarding ${nextTopic}` : null,
+        trimmedOpinion ? `I believe ${trimmedOpinion}` : null,
+      ].filter(Boolean).join(' '),
+      'stance',
+      buildStanceSearchFocusWords(nextTopic, trimmedOpinion),
+    )
     setLoading(true)
     setError(null)
     setArticles([])
@@ -3540,7 +3940,7 @@ function App(): JSX.Element {
       setQuerySvdDimensions(normalized.querySvdDimensions)
       setEmptyResultsMessage(normalized.emptyResultsMessage)
       setTypoCorrection(normalized.typoCorrection)
-      setShouldScrollToResults(Boolean(options.skipTypoCorrection) || !normalized.typoCorrection)
+      setShouldScrollToResults(true)
       if (options.markTopicFeedbackApplied) {
         setAppliedTopicFeedbackArticleIds(feedbackArticleIds)
       }
@@ -3564,6 +3964,7 @@ function App(): JSX.Element {
       setError(fetchError instanceof Error ? fetchError.message : 'Search request failed.')
     } finally {
       setLoading(false)
+      finishSearchFocus()
     }
   }
 
@@ -3652,10 +4053,18 @@ function App(): JSX.Element {
       wordsToAvoidKey: activeWordsToAvoidKey,
     }
     setHasSubmittedSearch(true)
-    setShouldScrollToResults(true)
+    setShouldScrollToResults(false)
     if (typeof document !== 'undefined') {
       document.body.style.overflow = ''
     }
+    startSearchFocus(
+      [
+        nextThesisSentence ? `Thesis ${nextThesisSentence}` : 'Essay topic',
+        summarizeApiText(nextEssayText, 170),
+      ].filter(Boolean).join(' '),
+      'essay',
+      buildEssaySearchFocusWords(nextEssayText, nextThesisSentence),
+    )
     setLoading(true)
     setError(null)
     setArticles([])
@@ -3709,6 +4118,7 @@ function App(): JSX.Element {
       setQuerySvdDimensions(normalized.querySvdDimensions)
       setEmptyResultsMessage(normalized.emptyResultsMessage)
       setTypoCorrection(normalized.typoCorrection)
+      setShouldScrollToResults(true)
       if (options.markTopicFeedbackApplied) {
         setAppliedTopicFeedbackArticleIds(feedbackArticleIds)
       }
@@ -3728,9 +4138,11 @@ function App(): JSX.Element {
       setQuerySvdDimensions([])
       setEmptyResultsMessage(null)
       setTypoCorrection(null)
+      setShouldScrollToResults(true)
       setError(fetchError instanceof Error ? fetchError.message : 'Essay search failed.')
     } finally {
       setLoading(false)
+      finishSearchFocus()
     }
   }
 
@@ -4667,11 +5079,12 @@ function App(): JSX.Element {
               role="text"
               aria-label={`Regarding ${typedTopic || trimmedTopic || introTopicSequence[introTopicSequence.length - 1]}`}
             >
-              <span className="intro-line-label">Regarding</span>
+              <span ref={topicPromptLabelRef} className="intro-line-label">Regarding</span>
               {isSearchStageVisible && inputMode === 'stance' ? (
                 <span className="intro-inline-form-slot">
                   <span className="intro-inline-input-wrap">
                     <input
+                      ref={topicInputRef}
                       type="text"
                       value={topic}
                       onChange={(event) => setTopic(event.target.value)}
@@ -4725,11 +5138,12 @@ function App(): JSX.Element {
               role="text"
               aria-label={`I believe ${typedClaim || trimmedOpinion || introClaimSequence[introClaimSequence.length - 1]}`}
             >
-              <span className="intro-line-label">I believe</span>
+              <span ref={opinionPromptLabelRef} className="intro-line-label">I believe</span>
               {isSearchStageVisible && inputMode === 'stance' ? (
                 <span className="intro-inline-form-slot">
                   <span className="intro-inline-input-wrap">
                     <input
+                      ref={opinionInputRef}
                       type="text"
                       value={opinion}
                       onChange={(event) => setOpinion(event.target.value)}
@@ -4771,6 +5185,7 @@ function App(): JSX.Element {
                       <span className="essay-intake-label">Essay</span>
                       <span className="essay-intake-field essay-intake-text-field">
                         <textarea
+                          ref={essayTextAreaRef}
                           id="search-input"
                           placeholder="Paste an essay, paper, or op-ed..."
                           value={searchTerm}
@@ -4920,7 +5335,7 @@ function App(): JSX.Element {
                   <div className="essay-submit-panel">
                     <div>
                       <p className="essay-submit-eyebrow">Selected thesis</p>
-                      <p className="essay-submit-copy">
+                      <p ref={essaySubmitCopyRef} className="essay-submit-copy">
                         {resolvedEssayThesis || 'Choose a sentence above or type your own thesis below.'}
                       </p>
                     </div>
@@ -4979,6 +5394,15 @@ function App(): JSX.Element {
         </div>
       </div>
 
+      {searchFocusSnapshot && (
+        <FloatingSearchFocus
+          key={searchFocusSnapshot.key}
+          mode={searchFocusSnapshot.mode}
+          words={searchFocusSnapshot.words}
+          clearing={searchFocusSnapshot.clearing}
+        />
+      )}
+
       {hasSubmittedSearch && (
         <div
           ref={resultsSectionRef}
@@ -5010,7 +5434,7 @@ function App(): JSX.Element {
               </div>
             )}
 
-            {loading && (
+            {loading && !searchFocusSnapshot && (
               <div className="results-thinking-card" role="status" aria-live="polite">
                 <p className="results-thinking-label">Thinking</p>
                 <div className="results-thinking-dots" aria-hidden="true">
@@ -5404,7 +5828,7 @@ function App(): JSX.Element {
                                 <div className="svd-section-copy-block">
                                   <div className="svd-section-title">Query top 10 concepts</div>
                                   <p className="svd-section-copy">
-                                    This radar uses the 10 concepts most activated by the query, then shows how strongly this article aligns with each one.
+                                    This chart shows the main ideas in your query, and how strongly this article relates to each of them.
                                   </p>
                                 </div>
                                 <SvdRadarChart
@@ -5426,7 +5850,7 @@ function App(): JSX.Element {
                                 <div className="svd-section-copy-block">
                                   <div className="svd-section-title">Shared top 10 corpus concepts</div>
                                   <p className="svd-section-copy">
-                                    This radar plots every article against the same 10 broad corpus concepts, so differences in shape reflect differences in topic emphasis.
+                                    This chart compares the article to a common set of broad topics used across all results, so you can see how its focus differs from others.
                                   </p>
                                 </div>
                                 <SvdRadarChart
@@ -5450,7 +5874,10 @@ function App(): JSX.Element {
                                   <div className="svd-section-copy-block">
                                     <div className="svd-section-title">Top concepts for this article</div>
                                     <p className="svd-section-copy">
-                                      These bars show the article&apos;s top 10 concepts overall. Concepts extend left for negative loadings and right for positive loadings.
+                                      Longer bars mean the article is more strongly associated with that concept.
+                                    </p>
+                                    <p className='svd-section-copy'>
+                                      The direction (left vs. right) shows which side of the concept the article falls on. SVD dimensions capture contrasts between related themes, so opposite directions correspond to different but related topics.
                                     </p>
                                   </div>
 
@@ -5510,9 +5937,33 @@ function App(): JSX.Element {
                               />
                             </div>
                             <div className="sentiment-breakdown">
-                              <span>Negative {formatSentimentPercent(article.vader_sentiment.negative)}</span>
-                              <span>Neutral {formatSentimentPercent(article.vader_sentiment.neutral)}</span>
-                              <span>Positive {formatSentimentPercent(article.vader_sentiment.positive)}</span>
+                              <span
+                                className="sentiment-breakdown-segment negative"
+                                style={{ width: formatSentimentPercent(article.vader_sentiment.negative) }}
+                                aria-label={`Negative ${formatSentimentPercent(article.vader_sentiment.negative)}`}
+                              >
+                                <span className="sentiment-breakdown-text" aria-hidden="true">
+                                  Negative {formatSentimentPercent(article.vader_sentiment.negative)}
+                                </span>
+                              </span>
+                              <span
+                                className="sentiment-breakdown-segment neutral"
+                                style={{ width: formatSentimentPercent(article.vader_sentiment.neutral) }}
+                                aria-label={`Neutral ${formatSentimentPercent(article.vader_sentiment.neutral)}`}
+                              >
+                                <span className="sentiment-breakdown-text" aria-hidden="true">
+                                  Neutral {formatSentimentPercent(article.vader_sentiment.neutral)}
+                                </span>
+                              </span>
+                              <span
+                                className="sentiment-breakdown-segment positive"
+                                style={{ width: formatSentimentPercent(article.vader_sentiment.positive) }}
+                                aria-label={`Positive ${formatSentimentPercent(article.vader_sentiment.positive)}`}
+                              >
+                                <span className="sentiment-breakdown-text" aria-hidden="true">
+                                  Positive {formatSentimentPercent(article.vader_sentiment.positive)}
+                                </span>
+                              </span>
                             </div>
 
                             {article.vader_sentiment.text_scores && (
@@ -5580,7 +6031,7 @@ function App(): JSX.Element {
                         </details>
                       )}
 
-                      {(article.thesis_sentence || (article.support_sentences && article.support_sentences.length > 0)) && (
+                      {(article.thesis_sentence || (article.support_sentences && article.support_sentences.length > 0) || (article.keywords && article.keywords.length > 0)) && (
                         <details className="content-disclosure">
                           <summary className="content-disclosure-summary">
                             <span className="content-disclosure-copy">
@@ -5606,6 +6057,17 @@ function App(): JSX.Element {
                                 </ul>
                               </div>
                             )}
+
+                            {article.keywords && article.keywords.length > 0 && (
+                              <div className="overview-group">
+                                <div className="overview-label">Keywords</div>
+                                <div className="keyword-list">
+                                  {article.keywords.map((kw, index) => (
+                                    <span key={`${article.id}-keyword-${index}`} className="keyword-chip">{kw}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </details>
                       )}
@@ -5614,19 +6076,6 @@ function App(): JSX.Element {
                         <p className="claim-missing">
                           No extracted central claim is available for this article yet, so it stayed in the ranking based on topic or essay relevance alone.
                         </p>
-                      )}
-
-                      {article.keywords && article.keywords.length > 0 && (
-                        <div className="article-footer-row">
-                          <div className="keyword-block">
-                            <p>Keywords</p>
-                            <div className="keyword-list">
-                              {article.keywords.map((kw, index) => (
-                                <span key={`${article.id}-keyword-${index}`} className="keyword-chip">{kw}</span>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
                       )}
 
                       <div className="topic-feedback-action-row">
