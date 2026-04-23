@@ -5572,6 +5572,68 @@
   color: #5d4935;
 }
 
+.search-focus-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 28px;
+  box-sizing: border-box;
+  background:
+    linear-gradient(180deg, rgba(2, 2, 2, 0.28), rgba(2, 2, 2, 0.48)),
+    rgba(2, 2, 2, 0.34);
+  color: #fff8ed;
+  backdrop-filter: blur(0) saturate(1);
+  animation: search-focus-overlay-in 1100ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.search-focus-overlay.clearing {
+  animation: search-focus-overlay-clear 850ms linear forwards;
+}
+
+.search-focus-glow {
+  display: none;
+}
+
+.search-focus-field {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.search-focus-overlay.clearing .search-focus-field {
+  animation: search-focus-field-clear 850ms linear forwards;
+}
+
+.search-focus-word {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: min(20ch, 62vw);
+  min-height: 1em;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #fff8ed;
+  font-family: var(--focus-font-family), 'Kanit', sans-serif !important;
+  letter-spacing: 0;
+  text-shadow:
+    0 0 18px rgba(255, 252, 248, 0.16),
+    0 12px 34px rgba(0, 0, 0, 0.38);
+  white-space: nowrap;
+  overflow-wrap: anywhere;
+  opacity: 0;
+  filter: blur(6px);
+  transform: translate3d(0, 0, 0);
+  animation: search-focus-word-float-away var(--word-duration) linear forwards;
+  animation-delay: var(--word-delay);
+  will-change: transform, opacity, filter;
+}
+
 .results-thinking-card,
 .results-empty-card {
   display: flex;
@@ -6470,6 +6532,74 @@ a.results-overview-source-chip:hover {
   color: #3a2d1e;
 }
 
+@keyframes search-focus-overlay-in {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0) saturate(1);
+  }
+
+  to {
+    opacity: 1;
+    backdrop-filter: blur(18px) saturate(0.9);
+  }
+}
+
+@keyframes search-focus-overlay-clear {
+  from {
+    opacity: 1;
+    backdrop-filter: blur(18px) saturate(0.9);
+    background:
+      linear-gradient(180deg, rgba(2, 2, 2, 0.28), rgba(2, 2, 2, 0.48)),
+      rgba(2, 2, 2, 0.34);
+  }
+
+  to {
+    opacity: 0;
+    backdrop-filter: blur(0) saturate(1);
+    background:
+      linear-gradient(180deg, rgba(2, 2, 2, 0), rgba(2, 2, 2, 0)),
+      rgba(2, 2, 2, 0);
+  }
+}
+
+@keyframes search-focus-field-clear {
+  from {
+    opacity: 1;
+    filter: blur(0);
+  }
+
+  to {
+    opacity: 0;
+    filter: blur(5px);
+  }
+}
+
+@keyframes search-focus-word-float-away {
+  0% {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translate3d(0, 0, 0);
+  }
+
+  10% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translate3d(calc(var(--drift-x) * 0.1), calc(var(--drift-y) * 0.1), 0);
+  }
+
+  50% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translate3d(calc(var(--drift-x) * 0.5), calc(var(--drift-y) * 0.5), 0);
+  }
+
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translate3d(var(--drift-x), var(--drift-y), 0);
+  }
+}
+
 @keyframes intro-cue-bob {
 
   0%,
@@ -6542,6 +6672,14 @@ a.results-overview-source-chip:hover {
 
   .intro-shell.search-active {
     gap: 8px;
+  }
+
+  .search-focus-overlay {
+    padding: 18px 12px;
+  }
+
+  .search-focus-word {
+    max-width: min(18ch, 78vw);
   }
 
   .search-header-block {
@@ -6870,10 +7008,20 @@ a.results-overview-source-chip:hover {
   .search-stage .essay-panel,
   .search-stage .stance-actions,
   .results-paper,
+  .search-focus-overlay,
+  .search-focus-glow,
+  .search-focus-field,
+  .search-focus-word,
   .intro-cue-arrow,
   .results-thinking-dots span {
     transition: none;
     animation: none;
+  }
+
+  .search-focus-word {
+    opacity: 1;
+    filter: none;
+    transform: none;
   }
 }
 
