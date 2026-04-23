@@ -31,6 +31,8 @@ import {
 import Chat from './Chat'
 
 type InputMode = 'stance' | 'essay'
+type TopNavPage = 'home' | 'search' | 'about'
+type AboutSection = 'overview' | 'team' | 'method'
 type IntroStage = 0 | 1 | 2
 type EssayStep = 1 | 2
 type EssayThesisMode = 'candidate' | 'custom'
@@ -118,6 +120,18 @@ const introTopicSequence = [
   'climate',
   'immigration',
   'minimum wage',
+] as const
+
+const aboutOverviewParagraphs = [
+  'hear! hear! is a research and writing companion designed to help users explore Guardian opinion articles in relation to their own ideas. Rather than only matching simple keywords, the app combines topic relevance and stance-aware ranking so readers can quickly find articles that support, complicate, or challenge a position they care about.',
+  'The project is built to make argument discovery more transparent and useful for writing. Whether someone starts with a short claim or a full draft essay, hear! hear! surfaces meaningful viewpoints, explains how results are ranked, and helps users understand the broader conversation before they refine a thesis, gather evidence, or revise an argument.',
+] as const
+
+const aboutTeamMembers = [
+  'Ashali Sharma',
+  'Jonathan Scardon',
+  'Steven Zhou',
+  'Nuo Cen',
 ] as const
 
 type IntroTopic = (typeof introTopicSequence)[number]
@@ -2232,8 +2246,11 @@ function App(): JSX.Element {
   const [queryAssistError, setQueryAssistError] = useState<string | null>(null)
   const [queryRewriteOptions, setQueryRewriteOptions] = useState<QueryRewriteAlternative[]>([])
   const [queryImproveSuggestions, setQueryImproveSuggestions] = useState<string[]>([])
-  const [isAboutOpen, setIsAboutOpen] = useState<boolean>(false)
-  const [activeAboutTab, setActiveAboutTab] = useState<InputMode>('stance')
+  const [activeTopNavPage, setActiveTopNavPage] = useState<TopNavPage>(
+    hasSeenLandingRef.current ? 'search' : 'home',
+  )
+  const [activeAboutSection, setActiveAboutSection] = useState<AboutSection>('overview')
+  const [activeAboutMethodTab, setActiveAboutMethodTab] = useState<InputMode>('stance')
   const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
   const [similarArticleSource, setSimilarArticleSource] = useState<Article | null>(null)
@@ -2284,6 +2301,9 @@ function App(): JSX.Element {
   const [hasSubmittedSearch, setHasSubmittedSearch] = useState<boolean>(false)
   const [shouldScrollToResults, setShouldScrollToResults] = useState<boolean>(true)
   const useChunking = chunkingMode !== 'none'
+  const isSearchPageActive = activeTopNavPage === 'search'
+  const isAboutPageActive = activeTopNavPage === 'about'
+  const isSearchChromeVisible = isSearchPageActive || isAboutPageActive
 
   const clearSearchFocusTimer = (): void => {
     if (typeof window !== 'undefined' && searchFocusTimeoutRef.current !== null) {
@@ -2602,6 +2622,10 @@ function App(): JSX.Element {
   }, [])
 
   useEffect(() => {
+    if (activeTopNavPage !== 'home') {
+      return
+    }
+
     if (isSearchStageVisible) {
       setIntroStage(2)
       setTypedTopic(finalIntroTopic)
@@ -2713,7 +2737,7 @@ function App(): JSX.Element {
       isCancelled = true
       timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId))
     }
-  }, [introSequenceKey, isSearchStageVisible])
+  }, [activeTopNavPage, introSequenceKey, isSearchStageVisible])
 
   useEffect(() => {
     if (inputMode !== 'stance') {
@@ -2799,7 +2823,6 @@ function App(): JSX.Element {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
-      setIsAboutOpen(false)
       setIsFilterOpen(false)
       setIsSettingsOpen(false)
       setIsQueryAssistOpen(false)
@@ -2843,22 +2866,29 @@ function App(): JSX.Element {
         behavior: 'smooth',
       })
     }
+    setActiveTopNavPage('search')
     setIsSearchStageVisible(true)
   }
 
-  const returnToLanding = (): void => {
+  const scrollPageToTop = (): void => {
     if (typeof window !== 'undefined') {
       window.scrollTo({
         top: 0,
         behavior: 'auto',
       })
     }
+  }
 
+  const showHomePage = (): void => {
+    scrollPageToTop()
     if (typeof document !== 'undefined') {
       document.body.style.overflow = ''
     }
 
+    clearSearchFocusTimer()
     touchStartYRef.current = null
+    setSearchFocusSnapshot(null)
+    setActiveTopNavPage('home')
     setHasSubmittedSearch(false)
     setIsSearchStageVisible(false)
     setIntroStage(0)
@@ -2867,8 +2897,19 @@ function App(): JSX.Element {
     setIntroSequenceKey(currentKey => currentKey + 1)
   }
 
+  const showSearchPage = (): void => {
+    activateSearchStage(true)
+  }
+
+  const openAboutPage = (): void => {
+    scrollPageToTop()
+    setActiveAboutMethodTab(inputMode)
+    setActiveTopNavPage('about')
+  }
+
   useEffect(() => {
     if (typeof window === 'undefined') return
+    if (activeTopNavPage !== 'home') return
     if (isSearchStageVisible || introStage < 2) return
 
     const isAtTop = (): boolean => window.scrollY <= 4
@@ -2911,14 +2952,14 @@ function App(): JSX.Element {
       window.removeEventListener('touchmove', handleTouchMove)
       window.removeEventListener('keydown', handleSearchTransitionKey)
     }
-  }, [introStage, isSearchStageVisible])
+  }, [activeTopNavPage, introStage, isSearchStageVisible])
 
   useEffect(() => {
     if (typeof document === 'undefined') return
 
     const previousOverflow = document.body.style.overflow
 
-    if (isSearchStageVisible && inputMode === 'stance' && !hasSubmittedSearch) {
+    if (isSearchPageActive && isSearchStageVisible && inputMode === 'stance' && !hasSubmittedSearch) {
       document.body.style.overflow = 'hidden'
       return () => {
         document.body.style.overflow = previousOverflow
@@ -2930,7 +2971,7 @@ function App(): JSX.Element {
     return () => {
       document.body.style.overflow = previousOverflow
     }
-  }, [hasSubmittedSearch, inputMode, isSearchStageVisible])
+  }, [hasSubmittedSearch, inputMode, isSearchPageActive, isSearchStageVisible])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -4317,10 +4358,6 @@ function App(): JSX.Element {
     setStanceMethod('nli')
   }
 
-  const openAbout = (tab: InputMode = inputMode): void => {
-    setActiveAboutTab(tab)
-    setIsAboutOpen(true)
-  }
   const showScoreGrid = (article: Article): boolean => (
     article.combined_score != null ||
     article.stance_score_normalized != null ||
@@ -4861,224 +4898,405 @@ function App(): JSX.Element {
         className={[
           'intro-screen',
           'landing-section',
-          isSearchStageVisible ? 'search-active' : '',
+          isSearchChromeVisible ? 'search-active' : '',
           inputMode === 'essay' ? 'essay-mode' : 'stance-mode',
         ].filter(Boolean).join(' ')}
       >
-        <div className={`intro-shell ${isSearchStageVisible ? 'search-active' : ''}`}>
-          <div className={`search-chrome ${isSearchStageVisible ? 'visible' : ''}`}>
-            <div className="top-nav" aria-label="Page navigation">
-              <div className="top-nav-spacer" aria-hidden="true" />
-              <div className="top-nav-actions">
-                <button
-                  type="button"
-                  className="top-nav-button"
-                  onClick={returnToLanding}
-                >
-                  Home
-                </button>
-                <button
-                  type="button"
-                  className="top-nav-button"
-                  onClick={() => openAbout()}
-                >
-                  About
-                </button>
-              </div>
-            </div>
-
-            <div className="search-header-block">
-              <div className="hero-copy">
-                <h1>hear! hear!</h1>
-                <h2>Find your voice in Guardian opinion articles</h2>
-              </div>
-
-              <div className="mode-switch" role="tablist" aria-label="Search mode">
-                <button
-                  type="button"
-                  className={`mode-pill ${inputMode === 'stance' ? 'active' : ''}`}
-                  onClick={() => setInputMode('stance')}
-                >
-                  Topic + Stance
-                </button>
-                <button
-                  type="button"
-                  className={`mode-pill ${inputMode === 'essay' ? 'active' : ''}`}
-                  onClick={() => setInputMode('essay')}
-                >
-                  Essay
-                </button>
-              </div>
-
-              <div className="top-search-controls" aria-label="Search controls">
-                <div className="top-search-mode-group top-search-mode-group-compact">
-                  <div className="top-search-mode-heading">
-                    <span>Search Granularity</span>
-                    <button
-                      type="button"
-                      className="top-search-mode-help"
-                      onClick={() => openSettingsAt('retrieval-granularity')}
-                      aria-label="Open search granularity settings"
-                    >
-                      ?
-                    </button>
-                  </div>
-                  <div className="top-search-mode-segments" role="group" aria-label="Search granularity">
-                    <button
-                      type="button"
-                      className={`top-search-mode-segment ${!useChunking ? 'active' : ''}`}
-                      aria-pressed={!useChunking}
-                      onClick={() => handleChunkingModeChange(false)}
-                    >
-                      Article
-                    </button>
-                    <button
-                      type="button"
-                      className={`top-search-mode-segment ${useChunking ? 'active' : ''}`}
-                      aria-pressed={useChunking}
-                      onClick={() => handleChunkingModeChange(true)}
-                      disabled={!canUseChunking}
-                    >
-                      Chunks
-                    </button>
-                  </div>
-                </div>
-
-                <div className="top-search-mode-toolbar" aria-label="Search methods">
-                  <div className="top-search-mode-group">
-                    <div className="top-search-mode-heading">
-                      <span>Topic Relevance Search Method</span>
-                      <button
-                        type="button"
-                        className="top-search-mode-help"
-                        onClick={() => openSettingsAt('topic-relevance')}
-                        aria-label="Open topic relevance settings"
-                      >
-                        ?
-                      </button>
-                    </div>
-                    <div className="top-search-mode-segments" role="group" aria-label="Topic relevance search method">
-                      <button
-                        type="button"
-                        className={`top-search-mode-segment ${!useChunking && retrievalModel === 'tfidf' ? 'active' : ''}`}
-                        aria-pressed={!useChunking && retrievalModel === 'tfidf'}
-                        onClick={() => handleTopicSearchModeChange('tfidf')}
-                        disabled={!canUseLexicalRetrieval}
-                      >
-                        Lexical
-                      </button>
-                      <button
-                        type="button"
-                        className={`top-search-mode-segment ${effectiveRetrievalModel === 'svd' ? 'active' : ''}`}
-                        aria-pressed={effectiveRetrievalModel === 'svd'}
-                        onClick={() => handleTopicSearchModeChange('svd')}
-                        disabled={!canUseSvd}
-                      >
-                        Semantic
-                      </button>
-                      <button
-                        type="button"
-                        className={`top-search-mode-segment ${effectiveRetrievalModel === 'minilm' ? 'active' : ''}`}
-                        aria-pressed={effectiveRetrievalModel === 'minilm'}
-                        onClick={() => handleTopicSearchModeChange('minilm')}
-                        disabled={!canUseMiniLm}
-                      >
-                        Enhanced
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="top-search-mode-group">
-                    <div className="top-search-mode-heading">
-                      <span>Stance Agreement Search Method</span>
-                      <button
-                        type="button"
-                        className="top-search-mode-help"
-                        onClick={() => openSettingsAt('agreement-scorer')}
-                        aria-label="Open stance agreement settings"
-                      >
-                        ?
-                      </button>
-                    </div>
-                    <div className="top-search-mode-segments" role="group" aria-label="Stance agreement search method">
-                      <button
-                        type="button"
-                        className={`top-search-mode-segment ${effectiveStanceMethod === 'nli' ? 'active' : ''}`}
-                        aria-pressed={effectiveStanceMethod === 'nli'}
-                        onClick={() => handleAgreementSearchModeChange('nli')}
-                        disabled={!canUseNliAgreement || useChunking}
-                      >
-                        Fast
-                      </button>
-                      <button
-                        type="button"
-                        className={`top-search-mode-segment ${effectiveStanceMethod === 'llm' ? 'active' : ''}`}
-                        aria-pressed={effectiveStanceMethod === 'llm'}
-                        onClick={() => handleAgreementSearchModeChange('llm')}
-                        disabled={!canUseLlmAgreement}
-                      >
-                        Enhanced
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {inputMode === 'essay' && isSearchStageVisible && shouldUseEssayThesisStep && (
-                <div
-                  className="essay-progress-shell"
-                  aria-label={`Essay workflow step ${essayWorkflowStep} of 2`}
-                >
-                  <div className="essay-progress-bar" aria-hidden="true">
-                    <span className={`essay-progress-segment ${essayWorkflowStep === 1 ? 'active' : 'complete'}`} />
-                    <span className={`essay-progress-segment ${essayWorkflowStep === 2 ? 'active' : (isEssayStepTwoAvailable ? 'complete' : '')}`} />
-                  </div>
-
-                  <div className="essay-progress-steps">
-                    <button
-                      type="button"
-                      className={`essay-progress-step ${essayWorkflowStep === 1 ? 'active' : 'complete'}`}
-                      onClick={() => setEssayActiveStep(1)}
-                      aria-current={essayWorkflowStep === 1 ? 'step' : undefined}
-                    >
-                      <span className="essay-progress-number">1</span>
-                      <div className="essay-progress-copy">
-                        <span className="essay-progress-title">Add your essay</span>
-                        <span className="essay-progress-note">Paste text or import from a PDF.</span>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`essay-progress-step ${essayWorkflowStep === 2
-                        ? 'active'
-                        : (isEssayStepTwoAvailable ? 'available' : 'disabled')
-                        }`}
-                      onClick={() => {
-                        if (isEssayStepTwoAvailable) {
-                          setEssayActiveStep(2)
-                        }
-                      }}
-                      disabled={!isEssayStepTwoAvailable}
-                      aria-current={essayWorkflowStep === 2 ? 'step' : undefined}
-                    >
-                      <span className="essay-progress-number">2</span>
-                      <div className="essay-progress-copy">
-                        <span className="essay-progress-title">Choose the thesis</span>
-                        <span className="essay-progress-note">
-                          {isEssayStepTwoAvailable
-                            ? 'Pick a sentence or write your own thesis.'
-                            : 'Extract thesis options to unlock this step.'}
-                        </span>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-              )}
+        <div className={`intro-shell ${isSearchChromeVisible ? 'search-active' : ''}`}>
+          <div className="top-nav page-top-nav" aria-label="Page navigation">
+            <div className="top-nav-spacer" aria-hidden="true" />
+            <div className="top-nav-actions">
+              <button
+                type="button"
+                className={`top-nav-button ${activeTopNavPage === 'home' ? 'active' : ''}`}
+                onClick={showHomePage}
+                aria-pressed={activeTopNavPage === 'home'}
+              >
+                Home
+              </button>
+              <button
+                type="button"
+                className={`top-nav-button ${isSearchPageActive ? 'active' : ''}`}
+                onClick={showSearchPage}
+                aria-pressed={isSearchPageActive}
+              >
+                Search
+              </button>
+              <button
+                type="button"
+                className={`top-nav-button ${isAboutPageActive ? 'active' : ''}`}
+                onClick={openAboutPage}
+                aria-pressed={isAboutPageActive}
+              >
+                About
+              </button>
             </div>
           </div>
 
-          <div className={`landing-prompt-shell ${(inputMode === 'essay' && isSearchStageVisible) ? 'hidden' : ''}`}>
+          <div className={`search-chrome ${isSearchChromeVisible ? 'visible' : ''}`}>
+            {isAboutPageActive ? (
+              <section className="about-page" aria-labelledby="about-page-title">
+                <div className="about-page-card">
+                  <div className="about-page-header">
+                    <p className="about-page-eyebrow">About</p>
+                    <h2 id="about-page-title">About hear! hear!</h2>
+                    <p className="about-page-subtitle">
+                      Learn what the project is for, who built it, and how the search pipeline works.
+                    </p>
+                  </div>
+
+                  <div className="about-tablist" role="tablist" aria-label="About sections">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={activeAboutSection === 'overview'}
+                      className={`about-tab ${activeAboutSection === 'overview' ? 'active' : ''}`}
+                      onClick={() => setActiveAboutSection('overview')}
+                    >
+                      Overview
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={activeAboutSection === 'team'}
+                      className={`about-tab ${activeAboutSection === 'team' ? 'active' : ''}`}
+                      onClick={() => setActiveAboutSection('team')}
+                    >
+                      Team
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={activeAboutSection === 'method'}
+                      className={`about-tab ${activeAboutSection === 'method' ? 'active' : ''}`}
+                      onClick={() => setActiveAboutSection('method')}
+                    >
+                      Method
+                    </button>
+                  </div>
+
+                  <div className="about-page-panel">
+                    {activeAboutSection === 'overview' && (
+                      <div className="about-page-stack">
+                        {aboutOverviewParagraphs.map((paragraph) => (
+                          <p key={paragraph} className="about-page-copy">
+                            {paragraph}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+
+                    {activeAboutSection === 'team' && (
+                      <ul className="about-team-grid" aria-label="Team members">
+                        {aboutTeamMembers.map((member) => (
+                          <li key={member} className="about-team-card">
+                            <p className="about-team-label">Team Member</p>
+                            <h3>{member}</h3>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {activeAboutSection === 'method' && (
+                      <div className="about-page-stack">
+                        <p className="about-page-copy">
+                          The method tab explains the current ranking workflow for both search entry points in hear! hear!.
+                        </p>
+
+                        <div className="about-tablist about-method-tablist" role="tablist" aria-label="About search methods">
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={activeAboutMethodTab === 'stance'}
+                            className={`about-tab ${activeAboutMethodTab === 'stance' ? 'active' : ''}`}
+                            onClick={() => setActiveAboutMethodTab('stance')}
+                          >
+                            Topic and Stance Search
+                          </button>
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={activeAboutMethodTab === 'essay'}
+                            className={`about-tab ${activeAboutMethodTab === 'essay' ? 'active' : ''}`}
+                            onClick={() => setActiveAboutMethodTab('essay')}
+                          >
+                            Essay-Guided Search
+                          </button>
+                        </div>
+
+                        <div className="modal-stage-list about-method-stage-list">
+                          {activeAboutMethodTab === 'stance' ? (
+                            <>
+                              <section className="about-section">
+                                <p className="about-section-label">Stage 1</p>
+                                <p className="modal-copy">
+                                  <strong>Stage 1: Topic relevance.</strong> We first identify articles that are
+                                  relevant to your topic. To do this, we compute the similarity between your
+                                  input and each Guardian article using the retrieval representation selected
+                                  in topic relevance mode: either Lexical TF-IDF term vectors or Semantic
+                                  truncated-SVD latent dimensions, both compared with cosine similarity. This
+                                  helps us find articles that discuss similar themes and keywords.
+                                </p>
+                              </section>
+                              <section className="about-section">
+                                <p className="about-section-label">Stage 2</p>
+                                <p className="modal-copy">
+                                  <strong>Stage 2: Stance relevance.</strong> From the candidate articles identified
+                                  in Stage 1, we then rank them based on how they relate to your opinion.
+                                  The Agreement scorer in Settings can use either DeBERTa Natural Language
+                                  Inference (NLI) over each extracted article claim or Spark LLM scoring over
+                                  retrieved article context. The model estimates whether each article supports,
+                                  contradicts, or is neutral toward your stance. If you raise the recency
+                                  weight in Settings, newer publication dates also contribute to the final
+                                  ranking.
+                                </p>
+                              </section>
+                            </>
+                          ) : (
+                            <>
+                              <section className="about-section">
+                                <p className="about-section-label">Stage 1</p>
+                                <p className="modal-copy">
+                                  <strong>Stage 1: Essay thesis detection.</strong> We first split your essay into
+                                  individual sentences using our sentence segmentation pipeline. Then we use a
+                                  DeBERTa Natural Language Inference (NLI) model to compare each sentence against
+                                  the hypothesis, &ldquo;This sentence is the author&apos;s main claim.&rdquo; This gives
+                                  each sentence a claimness score, and we present the top options so you can
+                                  choose the sentence that best represents your essay&apos;s central thesis, or
+                                  enter your own thesis wording when you want to override the suggestions.
+                                  When the LLM Agreement scorer is selected, this step is skipped and the
+                                  full essay is used for agreement scoring.
+                                </p>
+                              </section>
+                              <section className="about-section">
+                                <p className="about-section-label">Stage 2</p>
+                                <p className="modal-copy">
+                                  <strong>Stage 2: Topic relevance.</strong> We identify articles that are relevant
+                                  to your essay as a whole. To
+                                  do this, we compute the similarity between your full essay and each Guardian
+                                  article using the retrieval representation selected in topic relevance mode:
+                                  either Lexical TF-IDF term vectors or Semantic truncated-SVD latent dimensions,
+                                  both compared with cosine similarity. This surfaces articles that discuss
+                                  similar themes, issues, and vocabulary.
+                                </p>
+                              </section>
+                              <section className="about-section">
+                                <p className="about-section-label">Stage 3</p>
+                                <p className="modal-copy">
+                                  <strong>Stage 3: Agreement relevance.</strong> From the candidate articles identified
+                                  in Stage 2, we then rank them based on how they relate to your selected thesis
+                                  for NLI or your full essay for LLM.
+                                  The Agreement scorer in Settings can use either DeBERTa NLI over each
+                                  extracted article claim or Spark LLM scoring over retrieved article context.
+                                  The model estimates whether each article supports, contradicts, or is neutral toward your position.
+                                  If you raise the recency weight in Settings, newer publication dates also
+                                  contribute to the final ranking.
+                                </p>
+                              </section>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            ) : (
+              <div className="search-header-block">
+                <div className="hero-copy">
+                  <h1>hear! hear!</h1>
+                  <h2>Find your voice in Guardian opinion articles</h2>
+                </div>
+
+                <div className="mode-switch" role="tablist" aria-label="Search mode">
+                  <button
+                    type="button"
+                    className={`mode-pill ${inputMode === 'stance' ? 'active' : ''}`}
+                    onClick={() => setInputMode('stance')}
+                  >
+                    Topic + Stance
+                  </button>
+                  <button
+                    type="button"
+                    className={`mode-pill ${inputMode === 'essay' ? 'active' : ''}`}
+                    onClick={() => setInputMode('essay')}
+                  >
+                    Essay
+                  </button>
+                </div>
+
+                <div className="top-search-controls" aria-label="Search controls">
+                  <div className="top-search-mode-group top-search-mode-group-compact">
+                    <div className="top-search-mode-heading">
+                      <span>Search Granularity</span>
+                      <button
+                        type="button"
+                        className="top-search-mode-help"
+                        onClick={() => openSettingsAt('retrieval-granularity')}
+                        aria-label="Open search granularity settings"
+                      >
+                        ?
+                      </button>
+                    </div>
+                    <div className="top-search-mode-segments" role="group" aria-label="Search granularity">
+                      <button
+                        type="button"
+                        className={`top-search-mode-segment ${!useChunking ? 'active' : ''}`}
+                        aria-pressed={!useChunking}
+                        onClick={() => handleChunkingModeChange(false)}
+                      >
+                        Article
+                      </button>
+                      <button
+                        type="button"
+                        className={`top-search-mode-segment ${useChunking ? 'active' : ''}`}
+                        aria-pressed={useChunking}
+                        onClick={() => handleChunkingModeChange(true)}
+                        disabled={!canUseChunking}
+                      >
+                        Chunks
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="top-search-mode-toolbar" aria-label="Search methods">
+                    <div className="top-search-mode-group">
+                      <div className="top-search-mode-heading">
+                        <span>Topic Relevance Search Method</span>
+                        <button
+                          type="button"
+                          className="top-search-mode-help"
+                          onClick={() => openSettingsAt('topic-relevance')}
+                          aria-label="Open topic relevance settings"
+                        >
+                          ?
+                        </button>
+                      </div>
+                      <div className="top-search-mode-segments" role="group" aria-label="Topic relevance search method">
+                        <button
+                          type="button"
+                          className={`top-search-mode-segment ${!useChunking && retrievalModel === 'tfidf' ? 'active' : ''}`}
+                          aria-pressed={!useChunking && retrievalModel === 'tfidf'}
+                          onClick={() => handleTopicSearchModeChange('tfidf')}
+                          disabled={!canUseLexicalRetrieval}
+                        >
+                          Lexical
+                        </button>
+                        <button
+                          type="button"
+                          className={`top-search-mode-segment ${effectiveRetrievalModel === 'svd' ? 'active' : ''}`}
+                          aria-pressed={effectiveRetrievalModel === 'svd'}
+                          onClick={() => handleTopicSearchModeChange('svd')}
+                          disabled={!canUseSvd}
+                        >
+                          Semantic
+                        </button>
+                        <button
+                          type="button"
+                          className={`top-search-mode-segment ${effectiveRetrievalModel === 'minilm' ? 'active' : ''}`}
+                          aria-pressed={effectiveRetrievalModel === 'minilm'}
+                          onClick={() => handleTopicSearchModeChange('minilm')}
+                          disabled={!canUseMiniLm}
+                        >
+                          Enhanced
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="top-search-mode-group">
+                      <div className="top-search-mode-heading">
+                        <span>Stance Agreement Search Method</span>
+                        <button
+                          type="button"
+                          className="top-search-mode-help"
+                          onClick={() => openSettingsAt('agreement-scorer')}
+                          aria-label="Open stance agreement settings"
+                        >
+                          ?
+                        </button>
+                      </div>
+                      <div className="top-search-mode-segments" role="group" aria-label="Stance agreement search method">
+                        <button
+                          type="button"
+                          className={`top-search-mode-segment ${effectiveStanceMethod === 'nli' ? 'active' : ''}`}
+                          aria-pressed={effectiveStanceMethod === 'nli'}
+                          onClick={() => handleAgreementSearchModeChange('nli')}
+                          disabled={!canUseNliAgreement || useChunking}
+                        >
+                          Fast
+                        </button>
+                        <button
+                          type="button"
+                          className={`top-search-mode-segment ${effectiveStanceMethod === 'llm' ? 'active' : ''}`}
+                          aria-pressed={effectiveStanceMethod === 'llm'}
+                          onClick={() => handleAgreementSearchModeChange('llm')}
+                          disabled={!canUseLlmAgreement}
+                        >
+                          Enhanced
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {inputMode === 'essay' && isSearchStageVisible && shouldUseEssayThesisStep && (
+                  <div
+                    className="essay-progress-shell"
+                    aria-label={`Essay workflow step ${essayWorkflowStep} of 2`}
+                  >
+                    <div className="essay-progress-bar" aria-hidden="true">
+                      <span className={`essay-progress-segment ${essayWorkflowStep === 1 ? 'active' : 'complete'}`} />
+                      <span className={`essay-progress-segment ${essayWorkflowStep === 2 ? 'active' : (isEssayStepTwoAvailable ? 'complete' : '')}`} />
+                    </div>
+
+                    <div className="essay-progress-steps">
+                      <button
+                        type="button"
+                        className={`essay-progress-step ${essayWorkflowStep === 1 ? 'active' : 'complete'}`}
+                        onClick={() => setEssayActiveStep(1)}
+                        aria-current={essayWorkflowStep === 1 ? 'step' : undefined}
+                      >
+                        <span className="essay-progress-number">1</span>
+                        <div className="essay-progress-copy">
+                          <span className="essay-progress-title">Add your essay</span>
+                          <span className="essay-progress-note">Paste text or import from a PDF.</span>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        className={`essay-progress-step ${essayWorkflowStep === 2
+                          ? 'active'
+                          : (isEssayStepTwoAvailable ? 'available' : 'disabled')
+                          }`}
+                        onClick={() => {
+                          if (isEssayStepTwoAvailable) {
+                            setEssayActiveStep(2)
+                          }
+                        }}
+                        disabled={!isEssayStepTwoAvailable}
+                        aria-current={essayWorkflowStep === 2 ? 'step' : undefined}
+                      >
+                        <span className="essay-progress-number">2</span>
+                        <div className="essay-progress-copy">
+                          <span className="essay-progress-title">Choose the thesis</span>
+                          <span className="essay-progress-note">
+                            {isEssayStepTwoAvailable
+                              ? 'Pick a sentence or write your own thesis.'
+                              : 'Extract thesis options to unlock this step.'}
+                          </span>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {!isAboutPageActive && (
+            <>
+              <div className={`landing-prompt-shell ${(inputMode === 'essay' && isSearchStageVisible) ? 'hidden' : ''}`}>
             <div
               className={`intro-line visible ${introStage > 0 ? 'done' : ''}`}
               role="text"
@@ -5396,23 +5614,27 @@ function App(): JSX.Element {
               <span className="intro-cue-arrow" aria-hidden="true">↓</span>
             </button>
           </div>
+            </>
+          )}
         </div>
       </div>
 
-      {searchFocusSnapshot && (
-        <FloatingSearchFocus
-          key={searchFocusSnapshot.key}
-          mode={searchFocusSnapshot.mode}
-          words={searchFocusSnapshot.words}
-          clearing={searchFocusSnapshot.clearing}
-        />
-      )}
+      {isSearchPageActive && (
+        <>
+          {searchFocusSnapshot && (
+            <FloatingSearchFocus
+              key={searchFocusSnapshot.key}
+              mode={searchFocusSnapshot.mode}
+              words={searchFocusSnapshot.words}
+              clearing={searchFocusSnapshot.clearing}
+            />
+          )}
 
-      {hasSubmittedSearch && (
-        <div
-          ref={resultsSectionRef}
-          className="results-paper-section visible"
-        >
+          {hasSubmittedSearch && (
+            <div
+              ref={resultsSectionRef}
+              className="results-paper-section visible"
+            >
           <div className="results-paper">
             <div className="results-paper-header">
               <p className="results-paper-eyebrow">Results</p>
@@ -6284,7 +6506,7 @@ function App(): JSX.Element {
         </div>
       )}
 
-      {hasSubmittedSearch && !loading && !error && articles.length > 0 && (
+      {isSearchPageActive && hasSubmittedSearch && !loading && !error && articles.length > 0 && (
         <aside
           className={`results-chat-popout ${isResultsChatMinimized ? 'minimized' : 'open'}`}
           aria-label="Ask questions about these results"
@@ -6423,6 +6645,8 @@ function App(): JSX.Element {
           )}
         </aside>
       )}
+            </>
+          )}
 
       {similarArticleSource && (
         <div
@@ -6512,128 +6736,6 @@ function App(): JSX.Element {
                 {similarArticlesLoading ? 'Loading...' : 'Load more'}
               </button>
             )}
-          </div>
-        </div>
-      )}
-
-      {isAboutOpen && (
-        <div
-          className="modal-backdrop"
-          onClick={() => setIsAboutOpen(false)}
-          role="presentation"
-        >
-          <div
-            className="modal-card about-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="about-modal-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="modal-header">
-              <div>
-                <h3 id="about-modal-title">About</h3>
-              </div>
-              <button
-                type="button"
-                className="modal-close"
-                onClick={() => setIsAboutOpen(false)}
-                aria-label="Close About popup"
-              >
-                Close
-              </button>
-            </div>
-            <div className="about-tablist" role="tablist" aria-label="About search modes">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeAboutTab === 'stance'}
-                className={`about-tab ${activeAboutTab === 'stance' ? 'active' : ''}`}
-                onClick={() => setActiveAboutTab('stance')}
-              >
-                Topic and Stance Search
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeAboutTab === 'essay'}
-                className={`about-tab ${activeAboutTab === 'essay' ? 'active' : ''}`}
-                onClick={() => setActiveAboutTab('essay')}
-              >
-                Essay-Guided Search
-              </button>
-            </div>
-            <div className="modal-stage-list">
-              {activeAboutTab === 'stance' ? (
-                <>
-                  <section className="about-section">
-                    <p className="about-section-label">Stage 1</p>
-                    <p className="modal-copy">
-                      <strong>Stage 1: Topic relevance.</strong> We first identify articles that are
-                      relevant to your topic. To do this, we compute the similarity between your
-                      input and each Guardian article using the retrieval representation selected
-                      in topic relevance mode: either Lexical TF-IDF term vectors or Semantic
-                      truncated-SVD latent dimensions, both compared with cosine similarity. This
-                      helps us find articles that discuss similar themes and keywords.
-                    </p>
-                  </section>
-                  <section className="about-section">
-                    <p className="about-section-label">Stage 2</p>
-                    <p className="modal-copy">
-                      <strong>Stage 2: Stance relevance.</strong> From the candidate articles identified
-                      in Stage 1, we then rank them based on how they relate to your opinion.
-                      The Agreement scorer in Settings can use either DeBERTa Natural Language
-                      Inference (NLI) over each extracted article claim or Spark LLM scoring over
-                      retrieved article context. The model estimates whether each article supports,
-                      contradicts, or is neutral toward your stance. If you raise the recency
-                      weight in Settings, newer publication dates also contribute to the final
-                      ranking.
-                    </p>
-                  </section>
-                </>
-              ) : (
-                <>
-                  <section className="about-section">
-                    <p className="about-section-label">Stage 1</p>
-                    <p className="modal-copy">
-                      <strong>Stage 1: Essay thesis detection.</strong> We first split your essay into
-                      individual sentences using our sentence segmentation pipeline. Then we use a
-                      DeBERTa Natural Language Inference (NLI) model to compare each sentence against
-                      the hypothesis, &ldquo;This sentence is the author&apos;s main claim.&rdquo; This gives
-                      each sentence a claimness score, and we present the top options so you can
-                      choose the sentence that best represents your essay&apos;s central thesis, or
-                      enter your own thesis wording when you want to override the suggestions.
-                      When the LLM Agreement scorer is selected, this step is skipped and the
-                      full essay is used for agreement scoring.
-                    </p>
-                  </section>
-                  <section className="about-section">
-                    <p className="about-section-label">Stage 2</p>
-                    <p className="modal-copy">
-                      <strong>Stage 2: Topic relevance.</strong> We identify articles that are relevant
-                      to your essay as a whole. To
-                      do this, we compute the similarity between your full essay and each Guardian
-                      article using the retrieval representation selected in topic relevance mode:
-                      either Lexical TF-IDF term vectors or Semantic truncated-SVD latent dimensions,
-                      both compared with cosine similarity. This surfaces articles that discuss
-                      similar themes, issues, and vocabulary.
-                    </p>
-                  </section>
-                  <section className="about-section">
-                    <p className="about-section-label">Stage 3</p>
-                    <p className="modal-copy">
-                      <strong>Stage 3: Agreement relevance.</strong> From the candidate articles identified
-                      in Stage 2, we then rank them based on how they relate to your selected thesis
-                      for NLI or your full essay for LLM.
-                      The Agreement scorer in Settings can use either DeBERTa NLI over each
-                      extracted article claim or Spark LLM scoring over retrieved article context.
-                      The model estimates whether each article supports, contradicts, or is neutral toward your position.
-                      If you raise the recency weight in Settings, newer publication dates also
-                      contribute to the final ranking.
-                    </p>
-                  </section>
-                </>
-              )}
-            </div>
           </div>
         </div>
       )}
