@@ -4438,7 +4438,7 @@ function App(): JSX.Element {
     ...activeVisibleArticles.map(article => article.svd_article_query_dimensions),
   ])
   const llmIrrelevantArticles = articles.filter(isLlmIrrelevantArticle)
-  const canExplainRanking = useLlm === true && effectiveRetrievalModel === 'svd'
+  const canExplainRanking = useLlm === true && llmAgreementAvailable
   const shouldShowEssayShortcut = useLlm && inputMode === 'essay' && !isSearchStageVisible
   const pendingTopicFeedbackCount = pendingTopicFeedbackArticleIds.length
 
@@ -4759,10 +4759,13 @@ function App(): JSX.Element {
     }
 
     try {
-      const currentLabelState = getSvdDimensionLabelState(article)
-      const svdDimensionLabels = Object.keys(currentLabelState.labels).length > 0
-        ? currentLabelState.labels
-        : await requestSvdDimensionLabels(article)
+      let svdDimensionLabels: SvdDimensionLabelMap = {}
+      if (effectiveRetrievalModel === 'svd' && hasSvdExplainability(article)) {
+        const currentLabelState = getSvdDimensionLabelState(article)
+        svdDimensionLabels = Object.keys(currentLabelState.labels).length > 0
+          ? currentLabelState.labels
+          : await requestSvdDimensionLabels(article)
+      }
 
       const response = await fetch('/api/llm/explain-ranking', {
         method: 'POST',
@@ -4773,6 +4776,8 @@ function App(): JSX.Element {
           query: queryText,
           article,
           position: rank,
+          retrieval_model: effectiveRetrievalModel,
+          chunking_mode: chunkingMode,
           query_svd_dimensions: querySvdDimensions,
           svd_dimension_labels: svdDimensionLabels,
         }),

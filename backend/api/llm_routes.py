@@ -459,6 +459,245 @@ def _format_svd_context_group(label, dimensions, limit=5):
     return f"{label}:\n{formatted}"
 
 
+def _ranking_value_text(value, decimals=3, max_chars=80):
+    try:
+        return f"{float(value):.{decimals}f}"
+    except (TypeError, ValueError):
+        text = _clean_overview_text(value, max_chars)
+        return text or None
+
+
+def _append_ranking_value(lines, label, value, decimals=3):
+    text = _ranking_value_text(value, decimals=decimals)
+    if text is not None:
+        lines.append(f"{label}: {text}")
+
+
+def _format_topic_chunks_for_ranking(article, limit=3, max_chars=360):
+    chunks = article.get("topic_relevant_chunks")
+    if not isinstance(chunks, list) or not chunks:
+        return ""
+
+    lines = ["Top retrieved topic chunks:"]
+    count = 0
+    for chunk in chunks[:limit]:
+        if not isinstance(chunk, dict):
+            continue
+        text = _clean_overview_text(chunk.get("text"), max_chars)
+        if not text:
+            continue
+
+        metadata = []
+        try:
+            chunk_index = int(chunk.get("chunk_index"))
+            metadata.append(f"chunk {chunk_index + 1}")
+        except (TypeError, ValueError):
+            pass
+
+        score_text = _ranking_value_text(chunk.get("topic_score"))
+        if score_text is not None:
+            metadata.append(f"topic_score={score_text}")
+
+        source = _clean_overview_text(chunk.get("source"), 60)
+        if source:
+            metadata.append(f"source={source}")
+
+        prefix = f"{'; '.join(metadata)}: " if metadata else ""
+        lines.append(f"- {prefix}{text}")
+        count += 1
+
+    return "\n".join(lines) if count > 0 else ""
+
+
+def _format_agreement_excerpts_for_ranking(article, limit=3, max_chars=360):
+    excerpts = article.get("llm_relevant_paragraphs")
+    if not isinstance(excerpts, list) or not excerpts:
+        return ""
+
+    lines = ["Agreement evidence excerpts:"]
+    count = 0
+    for excerpt in excerpts[:limit]:
+        if not isinstance(excerpt, dict):
+            continue
+        text = _clean_overview_text(excerpt.get("text"), max_chars)
+        if not text:
+            continue
+
+        metadata = []
+        try:
+            paragraph_index = int(excerpt.get("paragraph_index"))
+            metadata.append(f"excerpt {paragraph_index + 1}")
+        except (TypeError, ValueError):
+            pass
+
+        score_text = _ranking_value_text(excerpt.get("agreement_score"))
+        if score_text is not None:
+            metadata.append(f"agreement_score={score_text}")
+
+        prefix = f"{'; '.join(metadata)}: " if metadata else ""
+        lines.append(f"- {prefix}{text}")
+        count += 1
+
+    return "\n".join(lines) if count > 0 else ""
+
+
+def _ranking_mode_system_prompt(retrieval_model):
+    if retrieval_model == "tfidf":
+        return (
+            "You are an expert analyst explaining why a result ranked highly in a lexical "
+            "retrieval-and-reranking system. Use plain language and focus on visible word or "
+            "phrase overlap."
+        )
+    if retrieval_model == "minilm":
+        return (
+            "You are an expert analyst explaining why a result ranked highly in a dense semantic "
+            "retrieval-and-reranking system. Use plain language and focus on thematic overlap, "
+            "issue framing, actors, values, and arguments rather than model jargon."
+        )
+    return (
+        "You are an expert analyst explaining why a result ranked highly in an SVD-based semantic "
+        "retrieval-and-reranking system. Use plain language while accurately grounding the "
+        "explanation in the provided latent concept labels."
+    )
+
+
+def _ranking_mode_label(retrieval_model):
+    if retrieval_model == "tfidf":
+        return "Lexical TF-IDF"
+    if retrieval_model == "minilm":
+        return "Enhanced Semantic (MiniLM)"
+    return "Semantic SVD"
+
+
+def _build_ranking_explanation_prompt(
+    *,
+    query,
+    position_label,
+    article,
+    retrieval_model,
+    chunking_mode,
+    query_svd_dimensions=None,
+    dimension_labels=None,
+):
+    resolved_chunking_mode = normalize_chunking_mode(chunking_mode, DEFAULT_CHUNKING_MODE)
+    stage_one_granularity = (
+        "semantic chunks"
+        if resolved_chunking_mode != "none" or article.get("chunk_retrieval_enabled")
+        else "whole article"
+    )
+
+    article_title = _clean_overview_text(article.get("title"), 240)
+    article_summary = _clean_overview_text(article.get("summary"), 700)
+    article_claim = _clean_overview_text(article.get("central_claim_summary"), 500)
+    article_stance = _clean_overview_text(article.get("stance_label"), 80)
+
+    score_lines = [
+        f"Stage 1 retrieval mode: {_ranking_mode_label(retrieval_model)}",
+        f"Stage 1 search granularity: {stage_one_granularity}",
+    ]
+    _append_ranking_value(score_lines, "Combined ranking score", article.get("combined_score"))
+    _append_ranking_value(
+        score_lines,
+        "Topic score",
+        article.get("topic_score_display")
+        or article.get("topic_score")
+        or article.get("score"),
+    )
+    _append_ranking_value(score_lines, "Agreement score", article.get("stance_score_normalized"))
+    _append_ranking_value(score_lines, "Recency score", article.get("recency_score_normalized"))
+    _append_ranking_value(score_lines, "Matched chunk count", article.get("chunk_retrieval_matched_chunk_count"), decimals=0)
+    _append_ranking_value(score_lines, "Chunk topic score max", article.get("chunk_topic_score_max"))
+    _append_ranking_value(score_lines, "Chunk topic score top-k mean", article.get("chunk_topic_score_top_k_mean"))
+    _append_ranking_value(score_lines, "Chunk topic score coverage", article.get("chunk_topic_score_coverage"))
+    _append_ranking_value(score_lines, "Agreement excerpt count", article.get("llm_related_chunk_count"), decimals=0)
+    if article_stance:
+        score_lines.append(f"Agreement label: {article_stance}")
+
+    evidence_sections = [
+        _format_topic_chunks_for_ranking(article),
+        _format_agreement_excerpts_for_ranking(article),
+    ]
+    evidence_text = "\n\n".join(section for section in evidence_sections if section)
+    if not evidence_text:
+        evidence_text = "No chunk or excerpt evidence was provided."
+
+    common_intro = (
+        "Explain in plain language why this article ranked at the reported position. "
+        "Keep the answer to at most 3 sentences. "
+        "Use only the provided query, article metadata, score breakdown, and evidence snippets. "
+        "If agreement or recency likely affected the final rank, mention that briefly. "
+        "Do not invent article content beyond the provided metadata and evidence."
+    )
+
+    if retrieval_model == "tfidf":
+        mode_instructions = (
+            "The first stage used lexical TF-IDF matching. Focus on concrete overlap in words, "
+            "phrases, named actors, policies, or issue terms visible in the query and the article "
+            "metadata or evidence snippets. Do not mention latent concepts or embeddings."
+        )
+        extra_context = ""
+    elif retrieval_model == "minilm":
+        mode_instructions = (
+            "The first stage used dense semantic matching. Focus on shared themes, issue framing, "
+            "policy ideas, values, actors, or arguments that make the article semantically close to "
+            "the query. If chunk evidence is present, mention the strongest matching chunk themes. "
+            "Do not mention latent concepts, dimension IDs, or internal embedding mechanics."
+        )
+        extra_context = ""
+    else:
+        mode_instructions = (
+            "The first stage used truncated-SVD latent semantic similarity. Focus on shared themes "
+            "or concepts that connect the query and article. When referring to SVD concepts, use the "
+            "provided concept names exactly and do not mention numeric dimension identifiers."
+        )
+        query_svd_text = _format_svd_dimensions(query_svd_dimensions or [], dimension_labels or {})
+        article_query_chart_text = _format_svd_dimensions(
+            article.get("svd_query_chart_dimensions"),
+            dimension_labels or {},
+        )
+        article_chart_text = _format_svd_dimensions(
+            article.get("svd_chart_dimensions"),
+            dimension_labels or {},
+        )
+        article_dimensions_text = _format_svd_dimensions(
+            article.get("svd_dimensions"),
+            dimension_labels or {},
+        )
+        extra_context = (
+            "\n\nQuery SVD dimensions:\n"
+            f"{query_svd_text}\n\n"
+            "Article SVD query chart dimensions:\n"
+            f"{article_query_chart_text}\n\n"
+            "Article shared corpus SVD dimensions:\n"
+            f"{article_chart_text}\n\n"
+            "Article top SVD dimensions:\n"
+            f"{article_dimensions_text}\n"
+        )
+
+    prompt = (
+        f"{common_intro} {mode_instructions}\n\n"
+        f"Target rank position: {position_label}\n\n"
+        f"Query:\n{query}\n\n"
+        "Article:\n"
+        f"Title: {article_title or 'N/A'}\n"
+        f"Summary: {article_summary or 'N/A'}\n"
+    )
+    if article_claim:
+        prompt += f"Claim: {article_claim}\n"
+
+    prompt += (
+        "\nScore context:\n"
+        f"{chr(10).join(score_lines)}\n\n"
+        "Evidence:\n"
+        f"{evidence_text}"
+    )
+
+    if extra_context:
+        prompt += extra_context
+
+    return prompt
+
+
 def _format_article_for_results_chat(article, index, body_text=None, max_body_chars=5000):
     result_index = _result_index_for_article(article, index)
     title = _clean_overview_text(article.get("title"), 240)
@@ -1151,6 +1390,18 @@ def register_chat_route(app, json_search):
         query = str(payload.get("query") or "").strip()
         position = payload.get("position")
         article = payload.get("article") or {}
+        retrieval_model = normalize_retrieval_model(
+            payload.get("retrieval_model")
+            or article.get("chunk_retrieval_model")
+            or DEFAULT_RETRIEVAL_MODEL
+        )
+        chunking_mode = normalize_chunking_mode(
+            payload.get("chunking_mode")
+            or article.get("chunk_retrieval_chunking_mode")
+            or article.get("llm_chunking_mode")
+            or DEFAULT_CHUNKING_MODE,
+            DEFAULT_CHUNKING_MODE,
+        )
         query_svd_dimensions = payload.get("query_svd_dimensions") or []
         provided_dimension_labels = _normalize_svd_dimension_label_map(
             payload.get("svd_dimension_labels") or payload.get("dimension_labels")
@@ -1170,77 +1421,32 @@ def register_chat_route(app, json_search):
         except RuntimeError as exc:
             return jsonify({"error": str(exc)}), 500
 
-        cached_dimension_labels = _cached_svd_dimension_label_map(
-            query_svd_dimensions,
-            article.get("svd_query_chart_dimensions"),
-            article.get("svd_chart_dimensions"),
-            article.get("svd_dimensions"),
-        )
-        dimension_labels = {
-            **cached_dimension_labels,
-            **provided_dimension_labels,
-        }
-
-        query_svd_text = _format_svd_dimensions(query_svd_dimensions, dimension_labels)
-        article_query_chart_text = _format_svd_dimensions(
-            article.get("svd_query_chart_dimensions"),
-            dimension_labels,
-        )
-        article_chart_text = _format_svd_dimensions(
-            article.get("svd_chart_dimensions"),
-            dimension_labels,
-        )
-        article_dimensions_text = _format_svd_dimensions(
-            article.get("svd_dimensions"),
-            dimension_labels,
-        )
-
-        article_title = str(article.get("title") or "").strip()
-        article_summary = str(article.get("summary") or "").strip()
-        article_claim = str(article.get("central_claim_summary") or "").strip()
-        article_score = (
-            article.get("topic_score_display")
-            or article.get("topic_score")
-            or article.get("combined_score")
-            or article.get("score")
-            or None
-        )
-        if article_score is not None:
-            article_score = str(article_score)
+        dimension_labels = {}
+        if retrieval_model == "svd":
+            cached_dimension_labels = _cached_svd_dimension_label_map(
+                query_svd_dimensions,
+                article.get("svd_query_chart_dimensions"),
+                article.get("svd_chart_dimensions"),
+                article.get("svd_dimensions"),
+            )
+            dimension_labels = {
+                **cached_dimension_labels,
+                **provided_dimension_labels,
+            }
 
         position_label = str(position) if position is not None else "unknown"
-
-        prompt = (
-            "This retrieval system represents queries and articles in a shared latent semantic space via SVD. "
-            "Articles are ranked based on similarity to the query in this space. "
-            "Given the query, the article metadata, and the available SVD representations, explain why this article is ranked at position "
-            f"{position_label}. Focus on shared themes, concepts, or terminology that likely contributed to high similarity. "
-            "When referring to SVD concepts, use the provided radar concept names exactly instead of numeric dimension identifiers. "
-            "Please keep your response concise, with a maximum of 3 sentences to make it easy for users to get a quick insight into the ranking. "
-            "Do not invent unobserved article content beyond the title, summary, claim, and provided SVD dimension metadata. \n\n"
-            f"Query:\n{query}\n\n"
-            "Article:\n"
-            f"Title: {article_title or 'N/A'}\n"
-            f"Summary: {article_summary or 'N/A'}\n"
-        )
-        if article_claim:
-            prompt += f"Claim: {article_claim}\n"
-        if article_score is not None:
-            prompt += f"Similarity score: {article_score}\n"
-
-        prompt += (
-            "\nQuery SVD dimensions:\n"
-            f"{query_svd_text}\n\n"
-            "Article SVD query chart dimensions:\n"
-            f"{article_query_chart_text}\n\n"
-            "Article shared corpus SVD dimensions:\n"
-            f"{article_chart_text}\n\n"
-            "Article top SVD dimensions:\n"
-            f"{article_dimensions_text}\n"
+        prompt = _build_ranking_explanation_prompt(
+            query=query,
+            position_label=position_label,
+            article=article,
+            retrieval_model=retrieval_model,
+            chunking_mode=chunking_mode,
+            query_svd_dimensions=query_svd_dimensions,
+            dimension_labels=dimension_labels,
         )
 
         messages = [
-            {"role": "system", "content": "You are an expert data analyst explaining search ranking behavior in an SVD-based retrieval system."},
+            {"role": "system", "content": _ranking_mode_system_prompt(retrieval_model)},
             {"role": "user", "content": prompt},
         ]
 
