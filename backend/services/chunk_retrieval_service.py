@@ -1016,6 +1016,12 @@ def build_chunk_retrieval_index(
             index_name=index_name,
         )
         if resolved_model == "svd":
+            preprocess_chunk_svd_index(
+                index_dir=DEFAULT_INDEX_DIR,
+                index_name=DEFAULT_CHUNK_SVD_INDEX_NAME,
+                force_rebuild=False,
+                chunking_mode=resolved_chunking_mode,
+            )
             processor, meta = load_chunk_svd_index(
                 index_name=DEFAULT_CHUNK_SVD_INDEX_NAME,
                 load_articles=True,
@@ -1050,6 +1056,49 @@ def build_chunk_retrieval_index(
             chunk_count=index.n_chunks,
         )
         return index
+
+
+def unload_chunk_retrieval_indexes(keep_indexes=None):
+    keep = set()
+    for item in list(keep_indexes or []):
+        if isinstance(item, dict):
+            raw_model = item.get("retrieval_model")
+            raw_chunking_mode = item.get("chunking_mode")
+        else:
+            try:
+                raw_model, raw_chunking_mode = item
+            except (TypeError, ValueError):
+                continue
+
+        try:
+            model = normalize_retrieval_model(raw_model)
+        except ValueError:
+            continue
+        if model not in {"svd", "minilm"}:
+            continue
+        keep.add((model, normalize_chunk_index_mode(raw_chunking_mode)))
+
+    unloaded = []
+    with _chunk_index_lock:
+        for cache_key in list(_chunk_indexes.keys()):
+            if cache_key in keep:
+                continue
+            _chunk_indexes.pop(cache_key, None)
+            unloaded.append(cache_key)
+
+    if unloaded:
+        log_runtime_event(
+            "chunk_index.cache_unloaded",
+            unloaded_indexes=[
+                {"retrieval_model": model, "chunking_mode": chunking_mode}
+                for model, chunking_mode in unloaded
+            ],
+            kept_indexes=[
+                {"retrieval_model": model, "chunking_mode": chunking_mode}
+                for model, chunking_mode in sorted(keep)
+            ],
+        )
+    return unloaded
 
 
 def _aggregate_article_chunks(

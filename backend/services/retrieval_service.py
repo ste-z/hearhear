@@ -37,6 +37,7 @@ from backend.services.rocchio_feedback import (
     build_rocchio_processor_searcher,
     normalize_article_id_list,
 )
+from backend.stance_processing.stance_rerank import DEFAULT_STANCE_METHOD
 from backend.text_processing.search_helpers import (
     attach_query_svd_chart_dimensions as _attach_query_svd_chart_dimensions,
     DEFAULT_RETRIEVAL_MODEL,
@@ -927,7 +928,7 @@ def stance_search(
     rerank_selection_mode=DEFAULT_RERANK_SELECTION_MODE,
     rerank_threshold=None,
     topic_feedback_irrelevant_article_ids=None,
-    stance_method="nli",
+    stance_method=DEFAULT_STANCE_METHOD,
     use_chunking=False,
     chunking_mode="none",
     chunk_candidate_top_k=DEFAULT_CHUNK_CANDIDATE_TOP_K,

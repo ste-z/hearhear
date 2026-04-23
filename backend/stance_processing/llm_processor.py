@@ -7,10 +7,6 @@ from pathlib import Path
 
 from backend.runtime.runtime_debug import log_runtime_event
 from backend.text_processing.paragraph_splitter import paragraph_rows_from_text
-from backend.text_processing.semantic_chunker import (
-    DEFAULT_SEMANTIC_BREAK_SIMILARITY_THRESHOLD,
-    semantic_chunk_rows_from_text,
-)
 
 
 DEFAULT_LLM_BATCH_SIZE = 20
@@ -20,6 +16,7 @@ DEFAULT_MAX_PARAGRAPHS_PER_ARTICLE = 40
 DEFAULT_MAX_PARAGRAPH_CHARS = 2500
 DEFAULT_RELEVANT_PARAGRAPH_COUNT = 5
 DEFAULT_CHUNKING_MODE = "paragraph"
+DEFAULT_SEMANTIC_BREAK_SIMILARITY_THRESHOLD = 0.75
 SPARK_API_KEY_ENV_NAMES = ("SPARK_API_KEY", "API_KEY")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_GUARDIAN_RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw" / "guardian_by_year"
@@ -613,6 +610,12 @@ def _svd_processor_for_semantic_chunks():
         return None
 
 
+def _semantic_chunk_rows_from_text(*args, **kwargs):
+    from backend.text_processing.semantic_chunker import semantic_chunk_rows_from_text
+
+    return semantic_chunk_rows_from_text(*args, **kwargs)
+
+
 def _chunk_rows_for_articles(
     articles,
     chunking_mode=DEFAULT_CHUNKING_MODE,
@@ -643,7 +646,7 @@ def _chunk_rows_for_articles(
 
         source_text = _article_source_text(article, article_id, body_lookup)
         if resolved_mode == "semantic":
-            rows = semantic_chunk_rows_from_text(
+            rows = _semantic_chunk_rows_from_text(
                 source_text,
                 article_id=article_id,
                 prefix=f"a{article_index}_sc",

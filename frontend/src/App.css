@@ -2663,6 +2663,79 @@
   animation-delay: 0.3s;
 }
 
+.runtime-artifact-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 160;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    linear-gradient(180deg, rgba(31, 24, 17, 0.42), rgba(31, 24, 17, 0.58)),
+    rgba(255, 248, 237, 0.36);
+  backdrop-filter: blur(8px) saturate(1.05);
+  cursor: wait;
+}
+
+.runtime-artifact-panel {
+  width: min(420px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px 26px;
+  border: 1px solid rgba(122, 95, 67, 0.22);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(250, 242, 231, 0.96));
+  box-shadow: 0 22px 60px rgba(31, 24, 17, 0.24);
+  color: #1f1811;
+  text-align: center;
+}
+
+.runtime-artifact-spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 22px;
+}
+
+.runtime-artifact-spinner span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #1f1811;
+  animation: loading-bounce 0.72s ease-in-out infinite;
+}
+
+.runtime-artifact-spinner span:nth-child(2) {
+  background: #c58f22;
+  animation-delay: 0.14s;
+}
+
+.runtime-artifact-spinner span:nth-child(3) {
+  background: #7a5f43;
+  animation-delay: 0.28s;
+}
+
+.runtime-artifact-eyebrow {
+  margin: 2px 0 0;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6a5a44;
+}
+
+.runtime-artifact-message {
+  margin: 0;
+  max-width: 32ch;
+  font-family: 'Kanit', sans-serif;
+  font-size: 1.35rem;
+  line-height: 1.15;
+  color: #1f1811;
+}
+
 @keyframes loading-bounce {
 
   0%,

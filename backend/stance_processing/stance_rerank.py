@@ -2,11 +2,6 @@ from datetime import datetime, timezone
 
 from backend.claims.claim_store import get_claim_records
 from backend.runtime.runtime_debug import log_runtime_event
-from backend.stance_processing.nli_processor import (
-    normalize_stance_score,
-    score_nli_pairs,
-    stance_label_from_probs,
-)
 
 
 DEFAULT_TOPIC_WEIGHT = 0.4
@@ -16,7 +11,7 @@ DEFAULT_RERANK_TOP_N = 20
 MAX_RERANK_TOP_N = 100
 RECENCY_HALF_LIFE_DAYS = 365.0 * 3.0
 DEFAULT_NORMALIZE_TOPIC_SCORES = False
-DEFAULT_STANCE_METHOD = "nli"
+DEFAULT_STANCE_METHOD = "llm"
 SUPPORTED_STANCE_METHODS = ("nli", "llm")
 DEFAULT_CHUNKING_MODE = "none"
 SUPPORTED_CHUNKING_MODES = ("none", "paragraph", "semantic")
@@ -279,6 +274,9 @@ def rerank_article_matches_by_statement(
         match_count=len(matches),
     )
 
+    normalize_nli_stance_score = None
+    nli_stance_label_from_probs = None
+
     if resolved_stance_method == "llm":
         from backend.stance_processing.llm_processor import (
             score_llm_article_agreement,
@@ -301,6 +299,12 @@ def rerank_article_matches_by_statement(
         )
         stance_by_match_idx = dict(enumerate(stance_rows))
     else:
+        from backend.stance_processing.nli_processor import (
+            normalize_stance_score as normalize_nli_stance_score,
+            score_nli_pairs,
+            stance_label_from_probs as nli_stance_label_from_probs,
+        )
+
         nli_rows = score_nli_pairs(premises, query_statement) if premises else []
         log_runtime_event("stance_rerank.nli_done", nli_row_count=len(nli_rows))
         stance_by_match_idx = dict(zip(indexed_claims, nli_rows))
@@ -349,8 +353,8 @@ def rerank_article_matches_by_statement(
                 neutral_prob = stance_row["neutral_prob"]
                 contradiction_prob = stance_row["contradiction_prob"]
                 stance_score = stance_row["stance_score"]
-                stance_score_normalized = normalize_stance_score(stance_score)
-                stance_label = stance_label_from_probs(
+                stance_score_normalized = normalize_nli_stance_score(stance_score)
+                stance_label = nli_stance_label_from_probs(
                     entailment_prob=entailment_prob,
                     neutral_prob=neutral_prob,
                     contradiction_prob=contradiction_prob,

@@ -119,6 +119,14 @@ def load_minilm_bundle(
     }
 
 
+def unload_minilm_bundle():
+    had_bundle = load_minilm_bundle.cache_info().currsize > 0
+    load_minilm_bundle.cache_clear()
+    if had_bundle:
+        log_runtime_event("minilm_bundle.cache_unloaded")
+    return had_bundle
+
+
 def encode_minilm_texts(
     texts,
     model_name=DEFAULT_MINILM_MODEL_NAME,

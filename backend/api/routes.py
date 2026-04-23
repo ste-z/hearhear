@@ -4,6 +4,7 @@ Routes: React app serving and Guardian article search API.
 To enable AI chat, set USE_LLM = True below. See backend/api/llm_routes.py for AI code.
 """
 import os
+import gc
 
 from flask import send_from_directory, request, jsonify
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
@@ -151,6 +152,122 @@ def _coerce_string_list(value):
         normalized.append(text)
         seen.add(text)
     return normalized
+
+
+def _preload_runtime_artifact(payload):
+    artifact = str(payload.get("artifact") or "").strip().lower()
+
+    if artifact == "retrieval_index":
+        from backend.text_processing.search_helpers import build_retrieval_processor
+
+        retrieval_model = normalize_retrieval_model(
+            payload.get("retrieval_model") or DEFAULT_RETRIEVAL_MODEL
+        )
+        processor = build_retrieval_processor(
+            retrieval_model=retrieval_model,
+            force_rebuild=False,
+            ensure_preprocessed=True,
+        )
+        if retrieval_model == "minilm" and _coerce_bool(payload.get("load_model"), False):
+            from backend.text_processing.minilm_processor import load_minilm_bundle
+
+            load_minilm_bundle()
+        return {
+            "artifact": artifact,
+            "retrieval_model": retrieval_model,
+            "n_docs": getattr(processor, "n_docs", None),
+            "n_terms": getattr(processor, "n_terms", None),
+        }
+
+    if artifact == "chunk_index":
+        from backend.services.chunk_retrieval_service import build_chunk_retrieval_index
+
+        retrieval_model = normalize_retrieval_model(
+            payload.get("retrieval_model") or DEFAULT_RETRIEVAL_MODEL
+        )
+        if retrieval_model == "tfidf":
+            retrieval_model = "svd"
+        chunking_mode = normalize_chunking_mode(
+            payload.get("chunking_mode") or DEFAULT_CHUNKING_MODE
+        )
+        if chunking_mode == "none":
+            chunking_mode = "semantic"
+
+        index = build_chunk_retrieval_index(
+            retrieval_model=retrieval_model,
+            chunking_mode=chunking_mode,
+        )
+        if retrieval_model == "minilm" and _coerce_bool(payload.get("load_model"), False):
+            from backend.text_processing.minilm_processor import load_minilm_bundle
+
+            load_minilm_bundle()
+        return {
+            "artifact": artifact,
+            "retrieval_model": retrieval_model,
+            "chunking_mode": chunking_mode,
+            "n_chunks": getattr(index, "n_chunks", None),
+        }
+
+    if artifact == "nli_model":
+        from backend.stance_processing.nli_processor import load_nli_bundle
+
+        bundle = load_nli_bundle()
+        return {
+            "artifact": artifact,
+            "model_name": bundle.get("model_name"),
+            "device": str(bundle.get("device")),
+        }
+
+    supported = ", ".join(("retrieval_index", "chunk_index", "nli_model"))
+    raise ValueError(f"Unsupported artifact {artifact!r}. Supported artifacts: {supported}.")
+
+
+def _unload_unused_runtime_artifacts(payload):
+    from backend.text_processing.search_helpers import unload_retrieval_processors
+    from backend.services.chunk_retrieval_service import unload_chunk_retrieval_indexes
+
+    keep_retrieval_models = _coerce_string_list(payload.get("keep_retrieval_models"))
+    keep_chunk_indexes = payload.get("keep_chunk_indexes")
+    if not isinstance(keep_chunk_indexes, list):
+        keep_chunk_indexes = []
+
+    unloaded_retrieval_models = unload_retrieval_processors(
+        keep_models=keep_retrieval_models,
+    )
+    unloaded_chunk_indexes = unload_chunk_retrieval_indexes(
+        keep_indexes=keep_chunk_indexes,
+    )
+
+    unloaded_minilm_model = False
+    if _coerce_bool(payload.get("unload_minilm_model"), False):
+        from backend.text_processing.minilm_processor import unload_minilm_bundle
+
+        unloaded_minilm_model = bool(unload_minilm_bundle())
+
+    unloaded_nli_model = False
+    if _coerce_bool(payload.get("unload_nli_model"), False):
+        from backend.stance_processing.nli_processor import unload_nli_bundle
+
+        unloaded_nli_model = bool(unload_nli_bundle())
+
+    unloaded_any = any([
+        unloaded_retrieval_models,
+        unloaded_chunk_indexes,
+        unloaded_minilm_model,
+        unloaded_nli_model,
+    ])
+    if unloaded_any:
+        gc.collect()
+
+    return {
+        "unloaded_retrieval_models": unloaded_retrieval_models,
+        "unloaded_chunk_indexes": [
+            {"retrieval_model": model, "chunking_mode": chunking_mode}
+            for model, chunking_mode in unloaded_chunk_indexes
+        ],
+        "unloaded_minilm_model": unloaded_minilm_model,
+        "unloaded_nli_model": unloaded_nli_model,
+    }
 
 
 def _extract_request_context():
@@ -408,6 +525,46 @@ def register_routes(app):
             "min_article_reading_minutes": min_article_reading_minutes,
             "max_article_reading_minutes": max_article_reading_minutes,
         })
+
+    @app.route("/api/runtime/preload", methods=["POST"])
+    def preload_runtime_artifact_route():
+        try:
+            payload = _request_payload()
+            result = _preload_runtime_artifact(payload)
+            log_runtime_event(
+                "runtime_preload.done",
+                artifact=result.get("artifact"),
+                retrieval_model=result.get("retrieval_model"),
+                chunking_mode=result.get("chunking_mode"),
+                model_name=result.get("model_name"),
+            )
+            return jsonify({
+                "ok": True,
+                **result,
+            })
+        except Exception as exc:
+            app.logger.exception("API request to /api/runtime/preload failed")
+            return _api_error_response(exc)
+
+    @app.route("/api/runtime/unload", methods=["POST"])
+    def unload_runtime_artifact_route():
+        try:
+            payload = _request_payload()
+            result = _unload_unused_runtime_artifacts(payload)
+            log_runtime_event(
+                "runtime_unload.done",
+                unloaded_retrieval_models=result.get("unloaded_retrieval_models"),
+                unloaded_chunk_indexes=result.get("unloaded_chunk_indexes"),
+                unloaded_minilm_model=result.get("unloaded_minilm_model"),
+                unloaded_nli_model=result.get("unloaded_nli_model"),
+            )
+            return jsonify({
+                "ok": True,
+                **result,
+            })
+        except Exception as exc:
+            app.logger.exception("API request to /api/runtime/unload failed")
+            return _api_error_response(exc)
 
     @app.route("/api/articles", methods=["GET", "POST"])
     @app.route("/api/articles/search", methods=["POST"])

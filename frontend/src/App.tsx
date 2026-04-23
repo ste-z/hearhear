@@ -67,6 +67,28 @@ type SearchFocusSnapshot = {
   words: SearchFocusWordSnapshot[]
   clearing: boolean
 }
+type RuntimeArtifactKind = 'retrieval_index' | 'chunk_index' | 'nli_model'
+type RuntimeArtifactTask = {
+  artifact: RuntimeArtifactKind
+  label: string
+  key: string
+  retrievalModel?: RetrievalModel
+  chunkingMode?: FrontendChunkingMode
+  loadModel?: boolean
+}
+type RuntimeArtifactLoadingState = {
+  message: string
+}
+type RuntimeArtifactKeepPlan = {
+  keepRetrievalModels: RetrievalModel[]
+  keepChunkIndexes: Array<{
+    retrieval_model: RetrievalModel
+    chunking_mode: FrontendChunkingMode
+  }>
+  keepNliModel: boolean
+  keepMiniLmModel: boolean
+  keepKeys: Set<string>
+}
 type ResultsChatMessage = {
   id: string
   role: 'user' | 'assistant'
@@ -145,7 +167,7 @@ const introClaimSequence = introClaimsByTopic[finalIntroTopic]
 const landingSeenStorageKey = 'hearhear.hasSeenLanding'
 const defaultSupportedRetrievalModels: RetrievalModel[] = ['svd', 'minilm', 'tfidf']
 const defaultRerankSelectionMode: RerankSelectionMode = 'automatic'
-const defaultStanceMethod: StanceMethod = 'nli'
+const defaultStanceMethod: StanceMethod = 'llm'
 const defaultSupportedStanceMethods: StanceMethod[] = ['nli', 'llm']
 const defaultChunkingMode: FrontendChunkingMode = 'none'
 const defaultSupportedChunkingModes: FrontendChunkingMode[] = ['none', 'semantic']
@@ -167,6 +189,24 @@ const similarArticlesPageSize = 5
 const searchFocusMinimumMs = 0
 const searchFocusClearMs = 850
 const searchFocusMaxWords = 34
+
+const retrievalArtifactLabel = (
+  retrievalModel: RetrievalModel,
+  useChunking: boolean,
+): string => {
+  if (useChunking) {
+    if (retrievalModel === 'minilm') {
+      return 'Loading enhanced semantic chunk vector index and MiniLM model'
+    }
+    return 'Loading chunked SVD vector index'
+  }
+
+  if (retrievalModel === 'tfidf') return 'Loading lexical TF-IDF vector index'
+  if (retrievalModel === 'minilm') {
+    return 'Loading enhanced semantic vector index and MiniLM model'
+  }
+  return 'Loading article-level SVD vector index'
+}
 
 const isRetrievalModel = (value: unknown): value is RetrievalModel => (
   value === 'tfidf' || value === 'svd' || value === 'minilm'
@@ -2222,6 +2262,7 @@ function App(): JSX.Element {
   const [isImportingPdf, setIsImportingPdf] = useState<boolean>(false)
   const [importedPdfName, setImportedPdfName] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
+  const [runtimeArtifactLoading, setRuntimeArtifactLoading] = useState<RuntimeArtifactLoadingState | null>(null)
   const [searchFocusSnapshot, setSearchFocusSnapshot] = useState<SearchFocusSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [emptyResultsMessage, setEmptyResultsMessage] = useState<string | null>(null)
@@ -2267,6 +2308,8 @@ function App(): JSX.Element {
   const searchFocusKeyRef = useRef<number>(0)
   const searchFocusStartedAtRef = useRef<number>(0)
   const searchFocusTimeoutRef = useRef<number | null>(null)
+  const runtimeArtifactRequestIdRef = useRef<number>(0)
+  const readyRuntimeArtifactKeysRef = useRef<Set<string>>(new Set())
   const lastAppliedFiltersRef = useRef<{
     yearStart: number | null
     yearEnd: number | null
@@ -2284,6 +2327,7 @@ function App(): JSX.Element {
   const [hasSubmittedSearch, setHasSubmittedSearch] = useState<boolean>(false)
   const [shouldScrollToResults, setShouldScrollToResults] = useState<boolean>(true)
   const useChunking = chunkingMode !== 'none'
+  const isRuntimeArtifactLoading = runtimeArtifactLoading !== null
 
   const clearSearchFocusTimer = (): void => {
     if (typeof window !== 'undefined' && searchFocusTimeoutRef.current !== null) {
@@ -3013,6 +3057,180 @@ function App(): JSX.Element {
   const currentAutoRerankThreshold = (
     useChunking ? autoChunkRerankThresholds : autoRerankThresholds
   )[effectiveRetrievalModel]
+
+  const runtimeRetrievalTask = (
+    nextModel: RetrievalModel,
+    nextUseChunking: boolean,
+    nextChunkingMode: FrontendChunkingMode = 'none',
+  ): RuntimeArtifactTask => {
+    if (nextUseChunking) {
+      return {
+        artifact: 'chunk_index',
+        label: retrievalArtifactLabel(nextModel, true),
+        key: `chunk_index:${nextModel}:${nextChunkingMode}`,
+        retrievalModel: nextModel,
+        chunkingMode: nextChunkingMode,
+        loadModel: nextModel === 'minilm',
+      }
+    }
+
+    return {
+      artifact: 'retrieval_index',
+      label: retrievalArtifactLabel(nextModel, false),
+      key: `retrieval_index:${nextModel}`,
+      retrievalModel: nextModel,
+      loadModel: nextModel === 'minilm',
+    }
+  }
+
+  const buildTopicPreloadTasks = (
+    nextModel: RetrievalModel,
+    nextChunkingMode: FrontendChunkingMode = chunkingMode,
+  ): RuntimeArtifactTask[] => {
+    const nextUseChunking = nextChunkingMode !== 'none'
+    const resolvedModel = (
+      nextUseChunking && nextModel === 'tfidf' && firstSemanticRetrievalModel
+        ? firstSemanticRetrievalModel
+        : nextModel
+    )
+    const tasks: RuntimeArtifactTask[] = []
+    if (nextUseChunking && nextChunkingMode === 'semantic') {
+      tasks.push(runtimeRetrievalTask('svd', false))
+    }
+    tasks.push(runtimeRetrievalTask(resolvedModel, nextUseChunking, nextChunkingMode))
+    return tasks
+  }
+
+  const buildAgreementPreloadTasks = (nextMethod: StanceMethod): RuntimeArtifactTask[] => {
+    if (nextMethod !== 'nli') return []
+    return [{
+      artifact: 'nli_model',
+      label: 'Loading NLI model',
+      key: 'nli_model',
+    }]
+  }
+
+  const buildRuntimeKeepPlan = (
+    nextModel: RetrievalModel,
+    nextChunkingMode: FrontendChunkingMode,
+    nextStanceMethod: StanceMethod,
+  ): RuntimeArtifactKeepPlan => {
+    const nextUseChunking = nextChunkingMode !== 'none'
+    const resolvedModel = (
+      nextUseChunking && nextModel === 'tfidf' && firstSemanticRetrievalModel
+        ? firstSemanticRetrievalModel
+        : nextModel
+    )
+    const keepRetrievalModels: RetrievalModel[] = nextUseChunking
+      ? (nextChunkingMode === 'semantic' ? ['svd'] : [])
+      : [resolvedModel]
+    const keepChunkIndexes = nextUseChunking
+      ? [{
+        retrieval_model: resolvedModel,
+        chunking_mode: nextChunkingMode,
+      }]
+      : []
+    const keepNliModel = !nextUseChunking && nextStanceMethod === 'nli'
+    const keepMiniLmModel = resolvedModel === 'minilm'
+    const keepKeys = new Set<string>()
+
+    for (const model of keepRetrievalModels) {
+      keepKeys.add(`retrieval_index:${model}`)
+    }
+    for (const chunkIndex of keepChunkIndexes) {
+      keepKeys.add(`chunk_index:${chunkIndex.retrieval_model}:${chunkIndex.chunking_mode}`)
+    }
+    if (keepNliModel) {
+      keepKeys.add('nli_model')
+    }
+
+    return {
+      keepRetrievalModels,
+      keepChunkIndexes,
+      keepNliModel,
+      keepMiniLmModel,
+      keepKeys,
+    }
+  }
+
+  const preloadRuntimeArtifacts = async (tasks: RuntimeArtifactTask[]): Promise<boolean> => {
+    const uniqueTasks = tasks.filter((task, index) => (
+      tasks.findIndex(candidate => candidate.key === task.key) === index &&
+      !readyRuntimeArtifactKeysRef.current.has(task.key)
+    ))
+    if (uniqueTasks.length === 0) return true
+
+    const requestId = runtimeArtifactRequestIdRef.current + 1
+    runtimeArtifactRequestIdRef.current = requestId
+
+    try {
+      for (const task of uniqueTasks) {
+        setRuntimeArtifactLoading({ message: task.label })
+        const response = await fetch('/api/runtime/preload', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            artifact: task.artifact,
+            retrieval_model: task.retrievalModel,
+            chunking_mode: task.chunkingMode,
+            load_model: task.loadModel,
+          }),
+        })
+        await readApiJson<{ ok?: boolean }>(response)
+        readyRuntimeArtifactKeysRef.current.add(task.key)
+      }
+      return true
+    } catch (preloadError) {
+      console.error('Runtime artifact preload failed:', preloadError)
+      setError(
+        preloadError instanceof Error
+          ? preloadError.message
+          : 'Failed to load the selected search artifact.',
+      )
+      return false
+    } finally {
+      if (runtimeArtifactRequestIdRef.current === requestId) {
+        setRuntimeArtifactLoading(null)
+      }
+    }
+  }
+
+  const offloadUnusedRuntimeArtifacts = async (
+    nextModel: RetrievalModel,
+    nextChunkingMode: FrontendChunkingMode,
+    nextStanceMethod: StanceMethod,
+  ): Promise<void> => {
+    const keepPlan = buildRuntimeKeepPlan(nextModel, nextChunkingMode, nextStanceMethod)
+    const readyKeys = readyRuntimeArtifactKeysRef.current
+    const loadedMiniLmModel = Array.from(readyKeys).some(key => key.includes('minilm'))
+    const loadedNliModel = readyKeys.has('nli_model')
+
+    try {
+      setRuntimeArtifactLoading({ message: 'Releasing unused search artifacts' })
+      const response = await fetch('/api/runtime/unload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          keep_retrieval_models: keepPlan.keepRetrievalModels,
+          keep_chunk_indexes: keepPlan.keepChunkIndexes,
+          unload_minilm_model: loadedMiniLmModel && !keepPlan.keepMiniLmModel,
+          unload_nli_model: loadedNliModel && !keepPlan.keepNliModel,
+        }),
+      })
+      await readApiJson<{ ok?: boolean }>(response)
+      readyRuntimeArtifactKeysRef.current = new Set(
+        Array.from(readyRuntimeArtifactKeysRef.current).filter(key => keepPlan.keepKeys.has(key)),
+      )
+    } catch (offloadError) {
+      console.warn('Runtime artifact unload failed:', offloadError)
+    } finally {
+      setRuntimeArtifactLoading(null)
+    }
+  }
 
   useEffect(() => {
     if (useChunking && retrievalModel === 'tfidf' && firstSemanticRetrievalModel) {
@@ -3859,7 +4077,7 @@ function App(): JSX.Element {
     options: TopicFeedbackSearchOptions = {},
   ): Promise<void> => {
     const nextTopic = (options.topicOverride ?? trimmedTopic).trim()
-    if (inputMode !== 'stance' || !nextTopic || !trimmedOpinion || loading) return
+    if (inputMode !== 'stance' || !nextTopic || !trimmedOpinion || loading || isRuntimeArtifactLoading) return
     const feedbackArticleIds = options.topicFeedbackIrrelevantArticleIds ?? topicFeedbackIrrelevantArticleIds
 
     lastAppliedFiltersRef.current = {
@@ -3969,7 +4187,7 @@ function App(): JSX.Element {
   }
 
   const handleAnalyzeEssay = async (): Promise<void> => {
-    if (!canAnalyzeEssay || loading) return
+    if (!canAnalyzeEssay || loading || isRuntimeArtifactLoading) return
 
     setLoading(true)
     setError(null)
@@ -4036,7 +4254,7 @@ function App(): JSX.Element {
   ): Promise<void> => {
     const nextEssayText = essayText.trim()
     const nextThesisSentence = thesisSentence.trim()
-    if (!nextEssayText || loading) return
+    if (!nextEssayText || loading || isRuntimeArtifactLoading) return
     if (!isLlmAgreementSelected && !nextThesisSentence) return
     const feedbackArticleIds = options.topicFeedbackIrrelevantArticleIds ?? topicFeedbackIrrelevantArticleIds
 
@@ -4147,7 +4365,7 @@ function App(): JSX.Element {
   }
 
   const handleSubmitEssay = async (): Promise<void> => {
-    if (!canSubmitEssay || loading) return
+    if (!canSubmitEssay || loading || isRuntimeArtifactLoading) return
     await submitEssaySearch(
       essayPreparedText,
       resolvedEssayThesis,
@@ -4156,7 +4374,7 @@ function App(): JSX.Element {
   }
 
   const handleSubmitEssayFromDraft = async (): Promise<void> => {
-    if (!canAnalyzeEssay || loading || !isLlmAgreementSelected) return
+    if (!canAnalyzeEssay || loading || isRuntimeArtifactLoading || !isLlmAgreementSelected) return
 
     const nextEssayText = trimmedEssayText
     setEssayPreparedText(nextEssayText)
@@ -4170,19 +4388,19 @@ function App(): JSX.Element {
 
   const handleApplyTypoCorrection = (correctedQuery: string): void => {
     const nextTopic = correctedQuery.trim()
-    if (!nextTopic || loading) return
+    if (!nextTopic || loading || isRuntimeArtifactLoading) return
     skipNextStanceResetRef.current = true
     setTopic(nextTopic)
     void handleSubmitStance({ topicOverride: nextTopic })
   }
 
   const handleSearchAnyway = (): void => {
-    if (loading) return
+    if (loading || isRuntimeArtifactLoading) return
     void handleSubmitStance({ skipTypoCorrection: true })
   }
 
   useEffect(() => {
-    if (isFilterOpen || loading || !hasSubmittedSearch) {
+    if (isFilterOpen || loading || isRuntimeArtifactLoading || !hasSubmittedSearch) {
       return
     }
 
@@ -4218,6 +4436,7 @@ function App(): JSX.Element {
     hasSubmittedSearch,
     inputMode,
     isFilterOpen,
+    isRuntimeArtifactLoading,
     lengthFilterUnit,
     loading,
     resolvedCharacterEnd,
@@ -4287,33 +4506,58 @@ function App(): JSX.Element {
     setIsSettingsOpen(true)
   }
 
-  const handleTopicSearchModeChange = (nextModel: RetrievalModel): void => {
+  const handleTopicSearchModeChange = async (nextModel: RetrievalModel): Promise<void> => {
     if (!supportedRetrievalModels.includes(nextModel)) return
     if (useChunking && nextModel === 'tfidf') return
+    if (loading || isRuntimeArtifactLoading) return
+    if (nextModel === retrievalModel && (!useChunking || nextModel === effectiveRetrievalModel)) return
+    const ready = await preloadRuntimeArtifacts(buildTopicPreloadTasks(nextModel))
+    if (!ready) return
+    await offloadUnusedRuntimeArtifacts(nextModel, chunkingMode, stanceMethod)
     setRetrievalModel(nextModel)
   }
 
-  const handleChunkingModeChange = (nextUseChunking: boolean): void => {
+  const handleChunkingModeChange = async (nextUseChunking: boolean): Promise<void> => {
+    if (loading || isRuntimeArtifactLoading) return
+    if (nextUseChunking === useChunking) return
     if (nextUseChunking) {
       if (!canUseChunking) return
+      const nextRetrievalModel = retrievalModel === 'tfidf' && firstSemanticRetrievalModel
+        ? firstSemanticRetrievalModel
+        : retrievalModel
+      const ready = await preloadRuntimeArtifacts(buildTopicPreloadTasks(nextRetrievalModel, 'semantic'))
+      if (!ready) return
+      await offloadUnusedRuntimeArtifacts(nextRetrievalModel, 'semantic', 'llm')
+      if (nextRetrievalModel !== retrievalModel) {
+        setRetrievalModel(nextRetrievalModel)
+      }
       setChunkingMode('semantic')
       setStanceMethod('llm')
       return
     }
 
+    const ready = await preloadRuntimeArtifacts(buildTopicPreloadTasks(retrievalModel, 'none'))
+    if (!ready) return
+    await offloadUnusedRuntimeArtifacts(retrievalModel, 'none', stanceMethod)
     setChunkingMode('none')
   }
 
-  const handleAgreementSearchModeChange = (nextMethod: StanceMethod): void => {
+  const handleAgreementSearchModeChange = async (nextMethod: StanceMethod): Promise<void> => {
     if (!supportedStanceMethods.includes(nextMethod)) return
+    if (loading || isRuntimeArtifactLoading) return
+    if (nextMethod === effectiveStanceMethod) return
     if (nextMethod === 'llm') {
       if (!canUseLlmAgreement) return
+      await offloadUnusedRuntimeArtifacts(retrievalModel, chunkingMode, 'llm')
       setStanceMethod('llm')
       return
     }
 
     if (useChunking) return
     if (!canUseNliAgreement) return
+    const ready = await preloadRuntimeArtifacts(buildAgreementPreloadTasks('nli'))
+    if (!ready) return
+    await offloadUnusedRuntimeArtifacts(retrievalModel, chunkingMode, 'nli')
     setStanceMethod('nli')
   }
 
@@ -4460,7 +4704,7 @@ function App(): JSX.Element {
   }
 
   const handleRefreshTopicFeedback = async (): Promise<void> => {
-    if (loading || pendingTopicFeedbackCount === 0) return
+    if (loading || isRuntimeArtifactLoading || pendingTopicFeedbackCount === 0) return
     const feedbackArticleIds = [...topicFeedbackIrrelevantArticleIds]
 
     if (inputMode === 'stance') {
@@ -4801,6 +5045,10 @@ function App(): JSX.Element {
   }
 
   const resultsDescription = useMemo(() => {
+    if (isRuntimeArtifactLoading) {
+      return runtimeArtifactLoading?.message ?? 'Preparing search artifacts.'
+    }
+
     if (loading) {
       return `Ranking Guardian opinion pieces${activeFilterSummary} with your current search settings.`
     }
@@ -4850,13 +5098,15 @@ function App(): JSX.Element {
     hasSubmittedSearch,
     inputMode,
     isLlmAgreementSelected,
+    isRuntimeArtifactLoading,
     llmIrrelevantArticles.length,
     loading,
+    runtimeArtifactLoading?.message,
     topicFeedbackIrrelevantArticles.length,
   ])
 
   return (
-    <div className="experience-shell">
+    <div className="experience-shell" aria-busy={isRuntimeArtifactLoading}>
       <div
         className={[
           'intro-screen',
@@ -4928,7 +5178,7 @@ function App(): JSX.Element {
                       type="button"
                       className={`top-search-mode-segment ${!useChunking ? 'active' : ''}`}
                       aria-pressed={!useChunking}
-                      onClick={() => handleChunkingModeChange(false)}
+                      onClick={() => void handleChunkingModeChange(false)}
                     >
                       Article
                     </button>
@@ -4936,7 +5186,7 @@ function App(): JSX.Element {
                       type="button"
                       className={`top-search-mode-segment ${useChunking ? 'active' : ''}`}
                       aria-pressed={useChunking}
-                      onClick={() => handleChunkingModeChange(true)}
+                      onClick={() => void handleChunkingModeChange(true)}
                       disabled={!canUseChunking}
                     >
                       Chunks
@@ -4962,7 +5212,7 @@ function App(): JSX.Element {
                         type="button"
                         className={`top-search-mode-segment ${!useChunking && retrievalModel === 'tfidf' ? 'active' : ''}`}
                         aria-pressed={!useChunking && retrievalModel === 'tfidf'}
-                        onClick={() => handleTopicSearchModeChange('tfidf')}
+                        onClick={() => void handleTopicSearchModeChange('tfidf')}
                         disabled={!canUseLexicalRetrieval}
                       >
                         Lexical
@@ -4971,7 +5221,7 @@ function App(): JSX.Element {
                         type="button"
                         className={`top-search-mode-segment ${effectiveRetrievalModel === 'svd' ? 'active' : ''}`}
                         aria-pressed={effectiveRetrievalModel === 'svd'}
-                        onClick={() => handleTopicSearchModeChange('svd')}
+                        onClick={() => void handleTopicSearchModeChange('svd')}
                         disabled={!canUseSvd}
                       >
                         Semantic
@@ -4980,7 +5230,7 @@ function App(): JSX.Element {
                         type="button"
                         className={`top-search-mode-segment ${effectiveRetrievalModel === 'minilm' ? 'active' : ''}`}
                         aria-pressed={effectiveRetrievalModel === 'minilm'}
-                        onClick={() => handleTopicSearchModeChange('minilm')}
+                        onClick={() => void handleTopicSearchModeChange('minilm')}
                         disabled={!canUseMiniLm}
                       >
                         Enhanced
@@ -5005,7 +5255,7 @@ function App(): JSX.Element {
                         type="button"
                         className={`top-search-mode-segment ${effectiveStanceMethod === 'nli' ? 'active' : ''}`}
                         aria-pressed={effectiveStanceMethod === 'nli'}
-                        onClick={() => handleAgreementSearchModeChange('nli')}
+                        onClick={() => void handleAgreementSearchModeChange('nli')}
                         disabled={!canUseNliAgreement || useChunking}
                       >
                         Fast
@@ -5014,7 +5264,7 @@ function App(): JSX.Element {
                         type="button"
                         className={`top-search-mode-segment ${effectiveStanceMethod === 'llm' ? 'active' : ''}`}
                         aria-pressed={effectiveStanceMethod === 'llm'}
-                        onClick={() => handleAgreementSearchModeChange('llm')}
+                        onClick={() => void handleAgreementSearchModeChange('llm')}
                         disabled={!canUseLlmAgreement}
                       >
                         Enhanced
@@ -6994,7 +7244,7 @@ function App(): JSX.Element {
                       <button
                         type="button"
                         className={`retrieval-model-button ${!useChunking ? 'active' : ''}`}
-                        onClick={() => handleChunkingModeChange(false)}
+                        onClick={() => void handleChunkingModeChange(false)}
                       >
                         <strong>Article</strong>
                         <p>Search and score each article as a whole.</p>
@@ -7002,7 +7252,7 @@ function App(): JSX.Element {
                       <button
                         type="button"
                         className={`retrieval-model-button ${useChunking ? 'active' : ''}`}
-                        onClick={() => handleChunkingModeChange(true)}
+                        onClick={() => void handleChunkingModeChange(true)}
                         disabled={!canUseChunking}
                       >
                         <strong>Chunks</strong>
@@ -7057,7 +7307,7 @@ function App(): JSX.Element {
                         <button
                           type="button"
                           className={`retrieval-model-button ${!useChunking && retrievalModel === 'tfidf' ? 'active' : ''}`}
-                          onClick={() => handleTopicSearchModeChange('tfidf')}
+                          onClick={() => void handleTopicSearchModeChange('tfidf')}
                           disabled={!canUseLexicalRetrieval}
                         >
                           <strong>Lexical</strong>
@@ -7068,7 +7318,7 @@ function App(): JSX.Element {
                         <button
                           type="button"
                           className={`retrieval-model-button ${effectiveRetrievalModel === 'svd' ? 'active' : ''}`}
-                          onClick={() => handleTopicSearchModeChange('svd')}
+                          onClick={() => void handleTopicSearchModeChange('svd')}
                           disabled={!canUseSvd}
                         >
                           <strong>Semantic</strong>
@@ -7079,7 +7329,7 @@ function App(): JSX.Element {
                         <button
                           type="button"
                           className={`retrieval-model-button ${effectiveRetrievalModel === 'minilm' ? 'active' : ''}`}
-                          onClick={() => handleTopicSearchModeChange('minilm')}
+                          onClick={() => void handleTopicSearchModeChange('minilm')}
                           disabled={!canUseMiniLm}
                         >
                           <strong>Enhanced Semantic</strong>
@@ -7211,11 +7461,7 @@ function App(): JSX.Element {
                         <button
                           type="button"
                           className={`retrieval-model-button ${effectiveStanceMethod === 'nli' ? 'active' : ''}`}
-                          onClick={() => {
-                            if (!useChunking) {
-                              setStanceMethod('nli')
-                            }
-                          }}
+                          onClick={() => void handleAgreementSearchModeChange('nli')}
                           disabled={useChunking}
                         >
                           <strong>Fast</strong>
@@ -7226,11 +7472,7 @@ function App(): JSX.Element {
                         <button
                           type="button"
                           className={`retrieval-model-button ${effectiveStanceMethod === 'llm' ? 'active' : ''}`}
-                          onClick={() => {
-                            if (canUseLlmAgreement) {
-                              setStanceMethod('llm')
-                            }
-                          }}
+                          onClick={() => void handleAgreementSearchModeChange('llm')}
                           disabled={!canUseLlmAgreement}
                         >
                           <strong>Enhanced</strong>
@@ -7278,6 +7520,25 @@ function App(): JSX.Element {
             </div>
           </div>
         </div>
+      )}
+
+      {runtimeArtifactLoading && (
+        <section
+          className="runtime-artifact-overlay"
+          role="alert"
+          aria-live="assertive"
+          aria-busy="true"
+        >
+          <div className="runtime-artifact-panel">
+            <div className="runtime-artifact-spinner" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
+            <p className="runtime-artifact-eyebrow">Preparing search</p>
+            <p className="runtime-artifact-message">{runtimeArtifactLoading.message}</p>
+          </div>
+        </section>
       )}
     </div>
   )

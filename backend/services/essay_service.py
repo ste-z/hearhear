@@ -8,13 +8,12 @@ from backend.services.retrieval_service import (
     normalize_rerank_selection_mode,
     select_rerank_candidates,
 )
-from backend.stance_processing.nli_processor import score_claim_sentences
 from backend.stance_processing.stance_rerank import (
+    DEFAULT_STANCE_METHOD,
     normalize_chunking_mode,
     normalize_stance_method,
     rerank_article_matches_by_statement,
 )
-from backend.text_processing.sentence_splitter import sentence_rows_from_text
 
 
 def essay_claim_candidates(essay_text, top_n=5):
@@ -25,6 +24,9 @@ def essay_claim_candidates(essay_text, top_n=5):
             "sentence_count": 0,
             "candidates": [],
         }
+
+    from backend.text_processing.sentence_splitter import sentence_rows_from_text
+    from backend.stance_processing.nli_processor import score_claim_sentences
 
     sentence_rows = sentence_rows_from_text(resolved_text, prefix="essay_s")
     candidates = score_claim_sentences(sentence_rows, top_n=top_n)
@@ -57,7 +59,7 @@ def essay_search(
     rerank_selection_mode=DEFAULT_RERANK_SELECTION_MODE,
     rerank_threshold=None,
     topic_feedback_irrelevant_article_ids=None,
-    stance_method="nli",
+    stance_method=DEFAULT_STANCE_METHOD,
     use_chunking=False,
     chunking_mode="none",
     chunk_candidate_top_k=DEFAULT_CHUNK_CANDIDATE_TOP_K,

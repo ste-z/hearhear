@@ -875,3 +875,27 @@ def build_vector_processor(force_rebuild=False, ensure_preprocessed=True):
         force_rebuild=force_rebuild,
         ensure_preprocessed=ensure_preprocessed,
     )
+
+
+def unload_retrieval_processors(keep_models=None):
+    keep = {
+        normalize_retrieval_model(model)
+        for model in list(keep_models or [])
+        if str(model or "").strip()
+    }
+    unloaded = []
+    with _vector_index_lock:
+        for model in list(_vector_processors.keys()):
+            if model in keep:
+                continue
+            _vector_processors.pop(model, None)
+            _vector_processor_doc_counts.pop(model, None)
+            unloaded.append(model)
+
+    if unloaded:
+        log_runtime_event(
+            "retrieval_processor.cache_unloaded",
+            unloaded_models=unloaded,
+            kept_models=sorted(keep),
+        )
+    return unloaded

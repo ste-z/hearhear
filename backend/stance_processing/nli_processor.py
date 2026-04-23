@@ -74,6 +74,14 @@ def load_nli_bundle(model_name=MODEL_NAME):
     }
 
 
+def unload_nli_bundle():
+    had_bundle = load_nli_bundle.cache_info().currsize > 0
+    load_nli_bundle.cache_clear()
+    if had_bundle:
+        log_runtime_event("nli_bundle.cache_unloaded", model_name=MODEL_NAME)
+    return had_bundle
+
+
 def score_nli_pairs(
     premises,
     hypothesis,

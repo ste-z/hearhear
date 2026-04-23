@@ -24,7 +24,7 @@ DEFAULT_MIN_BODY_TEXT_CHARS = 1000
 DEFAULT_BATCH_SIZE = 500
 DEFAULT_CLAIM_BATCH_SIZE = 500
 DEFAULT_BUNDLED_INDEX_DIR = Path(__file__).resolve().parent.parent / "data" / "processed" / "vector_index"
-DEFAULT_BUNDLED_INDEX_NAME = "guardian_tfidf"
+DEFAULT_BUNDLED_INDEX_NAME = "guardian_tfidf_svd"
 DEFAULT_ANALYSIS_EXPORT_DIR = Path(__file__).resolve().parent.parent / "data" / "processed" / "analysis_exports"
 DEFAULT_SVD_DIMENSION_SUMMARY_EXPORT_TOP_TERMS = 10
 STORE_GUARDIAN_BODY_TEXT_ENV = "STORE_GUARDIAN_BODY_TEXT_IN_DB"
@@ -198,6 +198,15 @@ def _populate_missing_article_length_metadata(bundled_articles=None, batch_size=
     return updated
 
 
+def _missing_article_length_metadata_exists():
+    return db.session.query(GuardianArticle.id).filter(
+        or_(
+            GuardianArticle.body_character_count <= 0,
+            GuardianArticle.body_word_count <= 0,
+        )
+    ).limit(1).first() is not None
+
+
 def _export_startup_svd_dimension_summaries(processor):
     if processor is None or not hasattr(processor, "export_dimension_summaries"):
         return None
@@ -254,12 +263,7 @@ def _existing_data_needs_refresh(expected_years=None, allow_missing_body_text=Fa
         func.trim(func.coalesce(GuardianArticle.summary, "")) == "",
     ).limit(1).first() is not None
 
-    missing_length_metadata_exists = db.session.query(GuardianArticle.id).filter(
-        or_(
-            GuardianArticle.body_character_count <= 0,
-            GuardianArticle.body_word_count <= 0,
-        )
-    ).limit(1).first() is not None
+    missing_length_metadata_exists = _missing_article_length_metadata_exists()
 
     existing_years = {
         int(year)
@@ -474,113 +478,49 @@ def _warm_runtime_assets():
     try:
         from backend.text_processing.search_helpers import (
             DEFAULT_RETRIEVAL_MODEL,
-            SUPPORTED_RETRIEVAL_MODELS,
             build_retrieval_processor,
+            normalize_retrieval_model,
         )
 
-        ordered_models = [
-            DEFAULT_RETRIEVAL_MODEL,
-            *[
-                model
-                for model in SUPPORTED_RETRIEVAL_MODELS
-                if model != DEFAULT_RETRIEVAL_MODEL
-            ],
-        ]
-
-        for retrieval_model in ordered_models:
-            if retrieval_model == "minilm":
-                log_runtime_event(
-                    "startup_warm.vector_index_skipped",
-                    retrieval_model=retrieval_model,
-                    reason="lazy_precompute",
-                )
-                continue
-            label = retrieval_labels.get(
-                retrieval_model,
-                retrieval_model.replace("_", " ").upper(),
-            )
+        retrieval_model = normalize_retrieval_model(DEFAULT_RETRIEVAL_MODEL)
+        label = retrieval_labels.get(
+            retrieval_model,
+            retrieval_model.replace("_", " ").upper(),
+        )
+        log_runtime_event(
+            "startup_warm.vector_index_start",
+            retrieval_model=retrieval_model,
+        )
+        vector_index = build_retrieval_processor(
+            retrieval_model=retrieval_model,
+            force_rebuild=False,
+            ensure_preprocessed=True,
+        )
+        log_runtime_event(
+            "startup_warm.vector_index_done",
+            retrieval_model=retrieval_model,
+            n_docs=getattr(vector_index, "n_docs", None),
+            n_terms=getattr(vector_index, "n_terms", None),
+        )
+        if retrieval_model == "svd":
             try:
-                log_runtime_event(
-                    "startup_warm.vector_index_start",
-                    retrieval_model=retrieval_model,
+                export_path = _export_startup_svd_dimension_summaries(
+                    vector_index
                 )
-                vector_index = build_retrieval_processor(
-                    retrieval_model=retrieval_model,
-                    force_rebuild=False,
-                    ensure_preprocessed=True,
-                )
-                log_runtime_event(
-                    "startup_warm.vector_index_done",
-                    retrieval_model=retrieval_model,
-                    n_docs=getattr(vector_index, "n_docs", None),
-                    n_terms=getattr(vector_index, "n_terms", None),
-                )
-                if retrieval_model == "svd":
-                    try:
-                        export_path = _export_startup_svd_dimension_summaries(
-                            vector_index
-                        )
-                        if export_path is not None:
-                            print(
-                                "SVD dimension summary exported to "
-                                f"{export_path}."
-                            )
-                    except Exception as exc:
-                        print(
-                            "Warning: SVD dimension summary export failed; "
-                            f"startup will continue. Details: {exc}"
-                        )
-                print(f"{label} retrieval artifacts ensured and loaded into memory.")
+                if export_path is not None:
+                    print(
+                        "SVD dimension summary exported to "
+                        f"{export_path}."
+                    )
             except Exception as exc:
                 print(
-                    f"Warning: {label} warm-up failed; startup will continue. "
-                    f"Details: {exc}"
+                    "Warning: SVD dimension summary export failed; "
+                    f"startup will continue. Details: {exc}"
                 )
+        print(f"{label} retrieval artifacts ensured and loaded into memory.")
     except Exception as exc:
         print(
             "Warning: retrieval warm-up initialization failed; startup will continue. "
-            f"Details: {exc}"
-        )
-
-    try:
-        from backend.services.chunk_retrieval_service import (
-            DEFAULT_CHUNK_RETRIEVAL_CHUNKING_MODE,
-            build_chunk_retrieval_index,
-        )
-
-        log_runtime_event(
-            "startup_warm.chunk_svd_start",
-            chunking_mode=DEFAULT_CHUNK_RETRIEVAL_CHUNKING_MODE,
-        )
-        chunk_index = build_chunk_retrieval_index(
-            retrieval_model="svd",
-            chunking_mode=DEFAULT_CHUNK_RETRIEVAL_CHUNKING_MODE,
-        )
-        log_runtime_event(
-            "startup_warm.chunk_svd_done",
-            chunk_count=getattr(chunk_index, "n_chunks", None),
-        )
-        print("Chunk SVD retrieval artifacts loaded into memory.")
-    except Exception as exc:
-        print(
-            "Warning: chunk SVD warm-up failed; chunk search may fail until rebuilt. "
-            f"Details: {exc}"
-        )
-
-    try:
-        from backend.stance_processing.nli_processor import load_nli_bundle
-
-        log_runtime_event("startup_warm.nli_start")
-        bundle = load_nli_bundle()
-        log_runtime_event(
-            "startup_warm.nli_done",
-            model_name=bundle.get("model_name"),
-            device=str(bundle.get("device")),
-        )
-        print("NLI model loaded into memory.")
-    except Exception as exc:
-        print(
-            "Warning: NLI warm-up failed; the first stance rerank may still cold-start. "
             f"Details: {exc}"
         )
 
@@ -596,17 +536,18 @@ def initialize_offline_data_pipeline(
     Ensure all offline assets are ready:
       1) SQLite guardian_articles table
       2) SQLite guardian_article_claims table
-      3) Retrieval index artifacts
+      3) Default retrieval index artifacts
     """
     with app.app_context():
         db.create_all()
         _ensure_guardian_article_length_columns()
 
         store_body_text = _should_store_body_text()
-        bundled_articles = _load_bundled_guardian_articles(years=years)
+        bundled_articles = None
         existing_count = GuardianArticle.query.count()
         should_seed = existing_count == 0
-        if existing_count > 0:
+        if existing_count > 0 and _missing_article_length_metadata_exists():
+            bundled_articles = _load_bundled_guardian_articles(years=years)
             updated_length_rows = _populate_missing_article_length_metadata(
                 bundled_articles=bundled_articles,
             )
@@ -626,6 +567,8 @@ def initialize_offline_data_pipeline(
             should_seed = True
 
         if should_seed:
+            if bundled_articles is None:
+                bundled_articles = _load_bundled_guardian_articles(years=years)
             _seed_guardian_articles(
                 project_root=project_root,
                 years=years,
@@ -648,44 +591,6 @@ def initialize_offline_data_pipeline(
 
         if should_seed_claims:
             _seed_guardian_claims()
-
-        try:
-            from backend.text_processing.text_preprocess import (
-                DEFAULT_INDEX_DIR,
-                DEFAULT_INDEX_NAME,
-                preprocess_tfidf_index,
-            )
-
-            preprocess_tfidf_index(
-                db_path=Path(app.instance_path) / "data.db",
-                index_dir=DEFAULT_INDEX_DIR,
-                index_name=DEFAULT_INDEX_NAME,
-                force_rebuild=False,
-                years=years,
-            )
-            print("TF-IDF artifacts are ready.")
-        except Exception as exc:
-            print(f"Warning: TF-IDF precompute failed; search may fail until rebuilt. Details: {exc}")
-
-        try:
-            from backend.services.chunk_retrieval_service import (
-                DEFAULT_CHUNK_RETRIEVAL_CHUNKING_MODE,
-                DEFAULT_CHUNK_SVD_INDEX_NAME,
-                preprocess_chunk_svd_index,
-            )
-            from backend.text_processing.indexing.corpus import DEFAULT_INDEX_DIR
-
-            preprocess_chunk_svd_index(
-                db_path=Path(app.instance_path) / "data.db",
-                index_dir=DEFAULT_INDEX_DIR,
-                index_name=DEFAULT_CHUNK_SVD_INDEX_NAME,
-                force_rebuild=False,
-                years=years,
-                chunking_mode=DEFAULT_CHUNK_RETRIEVAL_CHUNKING_MODE,
-            )
-            print("Chunk SVD artifacts are ready.")
-        except Exception as exc:
-            print(f"Warning: chunk SVD precompute failed; chunk search may fail until rebuilt. Details: {exc}")
 
         if warm_runtime_assets:
             _warm_runtime_assets()
