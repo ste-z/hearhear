@@ -1,5 +1,7 @@
 from backend.runtime.runtime_debug import log_runtime_event
 from backend.services.retrieval_service import (
+    DEFAULT_CHUNK_ARTICLE_TOP_K,
+    DEFAULT_CHUNK_CANDIDATE_TOP_K,
     DEFAULT_RETRIEVAL_MODEL,
     normalize_retrieval_model,
     DEFAULT_RERANK_SELECTION_MODE,
@@ -58,6 +60,8 @@ def essay_search(
     stance_method="nli",
     use_chunking=False,
     chunking_mode="none",
+    chunk_candidate_top_k=DEFAULT_CHUNK_CANDIDATE_TOP_K,
+    chunk_article_top_k=DEFAULT_CHUNK_ARTICLE_TOP_K,
 ):
     resolved_essay = str(essay_text or "").strip()
     resolved_thesis = str(selected_thesis_sentence or "").strip()
@@ -67,6 +71,8 @@ def essay_search(
             "empty_results_message": None,
         }
     resolved_model = normalize_retrieval_model(retrieval_model)
+    if use_chunking and str(chunking_mode or "none") != "none":
+        resolved_model = "svd"
     resolved_selection_mode = normalize_rerank_selection_mode(rerank_selection_mode)
 
     candidate_payload = select_rerank_candidates(
@@ -85,6 +91,10 @@ def essay_search(
         rerank_selection_mode=resolved_selection_mode,
         rerank_threshold=rerank_threshold,
         topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
+        use_chunking=use_chunking,
+        chunking_mode=chunking_mode,
+        chunk_candidate_top_k=chunk_candidate_top_k,
+        chunk_article_top_k=chunk_article_top_k,
     )
     topic_matches = candidate_payload["matches"]
     if not topic_matches:

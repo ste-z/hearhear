@@ -74,7 +74,11 @@ type ConfigResponse = {
   llm_agreement_available?: boolean | null
   default_rerank_selection_mode?: string | null
   default_auto_rerank_thresholds?: Partial<Record<RetrievalModel, number | null>> | null
+  default_chunk_auto_rerank_thresholds?: Partial<Record<RetrievalModel, number | null>> | null
+  default_chunk_candidate_top_k?: number | null
+  default_chunk_article_top_k?: number | null
   max_auto_rerank_candidates?: number | null
+  max_chunk_candidate_top_k?: number | null
   supported_retrieval_models?: string[] | null
   supported_rerank_selection_modes?: string[] | null
   min_article_year?: number | null
@@ -130,7 +134,14 @@ const defaultAutoRerankThresholds: Record<RetrievalModel, number> = {
   tfidf: 0.3,
   svd: 0.6,
 }
+const defaultChunkAutoRerankThresholds: Record<RetrievalModel, number> = {
+  tfidf: 0.12,
+  svd: 0.35,
+}
 const defaultMaxAutoRerankCandidates = 100
+const defaultChunkCandidateTopK = 300
+const defaultChunkArticleTopK = 5
+const defaultMaxChunkCandidateTopK = 2000
 const similarArticlesPageSize = 5
 
 const isRetrievalModel = (value: unknown): value is RetrievalModel => (
@@ -179,8 +190,9 @@ const clampAutoRerankThreshold = (value: number): number => (
 
 const normalizeAutoRerankThresholds = (
   value: unknown,
+  defaults: Record<RetrievalModel, number> = defaultAutoRerankThresholds,
 ): Record<RetrievalModel, number> => {
-  const nextThresholds = { ...defaultAutoRerankThresholds }
+  const nextThresholds = { ...defaults }
   if (!value || typeof value !== 'object') {
     return nextThresholds
   }
@@ -1837,8 +1849,16 @@ function App(): JSX.Element {
   const [autoRerankThresholds, setAutoRerankThresholds] = useState<Record<RetrievalModel, number>>(
     defaultAutoRerankThresholds,
   )
+  const [autoChunkRerankThresholds, setAutoChunkRerankThresholds] = useState<Record<RetrievalModel, number>>(
+    defaultChunkAutoRerankThresholds,
+  )
   const [maxAutoRerankCandidates, setMaxAutoRerankCandidates] = useState<number>(
     defaultMaxAutoRerankCandidates,
+  )
+  const [chunkCandidateTopK, setChunkCandidateTopK] = useState<number>(defaultChunkCandidateTopK)
+  const [chunkArticleTopK, setChunkArticleTopK] = useState<number>(defaultChunkArticleTopK)
+  const [maxChunkCandidateTopK, setMaxChunkCandidateTopK] = useState<number>(
+    defaultMaxChunkCandidateTopK,
   )
   const [normalizeTopicScores, setNormalizeTopicScores] = useState<boolean>(false)
   const [retrievalModel, setRetrievalModel] = useState<RetrievalModel>('svd')
@@ -2010,12 +2030,37 @@ function App(): JSX.Element {
             : currentMode
         ))
         setAutoRerankThresholds(normalizeAutoRerankThresholds(data.default_auto_rerank_thresholds))
+        setAutoChunkRerankThresholds(normalizeAutoRerankThresholds(
+          data.default_chunk_auto_rerank_thresholds,
+          defaultChunkAutoRerankThresholds,
+        ))
         if (
           typeof data.max_auto_rerank_candidates === 'number'
           && Number.isFinite(data.max_auto_rerank_candidates)
           && data.max_auto_rerank_candidates > 0
         ) {
           setMaxAutoRerankCandidates(Math.round(data.max_auto_rerank_candidates))
+        }
+        if (
+          typeof data.max_chunk_candidate_top_k === 'number'
+          && Number.isFinite(data.max_chunk_candidate_top_k)
+          && data.max_chunk_candidate_top_k > 0
+        ) {
+          setMaxChunkCandidateTopK(Math.round(data.max_chunk_candidate_top_k))
+        }
+        if (
+          typeof data.default_chunk_candidate_top_k === 'number'
+          && Number.isFinite(data.default_chunk_candidate_top_k)
+          && data.default_chunk_candidate_top_k > 0
+        ) {
+          setChunkCandidateTopK(Math.round(data.default_chunk_candidate_top_k))
+        }
+        if (
+          typeof data.default_chunk_article_top_k === 'number'
+          && Number.isFinite(data.default_chunk_article_top_k)
+          && data.default_chunk_article_top_k > 0
+        ) {
+          setChunkArticleTopK(Math.round(data.default_chunk_article_top_k))
         }
         if (
           nextMinArticleYear !== null &&
@@ -2256,7 +2301,7 @@ function App(): JSX.Element {
     setTypoCorrection(null)
     setError(null)
     setHasSubmittedSearch(false)
-  }, [chunkingMode, inputMode, opinion, recencyWeight, rerankTopK, stanceMethod, stanceWeight, topic, topicWeight])
+  }, [chunkArticleTopK, chunkCandidateTopK, chunkingMode, inputMode, opinion, recencyWeight, rerankTopK, stanceMethod, stanceWeight, topic, topicWeight])
 
   useEffect(() => {
     setArticles([])
@@ -2271,6 +2316,9 @@ function App(): JSX.Element {
     setHasSubmittedSearch(false)
   }, [
     autoRerankThresholds,
+    autoChunkRerankThresholds,
+    chunkArticleTopK,
+    chunkCandidateTopK,
     inputMode,
     recencyWeight,
     rerankSelectionMode,
@@ -2502,8 +2550,10 @@ function App(): JSX.Element {
   const canUseNliAgreement = supportedStanceMethods.includes('nli')
   const canUseLlmAgreement = supportedStanceMethods.includes('llm') && llmAgreementAvailable
   const canUseChunking = canUseLlmAgreement && supportedChunkingModes.includes('semantic')
-  const canToggleSvd = canUseSvd && canUseTfidf
-  const isLexicalSearchMode = retrievalModel === 'tfidf'
+  const canUseLexicalRetrieval = canUseTfidf && !useChunking
+  const effectiveRetrievalModel: RetrievalModel = useChunking ? 'svd' : retrievalModel
+  const canToggleSvd = canUseSvd && canUseTfidf && !useChunking
+  const isLexicalSearchMode = !useChunking && retrievalModel === 'tfidf'
   const queryAssistDisabledReason = !hasQueryAssistInput
     ? 'Add a topic or stance to use AI query help.'
     : (useLlm !== true
@@ -2514,7 +2564,16 @@ function App(): JSX.Element {
   const canUseQueryAssist = queryAssistDisabledReason === ''
   const activeWordsToAvoid = isLexicalSearchMode ? wordsToAvoid : []
   const activeWordsToAvoidKey = activeWordsToAvoid.join('\u0000')
-  const currentAutoRerankThreshold = autoRerankThresholds[retrievalModel]
+  const currentAutoRerankThreshold = (
+    useChunking ? autoChunkRerankThresholds : autoRerankThresholds
+  )[effectiveRetrievalModel]
+
+  useEffect(() => {
+    if (useChunking && retrievalModel !== 'svd' && canUseSvd) {
+      setRetrievalModel('svd')
+    }
+  }, [canUseSvd, retrievalModel, useChunking])
+
   const availableYears = useMemo(() => {
     if (minArticleYear === null || maxArticleYear === null || minArticleYear > maxArticleYear) {
       return []
@@ -2692,6 +2751,13 @@ function App(): JSX.Element {
     return Math.min(100, Math.max(1, Math.round(parsed)))
   }
 
+  const parseChunkCandidateTopKInput = (value: string, fallback: number): number => {
+    if (value.trim() === '') return fallback
+    const parsed = Number(value)
+    if (Number.isNaN(parsed)) return fallback
+    return Math.min(maxChunkCandidateTopK, Math.max(25, Math.round(parsed)))
+  }
+
   const parseAutoRerankThresholdInput = (value: string, fallback: number): number => {
     if (value.trim() === '') return fallback
     const parsed = Number(value)
@@ -2702,8 +2768,15 @@ function App(): JSX.Element {
   const updateCurrentAutoRerankThreshold = (value: string): void => {
     const nextThreshold = parseAutoRerankThresholdInput(
       value,
-      autoRerankThresholds[retrievalModel],
+      currentAutoRerankThreshold,
     )
+    if (useChunking) {
+      setAutoChunkRerankThresholds(currentThresholds => ({
+        ...currentThresholds,
+        [effectiveRetrievalModel]: nextThreshold,
+      }))
+      return
+    }
     setAutoRerankThresholds(currentThresholds => ({
       ...currentThresholds,
       [retrievalModel]: nextThreshold,
@@ -3233,7 +3306,7 @@ function App(): JSX.Element {
           action: nextMode === 'rewrite' ? 'rewrite' : 'suggest',
           topic: trimmedTopic,
           opinion: trimmedOpinion,
-          retrieval_model: retrievalModel,
+          retrieval_model: effectiveRetrievalModel,
         }),
       })
 
@@ -3387,7 +3460,9 @@ function App(): JSX.Element {
           stance_method: stanceMethod,
           use_chunking: useChunking,
           chunking_mode: chunkingMode,
-          retrieval_model: retrievalModel,
+          chunk_candidate_top_k: chunkCandidateTopK,
+          chunk_article_top_k: chunkArticleTopK,
+          retrieval_model: effectiveRetrievalModel,
           rerank_selection_mode: rerankSelectionMode,
           rerank_threshold: currentAutoRerankThreshold,
           year_start: resolvedYearStart,
@@ -3555,7 +3630,9 @@ function App(): JSX.Element {
           stance_method: stanceMethod,
           use_chunking: useChunking,
           chunking_mode: chunkingMode,
-          retrieval_model: retrievalModel,
+          chunk_candidate_top_k: chunkCandidateTopK,
+          chunk_article_top_k: chunkArticleTopK,
+          retrieval_model: effectiveRetrievalModel,
           rerank_selection_mode: rerankSelectionMode,
           rerank_threshold: currentAutoRerankThreshold,
           year_start: resolvedYearStart,
@@ -3746,6 +3823,7 @@ function App(): JSX.Element {
 
   const handleTopicSearchModeChange = (nextModel: RetrievalModel): void => {
     if (!supportedRetrievalModels.includes(nextModel)) return
+    if (useChunking && nextModel === 'tfidf') return
     setRetrievalModel(nextModel)
   }
 
@@ -3888,7 +3966,7 @@ function App(): JSX.Element {
     ...activeVisibleArticles.map(article => article.svd_article_query_dimensions),
   ])
   const llmIrrelevantArticles = articles.filter(isLlmIrrelevantArticle)
-  const canExplainRanking = useLlm === true && retrievalModel === 'svd'
+  const canExplainRanking = useLlm === true && effectiveRetrievalModel === 'svd'
   const shouldShowEssayShortcut = useLlm && inputMode === 'essay' && !isSearchStageVisible
   const pendingTopicFeedbackCount = pendingTopicFeedbackArticleIds.length
 
@@ -4371,17 +4449,17 @@ function App(): JSX.Element {
                   <div className="top-search-mode-segments" role="group" aria-label="Topic relevance search mode">
                     <button
                       type="button"
-                      className={`top-search-mode-segment ${retrievalModel === 'tfidf' ? 'active' : ''}`}
-                      aria-pressed={retrievalModel === 'tfidf'}
+                      className={`top-search-mode-segment ${!useChunking && retrievalModel === 'tfidf' ? 'active' : ''}`}
+                      aria-pressed={!useChunking && retrievalModel === 'tfidf'}
                       onClick={() => handleTopicSearchModeChange('tfidf')}
-                      disabled={!canUseTfidf}
+                      disabled={!canUseLexicalRetrieval}
                     >
                       Lexical
                     </button>
                     <button
                       type="button"
-                      className={`top-search-mode-segment ${retrievalModel === 'svd' ? 'active' : ''}`}
-                      aria-pressed={retrievalModel === 'svd'}
+                      className={`top-search-mode-segment ${effectiveRetrievalModel === 'svd' ? 'active' : ''}`}
+                      aria-pressed={effectiveRetrievalModel === 'svd'}
                       onClick={() => handleTopicSearchModeChange('svd')}
                       disabled={!canUseSvd}
                     >
@@ -6304,7 +6382,9 @@ function App(): JSX.Element {
                 <p id="avoid-words-help" className="setting-help-text">
                   {isLexicalSearchMode
                     ? 'Exclude tagged words from lexical TF-IDF results.'
-                    : 'Switch Topic Relevance Search Mode to Lexical to use this filter.'}
+                    : (useChunking
+                      ? 'Unavailable while semantic chunking is on.'
+                      : 'Switch Topic Relevance Search Mode to Lexical to use this filter.')}
                 </p>
               </div>
             </div>
@@ -6356,20 +6436,20 @@ function App(): JSX.Element {
                       {canUseTfidf && (
                         <button
                           type="button"
-                          className={`retrieval-model-button ${retrievalModel === 'tfidf' ? 'active' : ''}`}
-                          onClick={() => setRetrievalModel('tfidf')}
-                          disabled={!canToggleSvd}
+                          className={`retrieval-model-button ${!useChunking && retrievalModel === 'tfidf' ? 'active' : ''}`}
+                          onClick={() => handleTopicSearchModeChange('tfidf')}
+                          disabled={!canUseLexicalRetrieval || !canToggleSvd}
                         >
                           <strong>Lexical</strong>
-                          <p>Pure TF-IDF term matching with cosine similarity.</p>
+                          <p>{useChunking ? 'Disabled while semantic chunking is on.' : 'Pure TF-IDF term matching with cosine similarity.'}</p>
                         </button>
                       )}
                       {canUseSvd && (
                         <button
                           type="button"
-                          className={`retrieval-model-button ${retrievalModel === 'svd' ? 'active' : ''}`}
-                          onClick={() => setRetrievalModel('svd')}
-                          disabled={!canToggleSvd}
+                          className={`retrieval-model-button ${effectiveRetrievalModel === 'svd' ? 'active' : ''}`}
+                          onClick={() => handleTopicSearchModeChange('svd')}
+                          disabled={!canUseSvd || (!useChunking && !canToggleSvd)}
                         >
                           <strong>Semantic</strong>
                           <p>Truncated-SVD on TF-IDF to compare articles in latent concept space with cosine similarity.</p>
@@ -6423,7 +6503,11 @@ function App(): JSX.Element {
                         onClick={() => setRerankSelectionMode('automatic')}
                       >
                         <strong>Smart Filter</strong>
-                        <p>Only articles that are at least this relevant will be considered for deeper analysis.</p>
+                        <p>
+                          {useChunking
+                            ? 'Only chunks that are at least this relevant will enter the article pool.'
+                            : 'Only articles that are at least this relevant will be considered for deeper analysis.'}
+                        </p>
                       </button>
                     </div>
                     {rerankSelectionMode === 'manual' ? (
@@ -6448,7 +6532,7 @@ function App(): JSX.Element {
                     ) : (
                       <label className="settings-inline-field settings-range-field">
                         <div className="settings-range-header">
-                          <span>{`Relevance Sensitivity (${retrievalModel === 'svd' ? 'Semantic' : 'Lexical'})`}</span>
+                          <span>{`Relevance Sensitivity (${effectiveRetrievalModel === 'svd' ? 'Semantic' : 'Lexical'})`}</span>
                           <strong className="settings-range-value">{formatThresholdValue(currentAutoRerankThreshold)}</strong>
                         </div>
                         <input
@@ -6467,8 +6551,12 @@ function App(): JSX.Element {
                     )}
                     <p className="setting-help-text">
                       {rerankSelectionMode === 'manual'
-                        ? 'How many top retrieval matches move into the agreement reranking stage.'
-                        : `Articles at or above this raw topic relevance threshold move into the agreement reranking stage, with at most ${maxAutoRerankCandidates} articles reranked.`}
+                        ? (useChunking
+                          ? 'How many aggregated articles move from chunk retrieval into the agreement reranking stage.'
+                          : 'How many top retrieval matches move into the agreement reranking stage.')
+                        : (useChunking
+                          ? `Chunks at or above this raw relevance threshold are pooled first, capped by the global chunk pool, then grouped into articles for agreement reranking.`
+                          : `Articles at or above this raw topic relevance threshold move into the agreement reranking stage, with at most ${maxAutoRerankCandidates} articles reranked.`)}
                     </p>
                   </div>
                 </div>
@@ -6485,7 +6573,7 @@ function App(): JSX.Element {
                       <div className="settings-toggle-copy">
                         <span>Semantic chunking</span>
                         <p className="setting-help-text">
-                          Chuncking: Break articles into smaller sections and focus only on the parts that are most relevant to your query.
+                          Chunking: retrieve the strongest matching chunks first, group them into articles, and send the top chunks to the LLM.
                         </p>
                         <p className="setting-help-text">
                           Article-level: Treat each article as a whole when scoring relevance.
@@ -6508,7 +6596,7 @@ function App(): JSX.Element {
                         disabled={!canUseChunking}
                       >
                         <span className="settings-switch-label">
-                          {useChunking ? 'Chuncking' : 'Article-level'}
+                          {useChunking ? 'Chunking' : 'Article-level'}
                         </span>
                         <span className="retrieval-toggle-switch" aria-hidden="true">
                           <span className="retrieval-toggle-thumb" />
@@ -6517,6 +6605,29 @@ function App(): JSX.Element {
                     </div>
                     {!llmAgreementAvailable && supportedChunkingModes.includes('semantic') && (
                       <p className="setting-help-text">Add SPARK_API_KEY or API_KEY to enable semantic chunking.</p>
+                    )}
+                    {useChunking && (
+                      <label className="settings-inline-field settings-range-field">
+                        <div className="settings-range-header">
+                          <span>Global chunk pool</span>
+                          <strong className="settings-range-value">{chunkCandidateTopK}</strong>
+                        </div>
+                        <input
+                          type="range"
+                          min="25"
+                          max={maxChunkCandidateTopK}
+                          step="25"
+                          value={chunkCandidateTopK}
+                          onChange={(e) => setChunkCandidateTopK(parseChunkCandidateTopKInput(e.target.value, chunkCandidateTopK))}
+                        />
+                        <div className="settings-range-scale" aria-hidden="true">
+                          <span>25</span>
+                          <span>{maxChunkCandidateTopK}</span>
+                        </div>
+                        <p className="setting-help-text">
+                          Search this many top chunks globally before grouping them back into articles. The LLM receives the top {chunkArticleTopK} chunks per article.
+                        </p>
+                      </label>
                     )}
                   </div>
 

@@ -482,12 +482,16 @@ def _score_row(article_id, score_value):
 
 
 def _paragraph_prompt_payload(paragraph_row):
-    return {
+    payload = {
         "chunk_id": paragraph_row["paragraph_id"],
         "article_id": paragraph_row["article_id"],
         "chunk_index": paragraph_row["paragraph_index"],
         "text": paragraph_row["paragraph"],
     }
+    topic_score = paragraph_row.get("topic_score")
+    if topic_score is not None:
+        payload["topic_score"] = topic_score
+    return payload
 
 
 def build_llm_paragraph_agreement_messages(thesis, paragraph_rows):
@@ -535,6 +539,8 @@ def _normalize_paragraph_batch_scores(payload, paragraph_rows):
                 "paragraph": paragraph_row["paragraph"],
                 "sentence_start_index": paragraph_row.get("sentence_start_index"),
                 "sentence_end_index": paragraph_row.get("sentence_end_index"),
+                "topic_score": paragraph_row.get("topic_score"),
+                "topic_chunk_rank": paragraph_row.get("topic_chunk_rank"),
                 "agreement_score": score,
                 "stance_score": (score * 2.0) - 1.0,
                 "llm_irrelevant": _coerce_irrelevant_flag(irrelevant_value),
@@ -556,6 +562,43 @@ def _article_source_text(article, article_id, body_lookup):
         _article_value(article, "thesis_sentence"),
     ]
     return "\n\n".join(_clean_text(part) for part in parts if _clean_text(part))
+
+
+def _provided_chunk_rows_for_article(article, article_id):
+    if not isinstance(article, dict):
+        return []
+
+    raw_chunks = article.get("topic_relevant_chunks") or article.get("retrieval_chunks")
+    if not isinstance(raw_chunks, list):
+        return []
+
+    rows = []
+    for fallback_index, chunk in enumerate(raw_chunks):
+        if not isinstance(chunk, dict):
+            continue
+        text = _clean_text(chunk.get("text") or chunk.get("paragraph"))
+        if not text:
+            continue
+        try:
+            chunk_index = int(chunk.get("chunk_index"))
+        except (TypeError, ValueError):
+            chunk_index = fallback_index
+        rows.append({
+            "paragraph_id": str(
+                chunk.get("chunk_id")
+                or chunk.get("paragraph_id")
+                or f"{article_id}_chunk_{fallback_index}"
+            ),
+            "paragraph_index": chunk_index,
+            "article_id": article_id,
+            "paragraph": text,
+            "sentence_start_index": chunk.get("sentence_start_index"),
+            "sentence_end_index": chunk.get("sentence_end_index"),
+            "topic_score": chunk.get("topic_score"),
+            "topic_chunk_rank": chunk.get("chunk_rank"),
+        })
+
+    return rows
 
 
 def _svd_processor_for_semantic_chunks():
@@ -585,8 +628,19 @@ def _chunk_rows_for_articles(
         else None
     )
     paragraph_rows = []
+    provided_article_count = 0
+    provided_paragraph_count = 0
+    generated_article_count = 0
+    generated_paragraph_count = 0
     for article_index, article in enumerate(articles):
         article_id = _article_id(article, article_index)
+        provided_rows = _provided_chunk_rows_for_article(article, article_id)
+        if provided_rows:
+            provided_article_count += 1
+            provided_paragraph_count += len(provided_rows)
+            paragraph_rows.extend(provided_rows)
+            continue
+
         source_text = _article_source_text(article, article_id, body_lookup)
         if resolved_mode == "semantic":
             rows = semantic_chunk_rows_from_text(
@@ -607,7 +661,24 @@ def _chunk_rows_for_articles(
             )
         if max_paragraphs_per_article:
             rows = rows[:max(1, int(max_paragraphs_per_article))]
+        if rows:
+            generated_article_count += 1
+            generated_paragraph_count += len(rows)
         paragraph_rows.extend(rows)
+    if provided_paragraph_count:
+        log_runtime_event(
+            "llm_paragraph_agreement.retrieved_chunks_used",
+            article_count=provided_article_count,
+            paragraph_count=provided_paragraph_count,
+            chunking_mode=resolved_mode,
+        )
+    if generated_paragraph_count:
+        log_runtime_event(
+            "llm_paragraph_agreement.generated_chunks_used",
+            article_count=generated_article_count,
+            paragraph_count=generated_paragraph_count,
+            chunking_mode=resolved_mode,
+        )
     return paragraph_rows
 
 
@@ -626,6 +697,8 @@ def _top_relevant_paragraphs(paragraph_scores, limit=DEFAULT_RELEVANT_PARAGRAPH_
             "paragraph_index": row["paragraph_index"],
             "text": row["paragraph"],
             "agreement_score": row["agreement_score"],
+            "topic_score": row.get("topic_score"),
+            "topic_chunk_rank": row.get("topic_chunk_rank"),
             "sentence_start_index": row.get("sentence_start_index"),
             "sentence_end_index": row.get("sentence_end_index"),
         }
@@ -660,9 +733,24 @@ def _aggregate_paragraph_scores(article_rows, paragraph_scores):
             )
             continue
 
-        agreement_score = sum(
-            float(score["agreement_score"]) for score in related_scores
-        ) / len(related_scores)
+        weights = []
+        for score in related_scores:
+            try:
+                weight = float(score.get("topic_score"))
+            except (TypeError, ValueError):
+                weight = 0.0
+            weights.append(max(0.0, weight))
+
+        total_weight = sum(weights)
+        if total_weight > 0:
+            agreement_score = sum(
+                float(score["agreement_score"]) * weight
+                for score, weight in zip(related_scores, weights)
+            ) / total_weight
+        else:
+            agreement_score = sum(
+                float(score["agreement_score"]) for score in related_scores
+            ) / len(related_scores)
         rows.append(
             {
                 "article_id": article_id,

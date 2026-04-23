@@ -535,6 +535,31 @@ def _warm_runtime_assets():
         )
 
     try:
+        from backend.services.chunk_retrieval_service import (
+            DEFAULT_CHUNK_RETRIEVAL_CHUNKING_MODE,
+            build_chunk_retrieval_index,
+        )
+
+        log_runtime_event(
+            "startup_warm.chunk_svd_start",
+            chunking_mode=DEFAULT_CHUNK_RETRIEVAL_CHUNKING_MODE,
+        )
+        chunk_index = build_chunk_retrieval_index(
+            retrieval_model="svd",
+            chunking_mode=DEFAULT_CHUNK_RETRIEVAL_CHUNKING_MODE,
+        )
+        log_runtime_event(
+            "startup_warm.chunk_svd_done",
+            chunk_count=getattr(chunk_index, "n_chunks", None),
+        )
+        print("Chunk SVD retrieval artifacts loaded into memory.")
+    except Exception as exc:
+        print(
+            "Warning: chunk SVD warm-up failed; chunk search may fail until rebuilt. "
+            f"Details: {exc}"
+        )
+
+    try:
         from backend.stance_processing.nli_processor import load_nli_bundle
 
         log_runtime_event("startup_warm.nli_start")
@@ -633,6 +658,26 @@ def initialize_offline_data_pipeline(
             print("TF-IDF artifacts are ready.")
         except Exception as exc:
             print(f"Warning: TF-IDF precompute failed; search may fail until rebuilt. Details: {exc}")
+
+        try:
+            from backend.services.chunk_retrieval_service import (
+                DEFAULT_CHUNK_RETRIEVAL_CHUNKING_MODE,
+                DEFAULT_CHUNK_SVD_INDEX_NAME,
+                preprocess_chunk_svd_index,
+            )
+            from backend.text_processing.indexing.corpus import DEFAULT_INDEX_DIR
+
+            preprocess_chunk_svd_index(
+                db_path=Path(app.instance_path) / "data.db",
+                index_dir=DEFAULT_INDEX_DIR,
+                index_name=DEFAULT_CHUNK_SVD_INDEX_NAME,
+                force_rebuild=False,
+                years=years,
+                chunking_mode=DEFAULT_CHUNK_RETRIEVAL_CHUNKING_MODE,
+            )
+            print("Chunk SVD artifacts are ready.")
+        except Exception as exc:
+            print(f"Warning: chunk SVD precompute failed; chunk search may fail until rebuilt. Details: {exc}")
 
         if warm_runtime_assets:
             _warm_runtime_assets()

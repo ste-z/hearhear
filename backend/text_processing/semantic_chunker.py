@@ -1,9 +1,12 @@
 import math
 
+import numpy as np
+
 from backend.text_processing.sentence_splitter import sentence_rows_from_text
+from backend.text_processing.text_normalization import normalize_text_for_vectorization
 
 
-DEFAULT_SEMANTIC_BREAK_SIMILARITY_THRESHOLD = 0.2
+DEFAULT_SEMANTIC_BREAK_SIMILARITY_THRESHOLD = 0.4
 DEFAULT_SEMANTIC_MAX_CHARS = 15000
 
 
@@ -43,6 +46,50 @@ def _project_sentence(processor, sentence):
         return None
 
 
+def _project_sentences(processor, sentences):
+    if processor is None:
+        return [None for _sentence in sentences]
+
+    vectorizer = getattr(processor, "vectorizer", None)
+    components = getattr(processor, "components", None)
+    if vectorizer is None or components is None:
+        return [_project_sentence(processor, sentence) for sentence in sentences]
+
+    try:
+        normalized_sentences = [
+            normalize_text_for_vectorization(sentence)
+            for sentence in sentences
+        ]
+        non_empty_indices = [
+            index
+            for index, sentence in enumerate(normalized_sentences)
+            if sentence
+        ]
+        vectors = [None for _sentence in sentences]
+        if not non_empty_indices:
+            return vectors
+
+        query_matrix = vectorizer.transform([
+            normalized_sentences[index]
+            for index in non_empty_indices
+        ])
+        if int(getattr(query_matrix, "nnz", 0)) <= 0:
+            return vectors
+
+        projected = query_matrix @ np.asarray(components, dtype=np.float32).T
+        projected = np.asarray(projected, dtype=np.float32)
+        norms = np.linalg.norm(projected, axis=1)
+        for row_index, sentence_index in enumerate(non_empty_indices):
+            norm = float(norms[row_index])
+            if norm > 0.0:
+                vectors[sentence_index] = (
+                    projected[row_index] / norm
+                ).astype(np.float32, copy=False)
+        return vectors
+    except Exception:
+        return [_project_sentence(processor, sentence) for sentence in sentences]
+
+
 def semantic_chunk_rows_from_text(
     article_text,
     article_id=None,
@@ -62,6 +109,11 @@ def semantic_chunk_rows_from_text(
     current_sentences = []
     current_start = 0
     previous_vector = None
+    cleaned_sentences = [
+        _clean_text(sentence_row.get("sentence"))
+        for sentence_row in sentence_rows
+    ]
+    sentence_vectors = _project_sentences(svd_processor, cleaned_sentences)
 
     def flush():
         if not current_sentences:
@@ -81,12 +133,11 @@ def semantic_chunk_rows_from_text(
             }
         )
 
-    for sentence_index, sentence_row in enumerate(sentence_rows):
-        sentence = _clean_text(sentence_row.get("sentence"))
+    for sentence_index, sentence in enumerate(cleaned_sentences):
         if not sentence:
             continue
 
-        sentence_vector = _project_sentence(svd_processor, sentence)
+        sentence_vector = sentence_vectors[sentence_index]
         current_text = _clean_text(" ".join([*current_sentences, sentence]))
         should_break = False
 

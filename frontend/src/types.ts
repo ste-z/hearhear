@@ -77,6 +77,15 @@ export type Article = {
   thesis_sentence?: string | null
   support_sentences?: string[] | null
   vader_sentiment?: VaderSentiment | null
+  chunk_retrieval_enabled?: boolean | null
+  chunk_retrieval_model?: RetrievalModel | null
+  chunk_retrieval_chunking_mode?: string | null
+  chunk_retrieval_candidate_count?: number | null
+  chunk_retrieval_matched_chunk_count?: number | null
+  chunk_topic_score_max?: number | null
+  chunk_topic_score_top_k_mean?: number | null
+  chunk_topic_score_coverage?: number | null
+  topic_relevant_chunks?: TopicRelevantChunk[] | null
   svd_query_chart_dimensions?: SvdLatentDimension[] | null
   svd_chart_dimensions?: SvdLatentDimension[] | null
   svd_article_query_dimensions?: SvdLatentDimension[] | null
@@ -85,11 +94,23 @@ export type Article = {
   svd_dimensions?: SvdLatentDimension[] | null
 }
 
+export type TopicRelevantChunk = {
+  chunk_id?: string | null
+  chunk_index?: number | null
+  text: string
+  topic_score?: number | null
+  chunk_rank?: number | null
+  source?: string | null
+  retrieval_model?: RetrievalModel | string | null
+}
+
 export type LlmRelevantParagraph = {
   paragraph_id?: string | null
   paragraph_index?: number | null
   text: string
   agreement_score?: number | null
+  topic_score?: number | null
+  topic_chunk_rank?: number | null
   sentence_start_index?: number | null
   sentence_end_index?: number | null
 }

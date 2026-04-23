@@ -3,6 +3,16 @@ from sqlalchemy import or_
 
 from backend.db.models import GuardianArticle
 from backend.runtime.runtime_debug import log_runtime_event
+from backend.services.chunk_retrieval_service import (
+    DEFAULT_CHUNK_ARTICLE_TOP_K,
+    DEFAULT_CHUNK_AUTO_THRESHOLDS,
+    DEFAULT_CHUNK_CANDIDATE_TOP_K,
+    MAX_CHUNK_CANDIDATE_TOP_K,
+    chunk_retrieval_search,
+    default_chunk_auto_threshold,
+    normalize_chunk_article_top_k,
+    normalize_chunk_candidate_top_k,
+)
 from backend.services.filters.article_filters import (
     available_article_character_range,
     available_article_reading_time_range,
@@ -115,10 +125,75 @@ def select_rerank_candidates(
     rerank_selection_mode=DEFAULT_RERANK_SELECTION_MODE,
     rerank_threshold=None,
     topic_feedback_irrelevant_article_ids=None,
+    use_chunking=False,
+    chunking_mode="none",
+    chunk_candidate_top_k=DEFAULT_CHUNK_CANDIDATE_TOP_K,
+    chunk_article_top_k=DEFAULT_CHUNK_ARTICLE_TOP_K,
 ):
     resolved_model = normalize_retrieval_model(retrieval_model)
     resolved_selection_mode = normalize_rerank_selection_mode(rerank_selection_mode)
     resolved_top_n = max(1, int(top_n))
+    resolved_use_chunking = bool(use_chunking) and str(chunking_mode or "none") != "none"
+    if resolved_use_chunking and resolved_model != "svd":
+        log_runtime_event(
+            "rerank_candidates.chunk_force_svd",
+            requested_retrieval_model=resolved_model,
+        )
+        resolved_model = "svd"
+
+    if resolved_use_chunking:
+        resolved_reading_time_start, resolved_reading_time_end = normalize_article_reading_time_range(
+            reading_time_start,
+            reading_time_end,
+        )
+        reading_time_word_start, reading_time_word_end = _word_range_for_reading_time_range(
+            resolved_reading_time_start,
+            resolved_reading_time_end,
+        )
+        chunk_threshold = (
+            resolve_auto_rerank_threshold(
+                rerank_threshold,
+                retrieval_model=resolved_model,
+            )
+            if resolved_selection_mode == "automatic" and rerank_threshold is not None
+            else (
+                default_chunk_auto_threshold(resolved_model)
+                if resolved_selection_mode == "automatic"
+                else None
+            )
+        )
+        payload = chunk_retrieval_search(
+            query=query,
+            top_n=resolved_top_n,
+            retrieval_model=resolved_model,
+            chunking_mode=chunking_mode,
+            rerank_selection_mode=resolved_selection_mode,
+            rerank_threshold=chunk_threshold,
+            chunk_candidate_top_k=chunk_candidate_top_k,
+            chunk_article_top_k=chunk_article_top_k,
+            year_start=year_start,
+            year_end=year_end,
+            character_start=character_start,
+            character_end=character_end,
+            word_start=word_start,
+            word_end=word_end,
+            reading_time_word_start=reading_time_word_start,
+            reading_time_word_end=reading_time_word_end,
+            words_to_avoid=words_to_avoid,
+            topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
+        )
+        log_runtime_event(
+            "rerank_candidates.chunk_done",
+            retrieval_model=resolved_model,
+            selection_mode=resolved_selection_mode,
+            chunking_mode=chunking_mode,
+            selected_count=len(payload.get("matches") or []),
+            chunk_candidate_count=payload.get("chunk_candidate_count"),
+            chunk_candidate_top_k=normalize_chunk_candidate_top_k(chunk_candidate_top_k),
+            chunk_article_top_k=normalize_chunk_article_top_k(chunk_article_top_k),
+            threshold=payload.get("rerank_threshold"),
+        )
+        return payload
 
     if resolved_selection_mode == "manual":
         matches = retrieval_search(
@@ -851,6 +926,8 @@ def stance_search(
     stance_method="nli",
     use_chunking=False,
     chunking_mode="none",
+    chunk_candidate_top_k=DEFAULT_CHUNK_CANDIDATE_TOP_K,
+    chunk_article_top_k=DEFAULT_CHUNK_ARTICLE_TOP_K,
 ):
     from backend.stance_processing.stance_rerank import rerank_article_matches
 
@@ -862,6 +939,8 @@ def stance_search(
             "empty_results_message": None,
         }
     resolved_model = normalize_retrieval_model(retrieval_model)
+    if use_chunking and str(chunking_mode or "none") != "none":
+        resolved_model = "svd"
     resolved_selection_mode = normalize_rerank_selection_mode(rerank_selection_mode)
 
     candidate_payload = select_rerank_candidates(
@@ -880,6 +959,10 @@ def stance_search(
         rerank_selection_mode=resolved_selection_mode,
         rerank_threshold=rerank_threshold,
         topic_feedback_irrelevant_article_ids=topic_feedback_irrelevant_article_ids,
+        use_chunking=use_chunking,
+        chunking_mode=chunking_mode,
+        chunk_candidate_top_k=chunk_candidate_top_k,
+        chunk_article_top_k=chunk_article_top_k,
     )
     topic_matches = candidate_payload["matches"]
     if not topic_matches:

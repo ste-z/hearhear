@@ -25,9 +25,13 @@ from backend.services.pdf_service import extract_pdf_text
 from backend.services.retrieval_service import (
     attach_query_svd_chart_dimensions,
     DEFAULT_AUTO_RERANK_THRESHOLDS,
+    DEFAULT_CHUNK_ARTICLE_TOP_K,
+    DEFAULT_CHUNK_AUTO_THRESHOLDS,
+    DEFAULT_CHUNK_CANDIDATE_TOP_K,
     DEFAULT_RERANK_SELECTION_MODE,
     DEFAULT_RETRIEVAL_MODEL,
     json_search,
+    MAX_CHUNK_CANDIDATE_TOP_K,
     MAX_AUTO_RERANK_CANDIDATES,
     normalize_retrieval_model,
     normalize_rerank_selection_mode,
@@ -158,6 +162,21 @@ def _extract_request_context():
     stance_weight = _coerce_float(payload.get("stance_weight"), 0.4)
     recency_weight = _coerce_float(payload.get("recency_weight"), 0.2)
     rerank_top_k = _coerce_int(payload.get("top_k"), 20, minimum=1, maximum=100)
+    chunk_candidate_top_k = _coerce_int(
+        payload.get("chunk_candidate_top_k")
+        or payload.get("chunk_top_k")
+        or payload.get("chunk_candidate_limit"),
+        DEFAULT_CHUNK_CANDIDATE_TOP_K,
+        minimum=25,
+        maximum=MAX_CHUNK_CANDIDATE_TOP_K,
+    )
+    chunk_article_top_k = _coerce_int(
+        payload.get("chunk_article_top_k")
+        or payload.get("chunks_per_article"),
+        DEFAULT_CHUNK_ARTICLE_TOP_K,
+        minimum=1,
+        maximum=10,
+    )
     candidate_top_n = _coerce_int(payload.get("candidate_top_n"), 5, minimum=1, maximum=10)
     normalize_topic_scores = _coerce_bool(
         payload.get("normalize_topic_scores"),
@@ -294,6 +313,8 @@ def _extract_request_context():
         "stance_weight": stance_weight,
         "recency_weight": recency_weight,
         "rerank_top_k": rerank_top_k,
+        "chunk_candidate_top_k": chunk_candidate_top_k,
+        "chunk_article_top_k": chunk_article_top_k,
         "candidate_top_n": candidate_top_n,
         "normalize_topic_scores": normalize_topic_scores,
         "use_chunking": use_chunking,
@@ -367,7 +388,11 @@ def register_routes(app):
             "default_rerank_selection_mode": DEFAULT_RERANK_SELECTION_MODE,
             "supported_rerank_selection_modes": list(SUPPORTED_RERANK_SELECTION_MODES),
             "default_auto_rerank_thresholds": dict(DEFAULT_AUTO_RERANK_THRESHOLDS),
+            "default_chunk_auto_rerank_thresholds": dict(DEFAULT_CHUNK_AUTO_THRESHOLDS),
+            "default_chunk_candidate_top_k": DEFAULT_CHUNK_CANDIDATE_TOP_K,
+            "default_chunk_article_top_k": DEFAULT_CHUNK_ARTICLE_TOP_K,
             "max_auto_rerank_candidates": MAX_AUTO_RERANK_CANDIDATES,
+            "max_chunk_candidate_top_k": MAX_CHUNK_CANDIDATE_TOP_K,
             "min_article_year": min_article_year,
             "max_article_year": max_article_year,
             "min_article_characters": min_article_characters,
@@ -429,6 +454,8 @@ def register_routes(app):
                     chunking_mode=context["chunking_mode"],
                     rerank_selection_mode=context["rerank_selection_mode"],
                     rerank_threshold=context["rerank_threshold"],
+                    chunk_candidate_top_k=context["chunk_candidate_top_k"],
+                    chunk_article_top_k=context["chunk_article_top_k"],
                     topic_feedback_irrelevant_article_ids=context["topic_feedback_irrelevant_article_ids"],
                 )
             elif context["mode"] == "essay":
@@ -456,6 +483,8 @@ def register_routes(app):
                     chunking_mode=context["chunking_mode"],
                     rerank_selection_mode=context["rerank_selection_mode"],
                     rerank_threshold=context["rerank_threshold"],
+                    chunk_candidate_top_k=context["chunk_candidate_top_k"],
+                    chunk_article_top_k=context["chunk_article_top_k"],
                     topic_feedback_irrelevant_article_ids=context["topic_feedback_irrelevant_article_ids"],
                 )
             else:
