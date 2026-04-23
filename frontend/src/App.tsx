@@ -29,6 +29,7 @@ import {
   TypoCorrectionSuggestion,
 } from './types'
 import Chat from './Chat'
+import AboutMethodFlow from './AboutMethodFlow'
 
 type InputMode = 'stance' | 'essay'
 type TopNavPage = 'home' | 'search' | 'about'
@@ -4902,8 +4903,8 @@ function App(): JSX.Element {
           inputMode === 'essay' ? 'essay-mode' : 'stance-mode',
         ].filter(Boolean).join(' ')}
       >
-        <div className={`intro-shell ${isSearchChromeVisible ? 'search-active' : ''}`}>
-          <div className="top-nav page-top-nav" aria-label="Page navigation">
+        <div className={`intro-shell ${isSearchChromeVisible ? 'search-active' : ''} ${isAboutPageActive ? 'about-active' : ''}`}>
+          <div className={`top-nav page-top-nav ${isAboutPageActive ? 'about-active' : ''}`} aria-label="Page navigation">
             <div className="top-nav-spacer" aria-hidden="true" />
             <div className="top-nav-actions">
               <button
@@ -4933,7 +4934,7 @@ function App(): JSX.Element {
             </div>
           </div>
 
-          <div className={`search-chrome ${isSearchChromeVisible ? 'visible' : ''}`}>
+          <div className={`search-chrome ${isSearchChromeVisible ? 'visible' : ''} ${isAboutPageActive ? 'about-active' : ''}`}>
             {isAboutPageActive ? (
               <section className="about-page" aria-labelledby="about-page-title">
                 <div className="about-page-card">
@@ -4999,103 +5000,7 @@ function App(): JSX.Element {
 
                     {activeAboutSection === 'method' && (
                       <div className="about-page-stack">
-                        <p className="about-page-copy">
-                          The method tab explains the current ranking workflow for both search entry points in hear! hear!.
-                        </p>
-
-                        <div className="about-tablist about-method-tablist" role="tablist" aria-label="About search methods">
-                          <button
-                            type="button"
-                            role="tab"
-                            aria-selected={activeAboutMethodTab === 'stance'}
-                            className={`about-tab ${activeAboutMethodTab === 'stance' ? 'active' : ''}`}
-                            onClick={() => setActiveAboutMethodTab('stance')}
-                          >
-                            Topic and Stance Search
-                          </button>
-                          <button
-                            type="button"
-                            role="tab"
-                            aria-selected={activeAboutMethodTab === 'essay'}
-                            className={`about-tab ${activeAboutMethodTab === 'essay' ? 'active' : ''}`}
-                            onClick={() => setActiveAboutMethodTab('essay')}
-                          >
-                            Essay-Guided Search
-                          </button>
-                        </div>
-
-                        <div className="modal-stage-list about-method-stage-list">
-                          {activeAboutMethodTab === 'stance' ? (
-                            <>
-                              <section className="about-section">
-                                <p className="about-section-label">Stage 1</p>
-                                <p className="modal-copy">
-                                  <strong>Stage 1: Topic relevance.</strong> We first identify articles that are
-                                  relevant to your topic. To do this, we compute the similarity between your
-                                  input and each Guardian article using the retrieval representation selected
-                                  in topic relevance mode: either Lexical TF-IDF term vectors or Semantic
-                                  truncated-SVD latent dimensions, both compared with cosine similarity. This
-                                  helps us find articles that discuss similar themes and keywords.
-                                </p>
-                              </section>
-                              <section className="about-section">
-                                <p className="about-section-label">Stage 2</p>
-                                <p className="modal-copy">
-                                  <strong>Stage 2: Stance relevance.</strong> From the candidate articles identified
-                                  in Stage 1, we then rank them based on how they relate to your opinion.
-                                  The Agreement scorer in Settings can use either DeBERTa Natural Language
-                                  Inference (NLI) over each extracted article claim or Spark LLM scoring over
-                                  retrieved article context. The model estimates whether each article supports,
-                                  contradicts, or is neutral toward your stance. If you raise the recency
-                                  weight in Settings, newer publication dates also contribute to the final
-                                  ranking.
-                                </p>
-                              </section>
-                            </>
-                          ) : (
-                            <>
-                              <section className="about-section">
-                                <p className="about-section-label">Stage 1</p>
-                                <p className="modal-copy">
-                                  <strong>Stage 1: Essay thesis detection.</strong> We first split your essay into
-                                  individual sentences using our sentence segmentation pipeline. Then we use a
-                                  DeBERTa Natural Language Inference (NLI) model to compare each sentence against
-                                  the hypothesis, &ldquo;This sentence is the author&apos;s main claim.&rdquo; This gives
-                                  each sentence a claimness score, and we present the top options so you can
-                                  choose the sentence that best represents your essay&apos;s central thesis, or
-                                  enter your own thesis wording when you want to override the suggestions.
-                                  When the LLM Agreement scorer is selected, this step is skipped and the
-                                  full essay is used for agreement scoring.
-                                </p>
-                              </section>
-                              <section className="about-section">
-                                <p className="about-section-label">Stage 2</p>
-                                <p className="modal-copy">
-                                  <strong>Stage 2: Topic relevance.</strong> We identify articles that are relevant
-                                  to your essay as a whole. To
-                                  do this, we compute the similarity between your full essay and each Guardian
-                                  article using the retrieval representation selected in topic relevance mode:
-                                  either Lexical TF-IDF term vectors or Semantic truncated-SVD latent dimensions,
-                                  both compared with cosine similarity. This surfaces articles that discuss
-                                  similar themes, issues, and vocabulary.
-                                </p>
-                              </section>
-                              <section className="about-section">
-                                <p className="about-section-label">Stage 3</p>
-                                <p className="modal-copy">
-                                  <strong>Stage 3: Agreement relevance.</strong> From the candidate articles identified
-                                  in Stage 2, we then rank them based on how they relate to your selected thesis
-                                  for NLI or your full essay for LLM.
-                                  The Agreement scorer in Settings can use either DeBERTa NLI over each
-                                  extracted article claim or Spark LLM scoring over retrieved article context.
-                                  The model estimates whether each article supports, contradicts, or is neutral toward your position.
-                                  If you raise the recency weight in Settings, newer publication dates also
-                                  contribute to the final ranking.
-                                </p>
-                              </section>
-                            </>
-                          )}
-                        </div>
+                        <AboutMethodFlow mode={activeAboutMethodTab} onModeChange={setActiveAboutMethodTab} />
                       </div>
                     )}
                   </div>

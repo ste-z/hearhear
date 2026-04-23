@@ -3023,7 +3023,7 @@
 }
 
 .about-page {
-  width: min(980px, 100%);
+  width: min(1500px, 100%);
 }
 
 .about-page-card {
@@ -4759,6 +4759,10 @@
   min-height: calc(100dvh - 48px);
 }
 
+.intro-shell.search-active.about-active {
+  width: min(1560px, 100%);
+}
+
 .landing-section.search-active.stance-mode .intro-shell.search-active {
   min-height: calc(100dvh - 48px);
 }
@@ -4784,6 +4788,10 @@
   pointer-events: auto;
 }
 
+.search-chrome.about-active {
+  width: min(1500px, 100%);
+}
+
 .landing-section.search-active.stance-mode .search-chrome {
   position: relative;
 }
@@ -4798,6 +4806,10 @@
   padding-bottom: 0;
   border-bottom: none;
   z-index: 4;
+}
+
+.page-top-nav.about-active {
+  width: min(1500px, 100%);
 }
 
 .page-top-nav .top-nav-spacer {
