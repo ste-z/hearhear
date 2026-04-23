@@ -48,18 +48,99 @@ def _coerce_bool(value, default=False):
     return bool(default)
 
 
-def _format_svd_dimensions(dimensions):
+def _clean_svd_text(value, max_chars=160):
+    if value is None:
+        return ""
+    text = re.sub(r"\s+", " ", str(value)).strip()
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars - 3].rstrip()}..."
+
+
+def _clean_svd_dimension_label(value):
+    label = _clean_svd_text(value, 120)
+    label = re.sub(r"^(concept|dimension)\s+\d+\s*[:\-]\s*", "", label, flags=re.IGNORECASE).strip()
+    if re.fullmatch(r"(concept|dimension)?\s*\d+", label, flags=re.IGNORECASE):
+        return ""
+    return label
+
+
+def _normalize_svd_dimension_label_map(raw_labels):
+    labels = {}
+
+    if isinstance(raw_labels, dict):
+        iterable = raw_labels.items()
+    elif isinstance(raw_labels, list):
+        iterable = (
+            (item.get("dimension_index"), item.get("label"))
+            for item in raw_labels
+            if isinstance(item, dict)
+        )
+    else:
+        return labels
+
+    for raw_index, raw_label in iterable:
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError):
+            continue
+        label = _clean_svd_dimension_label(raw_label)
+        if label:
+            labels[index] = label
+
+    return labels
+
+
+def _coerce_svd_dimension_index(dimension):
+    try:
+        return int(dimension.get("dimension_index", -1))
+    except (AttributeError, TypeError, ValueError):
+        return -1
+
+
+def _svd_dimension_terms(dimension):
+    if not isinstance(dimension, dict):
+        return []
+    return [
+        str(term).strip()
+        for term in dimension.get("label_terms") or []
+        if str(term).strip()
+    ]
+
+
+def _svd_dimension_display_name(dimension, dimension_labels=None):
+    if not isinstance(dimension, dict):
+        return "Unnamed latent concept"
+
+    index = _coerce_svd_dimension_index(dimension)
+    if isinstance(dimension_labels, dict) and index in dimension_labels:
+        label = _clean_svd_dimension_label(dimension_labels.get(index))
+        if label:
+            return label
+
+    for key in ("display_label", "dimension_name", "name", "label"):
+        label = _clean_svd_dimension_label(dimension.get(key))
+        if label:
+            return label
+
+    label_text = _clean_svd_dimension_label(dimension.get("label_text"))
+    if label_text:
+        return label_text
+
+    label_terms = _svd_dimension_terms(dimension)
+    if label_terms:
+        return ", ".join(label_terms[:3])
+
+    return "Unnamed latent concept"
+
+
+def _format_svd_dimensions(dimensions, dimension_labels=None):
     if not isinstance(dimensions, list) or not dimensions:
         return "None"
 
     lines = []
     for dimension in dimensions:
-        try:
-            index = int(dimension.get("dimension_index", -1))
-        except (TypeError, ValueError):
-            index = -1
-
-        label = str(dimension.get("label_text") or dimension.get("dimension_label") or index)
+        name = _svd_dimension_display_name(dimension, dimension_labels)
         value_raw = dimension.get("value")
         try:
             value = float(value_raw)
@@ -76,10 +157,10 @@ def _format_svd_dimensions(dimensions):
             magnitude_text = str(magnitude_raw) if magnitude_raw is not None else None
 
         pole = dimension.get("pole")
-        label_terms = [str(term).strip() for term in dimension.get("label_terms") or [] if str(term).strip()]
+        label_terms = _svd_dimension_terms(dimension)
         term_text = f"terms: {', '.join(label_terms)}" if label_terms else None
 
-        parts = [f"Dimension {index}", f"label: {label}", f"value: {value_text}"]
+        parts = [f"Radar concept: {name}", f"value: {value_text}"]
         if magnitude_text:
             parts.append(f"magnitude: {magnitude_text}")
         if pole:
@@ -527,6 +608,28 @@ def _dimension_indices(dimensions):
     return indices
 
 
+def _cached_svd_dimension_label_map(*dimension_groups):
+    indices = []
+    seen = set()
+    for dimensions in dimension_groups:
+        if not isinstance(dimensions, list):
+            continue
+        for index in _dimension_indices(dimensions):
+            if index in seen:
+                continue
+            indices.append(index)
+            seen.add(index)
+
+    if not indices:
+        return {}
+
+    try:
+        return _normalize_svd_dimension_label_map(cached_svd_dimension_labels(indices))
+    except Exception:
+        logger.exception("Failed to load cached SVD dimension labels")
+        return {}
+
+
 def _parse_svd_dimension_labels(raw_content, requested_indices):
     text = str(raw_content or "").strip()
     if not text:
@@ -842,6 +945,9 @@ def register_chat_route(app, json_search):
         position = payload.get("position")
         article = payload.get("article") or {}
         query_svd_dimensions = payload.get("query_svd_dimensions") or []
+        provided_dimension_labels = _normalize_svd_dimension_label_map(
+            payload.get("svd_dimension_labels") or payload.get("dimension_labels")
+        )
 
         if not query:
             return jsonify({"error": "Query text is required."}), 400
@@ -857,10 +963,30 @@ def register_chat_route(app, json_search):
         except RuntimeError as exc:
             return jsonify({"error": str(exc)}), 500
 
-        query_svd_text = _format_svd_dimensions(query_svd_dimensions)
-        article_query_chart_text = _format_svd_dimensions(article.get("svd_query_chart_dimensions"))
-        article_chart_text = _format_svd_dimensions(article.get("svd_chart_dimensions"))
-        article_dimensions_text = _format_svd_dimensions(article.get("svd_dimensions"))
+        cached_dimension_labels = _cached_svd_dimension_label_map(
+            query_svd_dimensions,
+            article.get("svd_query_chart_dimensions"),
+            article.get("svd_chart_dimensions"),
+            article.get("svd_dimensions"),
+        )
+        dimension_labels = {
+            **cached_dimension_labels,
+            **provided_dimension_labels,
+        }
+
+        query_svd_text = _format_svd_dimensions(query_svd_dimensions, dimension_labels)
+        article_query_chart_text = _format_svd_dimensions(
+            article.get("svd_query_chart_dimensions"),
+            dimension_labels,
+        )
+        article_chart_text = _format_svd_dimensions(
+            article.get("svd_chart_dimensions"),
+            dimension_labels,
+        )
+        article_dimensions_text = _format_svd_dimensions(
+            article.get("svd_dimensions"),
+            dimension_labels,
+        )
 
         article_title = str(article.get("title") or "").strip()
         article_summary = str(article.get("summary") or "").strip()
@@ -882,7 +1008,8 @@ def register_chat_route(app, json_search):
             "Articles are ranked based on similarity to the query in this space. "
             "Given the query, the article metadata, and the available SVD representations, explain why this article is ranked at position "
             f"{position_label}. Focus on shared themes, concepts, or terminology that likely contributed to high similarity. "
-            "Please keep your response concise, with a maximum of 3 sentences to make it easy for users to get a quick insight into the ranking."
+            "When referring to SVD concepts, use the provided radar concept names exactly instead of numeric dimension identifiers. "
+            "Please keep your response concise, with a maximum of 3 sentences to make it easy for users to get a quick insight into the ranking. "
             "Do not invent unobserved article content beyond the title, summary, claim, and provided SVD dimension metadata. \n\n"
             f"Query:\n{query}\n\n"
             "Article:\n"

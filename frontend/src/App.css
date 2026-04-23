@@ -1117,7 +1117,8 @@
 
 .topic-feedback-action-row {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: flex-end;
   gap: 8px;
@@ -6634,6 +6635,18 @@ a.results-overview-source-chip:hover {
   .topic-feedback-undo-button,
   .topic-feedback-refresh-button {
     width: 100%;
+  }
+
+  .topic-feedback-action-row {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .topic-feedback-action-row .topic-feedback-button {
+    flex: 1 1 132px;
+    min-width: 0;
+    width: auto;
+    white-space: normal;
   }
 
   .article-footer-row {

@@ -17,8 +17,6 @@ import {
   EssayClaimCandidateResponse,
   EssayTextExtractionResponse,
   LlmRelevantParagraph,
-  QueryHelpResponse,
-  QueryRewriteAlternative,
   ResultsChatResponse,
   ResultsOverview,
   RetrievalModel,
@@ -38,7 +36,6 @@ type ChunkingMode = 'none' | 'paragraph' | 'semantic'
 type FrontendChunkingMode = Exclude<ChunkingMode, 'paragraph'>
 type LengthFilterUnit = 'characters' | 'words' | 'reading_time'
 type SettingsFocusTarget = 'topic-relevance' | 'agreement-scorer'
-type QueryAssistMode = 'menu' | 'rewrite' | 'suggestions'
 type SvdDimensionLabelMap = Record<number, string>
 type SvdChartSeriesRole = 'article' | 'query'
 type TopicFeedbackSearchOptions = {
@@ -306,54 +303,6 @@ const normalizeTypoCorrection = (value: unknown): TypoCorrectionSuggestion | nul
     options,
     corrections: Array.isArray(rawSuggestion.corrections) ? rawSuggestion.corrections : null,
   }
-}
-
-const normalizeQueryRewriteAlternatives = (value: unknown): QueryRewriteAlternative[] => {
-  if (!Array.isArray(value)) return []
-
-  const alternatives: QueryRewriteAlternative[] = []
-  const seen = new Set<string>()
-  for (const item of value) {
-    if (!item || typeof item !== 'object') continue
-    const rawAlternative = item as Partial<QueryRewriteAlternative>
-    const topic = typeof rawAlternative.topic === 'string' ? rawAlternative.topic.trim() : ''
-    const opinion = typeof rawAlternative.opinion === 'string' ? rawAlternative.opinion.trim() : ''
-    const query = typeof rawAlternative.query === 'string' ? rawAlternative.query.trim() : ''
-    if (!topic || !opinion || !query) continue
-
-    const key = `${topic.toLocaleLowerCase()}\u0000${opinion.toLocaleLowerCase()}`
-    if (seen.has(key)) continue
-
-    alternatives.push({
-      topic,
-      opinion,
-      query,
-      rationale: typeof rawAlternative.rationale === 'string' && rawAlternative.rationale.trim() !== ''
-        ? rawAlternative.rationale.trim()
-        : null,
-    })
-    seen.add(key)
-    if (alternatives.length >= 3) break
-  }
-
-  return alternatives
-}
-
-const normalizeQueryImproveSuggestions = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return []
-
-  const suggestions: string[] = []
-  const seen = new Set<string>()
-  for (const item of value) {
-    const suggestion = typeof item === 'string' ? item.trim() : ''
-    const key = suggestion.toLocaleLowerCase()
-    if (!suggestion || seen.has(key)) continue
-    suggestions.push(suggestion)
-    seen.add(key)
-    if (suggestions.length >= 6) break
-  }
-
-  return suggestions
 }
 
 const readApiJson = async <T,>(response: Response): Promise<T> => {
@@ -692,22 +641,6 @@ const scaleSvdMagnitude = (
 
 const formatSvdValue = (value: number): string => (
   `${value >= 0 ? '+' : ''}${value.toFixed(3)}`
-)
-
-const formatVaderScore = (value: number): string => (
-  `${value >= 0 ? '+' : ''}${value.toFixed(2)}`
-)
-
-const formatSentimentPercent = (value: number): string => `${Math.round(clampSvdMagnitude(value) * 100)}%`
-
-const formatSentimentLabel = (value?: string | null): string => {
-  const normalized = String(value || '').trim()
-  if (!normalized) return 'Neutral'
-  return normalized.charAt(0).toUpperCase() + normalized.slice(1)
-}
-
-const formatToneStrength = (value?: string | null): string => (
-  formatSentimentLabel(value)
 )
 
 const formatThresholdValue = (value: number): string => value.toFixed(2)
@@ -1564,11 +1497,11 @@ function RankingWeightSlider(
           onPointerDown={(event) => beginDrag('recency-agreement', event)}
           onKeyDown={(event) => handleBoundaryKeyDown('recency-agreement', event)}
           role="slider"
-          aria-label="Boundary between recency and agreement weight"
+          aria-label="Boundary between recency and AI agreement weight"
           aria-valuemin={Math.round(firstBoundary * 100)}
           aria-valuemax={100}
           aria-valuenow={Math.round(secondBoundary * 100)}
-          aria-valuetext={`Recency ${formatWeightShare(recencyShare)}, agreement ${formatWeightShare(agreementShare)}`}
+          aria-valuetext={`Recency ${formatWeightShare(recencyShare)}, AI agreement ${formatWeightShare(agreementShare)}`}
         />
       </div>
       <div className="ranking-weight-legend">
@@ -1614,11 +1547,11 @@ function RankingWeightSlider(
               step="1"
               value={Math.round(agreementShare * 100)}
               onChange={(event) => handleDirectShareChange('agreement', event.target.value)}
-              aria-label="Agreement weight percentage"
+              aria-label="AI agreement weight percentage"
             />
             <span>%</span>
           </label>
-          <span>Agreement</span>
+          <span>AI agreement</span>
         </div>
       </div>
     </div>
@@ -1721,12 +1654,6 @@ function App(): JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [emptyResultsMessage, setEmptyResultsMessage] = useState<string | null>(null)
   const [typoCorrection, setTypoCorrection] = useState<TypoCorrectionSuggestion | null>(null)
-  const [isQueryAssistOpen, setIsQueryAssistOpen] = useState<boolean>(false)
-  const [queryAssistMode, setQueryAssistMode] = useState<QueryAssistMode>('menu')
-  const [queryAssistLoading, setQueryAssistLoading] = useState<boolean>(false)
-  const [queryAssistError, setQueryAssistError] = useState<string | null>(null)
-  const [queryRewriteOptions, setQueryRewriteOptions] = useState<QueryRewriteAlternative[]>([])
-  const [queryImproveSuggestions, setQueryImproveSuggestions] = useState<string[]>([])
   const [isAboutOpen, setIsAboutOpen] = useState<boolean>(false)
   const [activeAboutTab, setActiveAboutTab] = useState<InputMode>('stance')
   const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false)
@@ -1751,7 +1678,6 @@ function App(): JSX.Element {
   const resultsSectionRef = useRef<HTMLDivElement | null>(null)
   const touchStartYRef = useRef<number | null>(null)
   const resultsOverviewRequestIdRef = useRef<number>(0)
-  const queryAssistRequestIdRef = useRef<number>(0)
   const lastAppliedFiltersRef = useRef<{
     yearStart: number | null
     yearEnd: number | null
@@ -2102,18 +2028,6 @@ function App(): JSX.Element {
   ])
 
   useEffect(() => {
-    queryAssistRequestIdRef.current += 1
-    if (inputMode !== 'stance') {
-      setIsQueryAssistOpen(false)
-    }
-    setQueryAssistLoading(false)
-    setQueryAssistError(null)
-    setQueryRewriteOptions([])
-    setQueryImproveSuggestions([])
-    setQueryAssistMode('menu')
-  }, [inputMode, opinion, retrievalModel, topic])
-
-  useEffect(() => {
     if (inputMode !== 'essay') {
       return
     }
@@ -2141,7 +2055,6 @@ function App(): JSX.Element {
       setIsAboutOpen(false)
       setIsFilterOpen(false)
       setIsSettingsOpen(false)
-      setIsQueryAssistOpen(false)
       setSettingsFocusTarget(null)
     }
 
@@ -2293,7 +2206,6 @@ function App(): JSX.Element {
   const trimmedEssayText = searchTerm.trim()
   const trimmedTopic = topic.trim()
   const trimmedOpinion = opinion.trim()
-  const hasQueryAssistInput = trimmedTopic !== '' || trimmedOpinion !== ''
   const trimmedCustomEssayThesis = essayCustomThesis.trim()
   const canSearchStance = inputMode === 'stance' && trimmedTopic !== '' && trimmedOpinion !== ''
   const canAnalyzeEssay = inputMode === 'essay' && trimmedEssayText !== ''
@@ -2323,14 +2235,6 @@ function App(): JSX.Element {
   const canUseChunking = canUseLlmAgreement && supportedChunkingModes.includes('semantic')
   const canToggleSvd = canUseSvd && canUseTfidf
   const isLexicalSearchMode = retrievalModel === 'tfidf'
-  const queryAssistDisabledReason = !hasQueryAssistInput
-    ? 'Add a topic or stance to use AI query help.'
-    : (useLlm !== true
-      ? 'AI query help is turned off in the backend config.'
-      : (!llmAgreementAvailable
-        ? 'AI query help needs SPARK_API_KEY or API_KEY in your backend environment.'
-        : ''))
-  const canUseQueryAssist = queryAssistDisabledReason === ''
   const activeWordsToAvoid = isLexicalSearchMode ? wordsToAvoid : []
   const activeWordsToAvoidKey = activeWordsToAvoid.join('\u0000')
   const currentAutoRerankThreshold = autoRerankThresholds[retrievalModel]
@@ -2903,7 +2807,7 @@ function App(): JSX.Element {
       const data = await readApiJson<ResultsOverview>(response)
       if (resultsOverviewRequestIdRef.current !== requestId) return
       if (!data || typeof data.overview !== 'string' || data.overview.trim() === '') {
-        throw new Error('Invalid response from the results overview API.')
+        throw new Error('Invalid response from the AI overview API.')
       }
 
       setResultsOverview({
@@ -2922,7 +2826,7 @@ function App(): JSX.Element {
       if (resultsOverviewRequestIdRef.current !== requestId) return
       console.error('Results overview failed:', fetchError)
       setResultsOverview(null)
-      setResultsOverviewError(fetchError instanceof Error ? fetchError.message : 'Results overview failed.')
+      setResultsOverviewError(fetchError instanceof Error ? fetchError.message : 'AI overview failed.')
     } finally {
       if (resultsOverviewRequestIdRef.current === requestId) {
         setResultsOverviewLoading(false)
@@ -2951,12 +2855,12 @@ function App(): JSX.Element {
     if (!question || resultsChatLoading) return
 
     if (useLlm !== true) {
-      setResultsChatError('Results chat is turned off in the backend config.')
+      setResultsChatError('AI results chat is turned off in the backend config.')
       return
     }
 
     if (!llmAgreementAvailable) {
-      setResultsChatError('Results chat needs SPARK_API_KEY or API_KEY in your backend environment.')
+      setResultsChatError('AI results chat needs SPARK_API_KEY or API_KEY in your backend environment.')
       return
     }
 
@@ -2997,7 +2901,7 @@ function App(): JSX.Element {
 
       const data = await readApiJson<ResultsChatResponse>(response)
       if (!data || typeof data.answer !== 'string' || data.answer.trim() === '') {
-        throw new Error('Invalid response from the results chat API.')
+        throw new Error('Invalid response from the AI results chat API.')
       }
 
       setResultsChatMessages([
@@ -3013,75 +2917,10 @@ function App(): JSX.Element {
     } catch (fetchError) {
       console.error('Results chat failed:', fetchError)
       setResultsChatMessages(nextMessages)
-      setResultsChatError(fetchError instanceof Error ? fetchError.message : 'Results chat failed.')
+      setResultsChatError(fetchError instanceof Error ? fetchError.message : 'AI results chat failed.')
     } finally {
       setResultsChatLoading(false)
     }
-  }
-
-  const handleToggleQueryAssist = (): void => {
-    if (!canUseQueryAssist) return
-    setIsQueryAssistOpen(currentOpen => !currentOpen)
-  }
-
-  const requestQueryAssist = async (nextMode: Exclude<QueryAssistMode, 'menu'>): Promise<void> => {
-    if (!canUseQueryAssist || queryAssistLoading) return
-
-    const requestId = queryAssistRequestIdRef.current + 1
-    queryAssistRequestIdRef.current = requestId
-    setQueryAssistMode(nextMode)
-    setQueryAssistLoading(true)
-    setQueryAssistError(null)
-    setQueryRewriteOptions([])
-    setQueryImproveSuggestions([])
-
-    try {
-      const response = await fetch('/api/llm/query-help', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          action: nextMode === 'rewrite' ? 'rewrite' : 'suggest',
-          topic: trimmedTopic,
-          opinion: trimmedOpinion,
-          retrieval_model: retrievalModel,
-        }),
-      })
-
-      const data = await readApiJson<QueryHelpResponse>(response)
-      if (queryAssistRequestIdRef.current !== requestId) return
-
-      if (nextMode === 'rewrite') {
-        const alternatives = normalizeQueryRewriteAlternatives(data.alternatives)
-        if (alternatives.length === 0) {
-          throw new Error('No query alternatives were returned.')
-        }
-        setQueryRewriteOptions(alternatives)
-        return
-      }
-
-      const suggestions = normalizeQueryImproveSuggestions(data.suggestions)
-      if (suggestions.length === 0) {
-        throw new Error('No query suggestions were returned.')
-      }
-      setQueryImproveSuggestions(suggestions)
-    } catch (fetchError) {
-      if (queryAssistRequestIdRef.current !== requestId) return
-      console.error('Query help failed:', fetchError)
-      setQueryAssistError(fetchError instanceof Error ? fetchError.message : 'Query help failed.')
-    } finally {
-      if (queryAssistRequestIdRef.current === requestId) {
-        setQueryAssistLoading(false)
-      }
-    }
-  }
-
-  const handleApplyQueryRewrite = (alternative: QueryRewriteAlternative): void => {
-    setTopic(alternative.topic)
-    setOpinion(alternative.opinion)
-    setTypoCorrection(null)
-    setIsQueryAssistOpen(false)
   }
 
   const handleEssaySearch = (value: string): void => {
@@ -3634,9 +3473,9 @@ function App(): JSX.Element {
     const totalCount = article.llm_chunk_count ?? 0
     const chunkNoun = getLlmChunkNoun(article)
     if (relatedCount > 0 && totalCount > 0) {
-      return `Expand to inspect the strongest ${Math.min(relatedCount, article.llm_relevant_paragraphs?.length ?? relatedCount)} of ${relatedCount} related ${chunkNoun}.`
+      return `Expand to inspect the strongest ${Math.min(relatedCount, article.llm_relevant_paragraphs?.length ?? relatedCount)} of ${relatedCount} ${chunkNoun} selected by AI.`
     }
-    return `Expand to inspect the ${chunkNoun} behind this LLM score.`
+    return `Expand to inspect the ${chunkNoun} behind this AI score.`
   }
   const paragraphKey = (
     article: Article,
@@ -3822,6 +3661,22 @@ function App(): JSX.Element {
     return `This article is on your topic and was compared against your statement.${recencyNote}`
   }
 
+  const getOverviewHint = (article: Article): string => {
+    const hasThesis = Boolean(article.thesis_sentence)
+    const hasSupport = Boolean(article.support_sentences && article.support_sentences.length > 0)
+
+    if (hasThesis && hasSupport) {
+      return 'Expand to see the thesis and support sentences.'
+    }
+    if (hasThesis) {
+      return 'Expand to see the thesis sentence.'
+    }
+    if (hasSupport) {
+      return 'Expand to see the support sentences.'
+    }
+    return 'Expand to see the article overview.'
+  }
+
   const getRankingExplanationKey = (article: Article): string => String(article.id)
 
   const getRankingExplanationState = (article: Article): {
@@ -3895,20 +3750,18 @@ function App(): JSX.Element {
     }))
   }
 
-  const requestSvdDimensionLabels = async (article: Article): Promise<SvdDimensionLabelMap> => {
+  const requestSvdDimensionLabels = async (article: Article): Promise<void> => {
     const currentState = getSvdDimensionLabelState(article)
-    if (currentState.loading || Object.keys(currentState.labels).length > 0) {
-      return currentState.labels
-    }
+    if (currentState.loading || Object.keys(currentState.labels).length > 0) return
 
     const dimensions = getSvdDimensionsForLabeling(article)
-    if (dimensions.length === 0) return currentState.labels
+    if (dimensions.length === 0) return
 
     if (useLlm !== true) {
       setSvdDimensionLabelState(article, {
-        error: 'LLM labels are turned off in the backend config.',
+        error: 'AI concept labels are turned off in the backend config.',
       })
-      return currentState.labels
+      return
     }
 
     setSvdDimensionLabelState(article, {
@@ -3937,7 +3790,7 @@ function App(): JSX.Element {
         }
       }
       if (Object.keys(nextLabels).length === 0) {
-        throw new Error('No concept labels were returned.')
+        throw new Error('No AI concept labels were returned.')
       }
 
       setSvdDimensionLabelState(article, {
@@ -3945,13 +3798,11 @@ function App(): JSX.Element {
         error: null,
         labels: nextLabels,
       })
-      return nextLabels
     } catch (fetchError) {
       setSvdDimensionLabelState(article, {
         loading: false,
-        error: fetchError instanceof Error ? fetchError.message : 'SVD concept labeling failed.',
+        error: fetchError instanceof Error ? fetchError.message : 'AI concept labeling failed.',
       })
-      return currentState.labels
     }
   }
 
@@ -3980,11 +3831,6 @@ function App(): JSX.Element {
     }
 
     try {
-      const currentLabelState = getSvdDimensionLabelState(article)
-      const svdDimensionLabels = Object.keys(currentLabelState.labels).length > 0
-        ? currentLabelState.labels
-        : await requestSvdDimensionLabels(article)
-
       const response = await fetch('/api/llm/explain-ranking', {
         method: 'POST',
         headers: {
@@ -3995,13 +3841,12 @@ function App(): JSX.Element {
           article,
           position: rank,
           query_svd_dimensions: querySvdDimensions,
-          svd_dimension_labels: svdDimensionLabels,
         }),
       })
 
       const data = await readApiJson<{ explanation?: string }>(response)
       if (!data || typeof data.explanation !== 'string' || data.explanation.trim() === '') {
-        throw new Error('Invalid response from the ranking explanation API.')
+        throw new Error('Invalid response from the AI ranking explanation API.')
       }
 
       setRankingExplanationState(article, {
@@ -4011,9 +3856,34 @@ function App(): JSX.Element {
     } catch (fetchError) {
       setRankingExplanationState(article, {
         loading: false,
-        error: fetchError instanceof Error ? fetchError.message : 'Ranking explanation failed.',
+        error: fetchError instanceof Error ? fetchError.message : 'AI ranking explanation failed.',
       })
     }
+  }
+
+  const getSvdExplainabilityHint = (article: Article): string => {
+    const queryChartCount = article.svd_query_chart_dimensions?.length ?? 0
+    const sharedDimensionCount = article.svd_chart_dimensions?.length ?? 0
+    const articleDimensionCount = article.svd_dimensions?.length ?? 0
+    if (queryChartCount > 0 && sharedDimensionCount > 0 && articleDimensionCount > 0) {
+      return `Expand to compare this article against the query concepts, the corpus concepts, and its top ${articleDimensionCount} signed concepts.`
+    }
+    if (queryChartCount > 0 && articleDimensionCount > 0) {
+      return `Expand to compare this article against the query concepts and inspect its top ${articleDimensionCount} signed concepts.`
+    }
+    if (sharedDimensionCount > 0 && articleDimensionCount > 0) {
+      return `Expand to compare this article on ${sharedDimensionCount} corpus concepts and inspect its top ${articleDimensionCount} signed concepts.`
+    }
+    if (queryChartCount > 0) {
+      return `Expand to compare this article against the query's top ${queryChartCount} concepts.`
+    }
+    if (sharedDimensionCount > 0) {
+      return `Expand to compare this article on ${sharedDimensionCount} shared corpus concepts.`
+    }
+    if (articleDimensionCount > 0) {
+      return `Expand to inspect this article's top ${articleDimensionCount} signed latent concepts.`
+    }
+    return 'Expand to inspect the latent concepts behind this match.'
   }
 
   const resultsDescription = useMemo(() => {
@@ -4163,17 +4033,17 @@ function App(): JSX.Element {
 
                 <div className="top-search-mode-group">
                   <div className="top-search-mode-heading">
-                    <span>Stance Agreement Search Mode</span>
+                    <span>AI Agreement Search Mode</span>
                     <button
                       type="button"
                       className="top-search-mode-help"
                       onClick={() => openSettingsAt('agreement-scorer')}
-                      aria-label="Open stance agreement mode settings"
+                      aria-label="Open AI agreement mode settings"
                     >
                       ?
                     </button>
                   </div>
-                  <div className="top-search-mode-segments" role="group" aria-label="Stance agreement search mode">
+                  <div className="top-search-mode-segments" role="group" aria-label="AI agreement search mode">
                     <button
                       type="button"
                       className={`top-search-mode-segment ${effectiveStanceMethod === 'nli' ? 'active' : ''}`}
@@ -4181,7 +4051,7 @@ function App(): JSX.Element {
                       onClick={() => handleAgreementSearchModeChange('nli')}
                       disabled={!canUseNliAgreement}
                     >
-                      Fast
+                      AI NLI
                     </button>
                     <button
                       type="button"
@@ -4190,7 +4060,7 @@ function App(): JSX.Element {
                       onClick={() => handleAgreementSearchModeChange('llm')}
                       disabled={!canUseLlmAgreement}
                     >
-                      Enhanced
+                      Spark AI
                     </button>
                   </div>
                 </div>
@@ -4240,7 +4110,7 @@ function App(): JSX.Element {
                         <span className="essay-progress-note">
                           {isEssayStepTwoAvailable
                             ? 'Pick a sentence or write your own thesis.'
-                            : 'Extract thesis options to unlock this step.'}
+                            : 'Extract AI thesis options to unlock this step.'}
                         </span>
                       </div>
                     </button>
@@ -4333,21 +4203,6 @@ function App(): JSX.Element {
                 </span>
               )}
             </div>
-
-            {isSearchStageVisible && inputMode === 'stance' && (
-              <div className="query-assist-shell">
-                <button
-                  type="button"
-                  className="query-assist-link"
-                  onClick={handleToggleQueryAssist}
-                  disabled={!canUseQueryAssist}
-                  aria-expanded={isQueryAssistOpen}
-                  title={queryAssistDisabledReason || undefined}
-                >
-                  Help me improve my query with AI.
-                </button>
-              </div>
-            )}
           </div>
 
           {inputMode === 'essay' && isSearchStageVisible && (
@@ -4373,7 +4228,7 @@ function App(): JSX.Element {
                     <div className="essay-intake-tools">
                       <p className="essay-upload-hint">
                         {importedPdfName
-                          ? `Text imported from ${importedPdfName}. You can keep editing it here before ${isLlmAgreementSelected ? 'searching' : 'extracting thesis options'}.`
+                          ? `Text imported from ${importedPdfName}. You can keep editing it here before ${isLlmAgreementSelected ? 'searching with AI' : 'extracting AI thesis options'}.`
                           : 'Have a PDF already? Upload it and we’ll drop the extracted text into this editor so you can revise it.'}
                       </p>
                       <label
@@ -4402,8 +4257,8 @@ function App(): JSX.Element {
                       disabled={!canAnalyzeEssay || loading}
                     >
                       {isLlmAgreementSelected
-                        ? (loading ? 'Searching...' : 'Search')
-                        : ((loading && essayWorkflowStep === 1) ? 'Extracting thesis...' : 'Extract thesis options')}
+                        ? (loading ? 'Searching with AI...' : 'Search with AI')
+                        : ((loading && essayWorkflowStep === 1) ? 'Extracting AI thesis options...' : 'Extract thesis options with AI')}
                     </button>
                   </div>
                 </>
@@ -4415,10 +4270,10 @@ function App(): JSX.Element {
                   <div className="essay-option-strip">
                     <div className="essay-option-strip-header">
                       <div>
-                        <p className="essay-option-strip-title">Thesis options</p>
+                        <p className="essay-option-strip-title">AI thesis options</p>
                         <p className="essay-option-strip-note">
                           {essayCandidates.length > 0
-                            ? 'Select a suggestion or enter your own thesis.'
+                            ? 'Select an AI suggestion or enter your own thesis.'
                             : 'Type your own thesis to continue.'}
                         </p>
                       </div>
@@ -4519,7 +4374,7 @@ function App(): JSX.Element {
                       onClick={handleSubmitEssay}
                       disabled={!canSubmitEssay || loading}
                     >
-                      {(loading && essayWorkflowStep === 2) ? 'Searching...' : 'Search'}
+                      {(loading && essayWorkflowStep === 2) ? 'Searching with AI...' : 'Search with AI'}
                     </button>
                   </div>
                 </div>
@@ -4535,7 +4390,7 @@ function App(): JSX.Element {
                 onClick={() => void handleSubmitStance()}
                 disabled={!canSearchStance || loading}
               >
-                Search
+                Search with AI
               </button>
             )}
             <button
@@ -4601,7 +4456,7 @@ function App(): JSX.Element {
 
             {loading && (
               <div className="results-thinking-card" role="status" aria-live="polite">
-                <p className="results-thinking-label">Thinking</p>
+                <p className="results-thinking-label">Searching with AI</p>
                 <div className="results-thinking-dots" aria-hidden="true">
                   <span />
                   <span />
@@ -4767,7 +4622,7 @@ function App(): JSX.Element {
                                   onClick={() => handleExplainRanking(article, activeArticleRank)}
                                   disabled={getRankingExplanationState(article).loading}
                                 >
-                                  {getRankingExplanationState(article).loading ? 'Explaining…' : 'Explain ranking with AI'}
+                                  {getRankingExplanationState(article).loading ? 'Explaining with AI…' : 'Explain ranking with AI'}
                                 </button>
                               </div>
                             )}
@@ -4858,9 +4713,9 @@ function App(): JSX.Element {
                                 <div className="match-metric-card source agreement">
                                   <div className="match-metric-header">
                                     <div className="match-metric-heading">
-                                      <div className="match-metric-label">Agreement</div>
+                                      <div className="match-metric-label">AI agreement</div>
                                       {renderMetricInfo(
-                                        'Agreement',
+                                        'AI agreement',
                                         `${articleTooltipBase}-agreement-help`,
                                         'How closely the article\'s main claim seems to align with your view.',
                                       )}
@@ -4877,7 +4732,7 @@ function App(): JSX.Element {
 
                                 {hasStanceSignals(article) && (
                                   <div className="agreement-hover-panel">
-                                    <div className="agreement-hover-title">Agreement is based on</div>
+                                    <div className="agreement-hover-title">AI agreement is based on</div>
                                     <div className="stance-read-panel">
                                       <div className="stance-read-grid">
                                         <div className="stance-read-row">
@@ -4926,7 +4781,7 @@ function App(): JSX.Element {
                         <details className="content-disclosure paragraph-evidence-disclosure">
                           <summary className="content-disclosure-summary">
                             <span className="content-disclosure-copy">
-                              <span className="content-disclosure-title">{`Relevant ${getLlmChunkNoun(article)}`}</span>
+                              <span className="content-disclosure-title">{`AI-selected ${getLlmChunkNoun(article)}`}</span>
                               <span className="content-disclosure-hint">{getParagraphEvidenceHint(article)}</span>
                             </span>
                             <span className="content-disclosure-status" aria-hidden="true" />
@@ -4954,6 +4809,7 @@ function App(): JSX.Element {
                           <summary className="content-disclosure-summary">
                             <span className="content-disclosure-copy">
                               <span className="content-disclosure-title">Latent concepts</span>
+                              <span className="content-disclosure-hint">{getSvdExplainabilityHint(article)}</span>
                             </span>
                             <span className="content-disclosure-status" aria-hidden="true" />
                           </summary>
@@ -4962,10 +4818,10 @@ function App(): JSX.Element {
                             {(svdDimensionLabelState.loading || svdDimensionLabelState.error) && (
                               <p
                                 className={`svd-section-copy ${svdDimensionLabelState.loading ? 'svd-label-loading' : ''}`}
-                                data-text={svdDimensionLabelState.loading ? 'Labeling latent concepts with the LLM...' : undefined}
+                                data-text={svdDimensionLabelState.loading ? 'Labeling latent concepts with AI...' : undefined}
                               >
                                 {svdDimensionLabelState.loading
-                                  ? 'Labeling latent concepts with the LLM...'
+                                  ? 'Labeling latent concepts with AI...'
                                   : svdDimensionLabelState.error}
                               </p>
                             )}
@@ -5039,123 +4895,12 @@ function App(): JSX.Element {
                         </details>
                       )}
 
-                      {article.vader_sentiment && (
-                        <details className="content-disclosure sentiment-disclosure">
-                          <summary className="content-disclosure-summary">
-                            <span className="content-disclosure-copy">
-                              <span className="content-disclosure-title">Sentiment</span>
-                            </span>
-                            <span className="content-disclosure-status" aria-hidden="true" />
-                          </summary>
-                          <div className="sentiment-panel">
-                            <div className="sentiment-score-row">
-                              <div className="sentiment-score-copy">
-                                <span className={`sentiment-label ${article.vader_sentiment.label}`}>
-                                  {formatSentimentLabel(article.vader_sentiment.label)}
-                                </span>
-                                {article.vader_sentiment.tone_strength && (
-                                  <span className={`sentiment-strength ${article.vader_sentiment.tone_strength}`}>
-                                    {formatToneStrength(article.vader_sentiment.tone_strength)} tone
-                                  </span>
-                                )}
-                              </div>
-                              <span className="sentiment-compound">
-                                {formatVaderScore(article.vader_sentiment.compound)}
-                              </span>
-                            </div>
-                            <div
-                              className="sentiment-meter"
-                              aria-label={`VADER sentiment: ${article.vader_sentiment.label}, compound ${formatVaderScore(article.vader_sentiment.compound)}`}
-                            >
-                              <span
-                                className="sentiment-meter-segment negative"
-                                style={{ width: formatSentimentPercent(article.vader_sentiment.negative) }}
-                              />
-                              <span
-                                className="sentiment-meter-segment neutral"
-                                style={{ width: formatSentimentPercent(article.vader_sentiment.neutral) }}
-                              />
-                              <span
-                                className="sentiment-meter-segment positive"
-                                style={{ width: formatSentimentPercent(article.vader_sentiment.positive) }}
-                              />
-                            </div>
-                            <div className="sentiment-breakdown">
-                              <span>Negative {formatSentimentPercent(article.vader_sentiment.negative)}</span>
-                              <span>Neutral {formatSentimentPercent(article.vader_sentiment.neutral)}</span>
-                              <span>Positive {formatSentimentPercent(article.vader_sentiment.positive)}</span>
-                            </div>
-
-                            {article.vader_sentiment.text_scores && (
-                              <div className="sentiment-comparison">
-                                <div className="sentiment-section-title">Title vs full article</div>
-                                <div className="sentiment-source-grid">
-                                  {[
-                                    { label: 'Title', score: article.vader_sentiment.text_scores.title },
-                                    { label: 'Summary', score: article.vader_sentiment.text_scores.summary },
-                                    { label: 'Full article', score: article.vader_sentiment.text_scores.article },
-                                  ].map((item) => {
-                                    if (!item.score) return null
-                                    return (
-                                      <div key={item.label} className="sentiment-source-card">
-                                        <span>{item.label}</span>
-                                        <strong className={item.score.label}>
-                                          {formatVaderScore(item.score.compound)}
-                                        </strong>
-                                        <small>{formatSentimentLabel(item.score.label)}</small>
-                                      </div>
-                                    )
-                                  })}
-                                </div>
-                              </div>
-                            )}
-
-                            {(
-                              (article.vader_sentiment.snippets?.negative?.length ?? 0) > 0 ||
-                              (article.vader_sentiment.snippets?.positive?.length ?? 0) > 0
-                            ) && (
-                                <div className="sentiment-evidence">
-                                  {[
-                                    {
-                                      key: 'negative',
-                                      title: 'Most negative sentences',
-                                      snippets: article.vader_sentiment.snippets?.negative ?? [],
-                                    },
-                                    {
-                                      key: 'positive',
-                                      title: 'Most positive sentences',
-                                      snippets: article.vader_sentiment.snippets?.positive ?? [],
-                                    },
-                                  ].map((group) => (
-                                    group.snippets.length > 0 && (
-                                      <div key={group.key} className={`sentiment-evidence-group ${group.key}`}>
-                                        <div className="sentiment-section-title">{group.title}</div>
-                                        <ol className="sentiment-snippet-list">
-                                          {group.snippets.map((snippet, index) => (
-                                            <li key={`${article.id}-sentiment-${group.key}-${index}`}>
-                                              <span>{snippet.text}</span>
-                                              <strong>{formatVaderScore(snippet.compound)}</strong>
-                                            </li>
-                                          ))}
-                                        </ol>
-                                      </div>
-                                    )
-                                  ))}
-                                </div>
-                              )}
-
-                            <div className="sentiment-ranking-note">
-                              Display only. Not used for ranking.
-                            </div>
-                          </div>
-                        </details>
-                      )}
-
                       {(article.thesis_sentence || (article.support_sentences && article.support_sentences.length > 0)) && (
                         <details className="content-disclosure">
                           <summary className="content-disclosure-summary">
                             <span className="content-disclosure-copy">
                               <span className="content-disclosure-title">Overview</span>
+                              <span className="content-disclosure-hint">{getOverviewHint(article)}</span>
                             </span>
                             <span className="content-disclosure-status" aria-hidden="true" />
                           </summary>
@@ -5229,9 +4974,9 @@ function App(): JSX.Element {
                   <details className="content-disclosure irrelevant-results-disclosure">
                     <summary className="content-disclosure-summary">
                       <span className="content-disclosure-copy">
-                        <span className="content-disclosure-title">Hidden as unrelated</span>
+                        <span className="content-disclosure-title">Hidden by AI as unrelated</span>
                         <span className="content-disclosure-hint">
-                          {`${llmIrrelevantArticles.length} ${llmIrrelevantArticles.length === 1 ? 'article was' : 'articles were'} marked completely unrelated by the LLM. Expand to inspect.`}
+                          {`${llmIrrelevantArticles.length} ${llmIrrelevantArticles.length === 1 ? 'article was' : 'articles were'} marked completely unrelated by AI. Expand to inspect.`}
                         </span>
                       </span>
                       <span className="content-disclosure-status" aria-hidden="true" />
@@ -5278,135 +5023,21 @@ function App(): JSX.Element {
 
       {shouldShowEssayShortcut && <Chat onSearchTerm={handleEssaySearch} />}
 
-      {isQueryAssistOpen && (
-        <div
-          className="modal-backdrop"
-          onClick={() => setIsQueryAssistOpen(false)}
-          role="presentation"
-        >
-          <div
-            className="modal-card query-assist-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="query-assist-modal-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="modal-header">
-              <div>
-                <p className="modal-eyebrow">AI query help</p>
-                <h3 id="query-assist-modal-title">Improve your query</h3>
-              </div>
-              <button
-                type="button"
-                className="modal-close"
-                onClick={() => setIsQueryAssistOpen(false)}
-                aria-label="Close AI query help popup"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="query-assist-modal-body">
-              {queryAssistMode === 'menu' && (
-                <div className="query-assist-choice-grid">
-                  <button
-                    type="button"
-                    className="query-assist-choice"
-                    onClick={() => void requestQueryAssist('rewrite')}
-                    disabled={queryAssistLoading}
-                  >
-                    Let the AI rewrite the query for me
-                  </button>
-                  <button
-                    type="button"
-                    className="query-assist-choice"
-                    onClick={() => void requestQueryAssist('suggestions')}
-                    disabled={queryAssistLoading}
-                  >
-                    Tell me how to improve my query
-                  </button>
-                </div>
-              )}
-
-              {queryAssistLoading && (
-                <div className="query-assist-thinking-card" role="status" aria-live="polite">
-                  <p className="results-thinking-label">Thinking</p>
-                  <div className="results-thinking-dots" aria-hidden="true">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <p className="query-assist-thinking-copy">Improving your query...</p>
-                </div>
-              )}
-
-              {!queryAssistLoading && queryAssistError && (
-                <div className="query-assist-error" role="alert">
-                  {queryAssistError}
-                </div>
-              )}
-
-              {!queryAssistLoading && queryAssistMode === 'rewrite' && queryRewriteOptions.length > 0 && (
-                <div className="query-rewrite-list">
-                  {queryRewriteOptions.map((alternative, index) => (
-                    <button
-                      key={`${alternative.topic}-${alternative.opinion}`}
-                      type="button"
-                      className="query-rewrite-option"
-                      onClick={() => handleApplyQueryRewrite(alternative)}
-                    >
-                      <span className="query-rewrite-option-label">{`Option ${index + 1}`}</span>
-                      <span className="query-rewrite-query">{alternative.query}</span>
-                      {alternative.rationale && (
-                        <span className="query-rewrite-rationale">{alternative.rationale}</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {!queryAssistLoading && queryAssistMode === 'suggestions' && queryImproveSuggestions.length > 0 && (
-                <ul className="query-suggestion-list">
-                  {queryImproveSuggestions.map((suggestion) => (
-                    <li key={suggestion}>{suggestion}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {queryAssistMode !== 'menu' && !queryAssistLoading && (
-              <button
-                type="button"
-                className="query-assist-back"
-                onClick={() => {
-                  setQueryAssistMode('menu')
-                  setQueryAssistError(null)
-                  setQueryRewriteOptions([])
-                  setQueryImproveSuggestions([])
-                }}
-              >
-                Back
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
       {hasSubmittedSearch && !loading && !error && articles.length > 0 && (
         <aside
           className={`results-chat-popout ${isResultsChatMinimized ? 'minimized' : 'open'}`}
-          aria-label="Ask questions about these results"
+          aria-label="Ask AI questions about these results"
         >
           {isResultsChatMinimized ? (
             <button
               type="button"
               className="results-chat-launcher"
               onClick={() => setIsResultsChatMinimized(false)}
-              aria-label="Open results chat"
+              aria-label="Open AI results chat"
             >
               <span className="results-chat-launcher-mark" aria-hidden="true">?</span>
               <span className="results-chat-launcher-copy">
-                <span>Ask AI</span>
+                <span>Ask AI about the results</span>
                 {resultsChatMessages.length > 0 && (
                   <span>{`${resultsChatMessages.length} messages`}</span>
                 )}
@@ -5417,13 +5048,13 @@ function App(): JSX.Element {
               <div className="results-chat-header">
                 <div>
                   <p className="results-overview-eyebrow">Ask AI about the results</p>
-                  <h3>Question the retrieved articles</h3>
+                  <h3>Question the retrieved articles with AI</h3>
                 </div>
                 <button
                   type="button"
                   className="results-chat-minimize-button"
                   onClick={() => setIsResultsChatMinimized(true)}
-                  aria-label="Minimize results chat"
+                  aria-label="Minimize AI results chat"
                 >
                   _
                 </button>
@@ -5449,7 +5080,7 @@ function App(): JSX.Element {
                   </div>
                 ) : (
                   <p className="results-chat-empty">
-                    Ask what the results agree on, where they split, or which pieces best support your claim.
+                    Ask AI what the results agree on, where they split, or which pieces best support your claim.
                   </p>
                 )}
               </div>
@@ -5463,15 +5094,15 @@ function App(): JSX.Element {
                   type="text"
                   value={resultsChatInput}
                   onChange={(event) => setResultsChatInput(event.target.value)}
-                  placeholder="Ask about these results..."
-                  aria-label="Ask a question about the current results"
+                  placeholder="Ask AI about these results..."
+                  aria-label="Ask AI a question about the current results"
                   disabled={resultsChatLoading}
                 />
                 <button
                   type="submit"
                   disabled={resultsChatLoading || resultsChatInput.trim() === ''}
                 >
-                  {resultsChatLoading ? 'Asking...' : 'Ask'}
+                  {resultsChatLoading ? 'Asking AI...' : 'Ask AI'}
                 </button>
               </form>
             </section>
@@ -5634,10 +5265,10 @@ function App(): JSX.Element {
                   <section className="about-section">
                     <p className="about-section-label">Stage 2</p>
                     <p className="modal-copy">
-                      <strong>Stage 2: Stance relevance.</strong> From the candidate articles identified
+                      <strong>Stage 2: AI stance relevance.</strong> From the candidate articles identified
                       in Stage 1, we then rank them based on how they relate to your opinion.
-                      The Agreement scorer in Settings can use either DeBERTa Natural Language
-                      Inference (NLI) over each extracted article claim or Spark LLM scoring over
+                      The AI agreement scorer in Settings can use either an AI DeBERTa Natural
+                      Language Inference (NLI) model over each extracted article claim or Spark AI scoring over
                       retrieved article context. The model estimates whether each article supports,
                       contradicts, or is neutral toward your stance. If you raise the recency
                       weight in Settings, newer publication dates also contribute to the final
@@ -5650,14 +5281,14 @@ function App(): JSX.Element {
                   <section className="about-section">
                     <p className="about-section-label">Stage 1</p>
                     <p className="modal-copy">
-                      <strong>Stage 1: Essay thesis detection.</strong> We first split your essay into
-                      individual sentences using our sentence segmentation pipeline. Then we use a
-                      DeBERTa Natural Language Inference (NLI) model to compare each sentence against
+                      <strong>Stage 1: AI essay thesis detection.</strong> We first split your essay into
+                      individual sentences using our sentence segmentation pipeline. Then we use an
+                      AI DeBERTa Natural Language Inference (NLI) model to compare each sentence against
                       the hypothesis, &ldquo;This sentence is the author&apos;s main claim.&rdquo; This gives
                       each sentence a claimness score, and we present the top options so you can
                       choose the sentence that best represents your essay&apos;s central thesis, or
                       enter your own thesis wording when you want to override the suggestions.
-                      When the LLM Agreement scorer is selected, this step is skipped and the
+                      When the Spark AI agreement scorer is selected, this step is skipped and the
                       full essay is used for agreement scoring.
                     </p>
                   </section>
@@ -5676,11 +5307,11 @@ function App(): JSX.Element {
                   <section className="about-section">
                     <p className="about-section-label">Stage 3</p>
                     <p className="modal-copy">
-                      <strong>Stage 3: Agreement relevance.</strong> From the candidate articles identified
+                      <strong>Stage 3: AI agreement relevance.</strong> From the candidate articles identified
                       in Stage 2, we then rank them based on how they relate to your selected thesis
-                      for NLI or your full essay for LLM.
-                      The Agreement scorer in Settings can use either DeBERTa NLI over each
-                      extracted article claim or Spark LLM scoring over retrieved article context.
+                      with AI NLI or your full essay with Spark AI.
+                      The AI agreement scorer in Settings can use either an AI DeBERTa NLI model over each
+                      extracted article claim or Spark AI scoring over retrieved article context.
                       The model estimates whether each article supports, contradicts, or is neutral toward your position.
                       If you raise the recency weight in Settings, newer publication dates also
                       contribute to the final ranking.
@@ -6042,7 +5673,7 @@ function App(): JSX.Element {
                     ref={topicSettingsRef}
                     tabIndex={-1}
                   >
-                    <span>Search Method</span>
+                    <span>Topic relevance mode</span>
                     <div className="retrieval-model-grid">
                       {canUseTfidf && (
                         <button
@@ -6063,22 +5694,23 @@ function App(): JSX.Element {
                           disabled={!canToggleSvd}
                         >
                           <strong>Semantic</strong>
-                          <p>Truncated-SVD on TF-IDF to compare articles in latent concept space with cosine similarity.</p>
+                          <p>SVD on TF-IDF to compare articles in latent concept space.</p>
                         </button>
                       )}
                     </div>
-                
+                    <p className="setting-help-text">
+                      {retrievalModel === 'svd'
+                        ? 'Semantic mode uses truncated-SVD dimensions from the TF-IDF matrix before cosine retrieval.'
+                        : 'Lexical mode uses the original TF-IDF term vectors before cosine retrieval.'}
+                    </p>
                   </div>
 
                   <div className="weight-card full-row settings-toggle-card">
                     <div className="settings-toggle-row">
                       <div className="settings-toggle-copy">
-                        <span>Match Score Display</span>
+                        <span>Normalize topic relevance</span>
                         <p className="setting-help-text">
-                          Raw: Show the original similarity score without scaling. 
-                        </p>
-                        <p className="setting-help-text">
-                          Relative: Show results scaled within this search — the best match appears as 100%.
+                          When on, the strongest retrieved article becomes 100% topic match within the current result set. When off, the app uses the raw retrieval similarity instead.
                         </p>
                       </div>
                       <button
@@ -6088,7 +5720,7 @@ function App(): JSX.Element {
                         onClick={() => setNormalizeTopicScores(current => !current)}
                       >
                         <span className="settings-switch-label">
-                          {normalizeTopicScores ? 'Relative' : 'Raw'}
+                          {normalizeTopicScores ? 'Normalized' : 'Raw'}
                         </span>
                         <span className="retrieval-toggle-switch" aria-hidden="true">
                           <span className="retrieval-toggle-thumb" />
@@ -6105,22 +5737,22 @@ function App(): JSX.Element {
                         className={`retrieval-model-button ${rerankSelectionMode === 'manual' ? 'active' : ''}`}
                         onClick={() => setRerankSelectionMode('manual')}
                       >
-                        <strong>Fixed Number</strong>
-                        <p>Always use a set number of top matches.</p>
+                        <strong>Manual K</strong>
+                        <p>Use a fixed number of top topic matches.</p>
                       </button>
                       <button
                         type="button"
                         className={`retrieval-model-button ${rerankSelectionMode === 'automatic' ? 'active' : ''}`}
                         onClick={() => setRerankSelectionMode('automatic')}
                       >
-                        <strong>Smart Filter</strong>
-                        <p>Only articles that are at least this relevant will be considered for deeper analysis.</p>
+                        <strong>Automatic threshold</strong>
+                        <p>Only move articles forward when their raw topic relevance clears a threshold.</p>
                       </button>
                     </div>
                     {rerankSelectionMode === 'manual' ? (
                       <label className="settings-inline-field settings-range-field">
                         <div className="settings-range-header">
-                          <span>Number of top matches </span>
+                          <span>Top K</span>
                           <strong className="settings-range-value">{rerankTopK}</strong>
                         </div>
                         <input
@@ -6139,7 +5771,7 @@ function App(): JSX.Element {
                     ) : (
                       <label className="settings-inline-field settings-range-field">
                         <div className="settings-range-header">
-                          <span>{`Relevance Sensitivity (${retrievalModel === 'svd' ? 'Semantic' : 'Lexical'})`}</span>
+                          <span>{`Topic relevance threshold (${retrievalModel === 'svd' ? 'Semantic' : 'Lexical'})`}</span>
                           <strong className="settings-range-value">{formatThresholdValue(currentAutoRerankThreshold)}</strong>
                         </div>
                         <input
@@ -6159,7 +5791,7 @@ function App(): JSX.Element {
                     <p className="setting-help-text">
                       {rerankSelectionMode === 'manual'
                         ? 'How many top retrieval matches move into the agreement reranking stage.'
-                        : `Articles at or above this raw topic relevance threshold move into the agreement reranking stage, with at most ${maxAutoRerankCandidates} articles reranked.`}
+                        : `Articles at or above this raw topic relevance threshold move into the next stage, with at most ${maxAutoRerankCandidates} articles reranked.`}
                     </p>
                   </div>
                 </div>
@@ -6168,18 +5800,15 @@ function App(): JSX.Element {
               <section className="settings-stage-section">
                 <div className="settings-stage-heading">
                   <span>Stage 2</span>
-                  <h4>Agreement scoring</h4>
+                  <h4>AI agreement scoring</h4>
                 </div>
                 <div className="modal-settings-grid">
                   <div className="weight-card full-row settings-toggle-card">
                     <div className="settings-toggle-row">
                       <div className="settings-toggle-copy">
-                        <span>Semantic chunking</span>
+                        <span>AI semantic chunking</span>
                         <p className="setting-help-text">
-                          Chuncking: Break articles into smaller sections and focus only on the parts that are most relevant to your query.
-                        </p>
-                        <p className="setting-help-text">
-                          Article-level: Treat each article as a whole when scoring relevance.
+                          When on, Spark AI scores semantic chunks, averages the related chunk scores, and hides articles with no related chunks.
                         </p>
                       </div>
                       <button
@@ -6199,7 +5828,7 @@ function App(): JSX.Element {
                         disabled={!canUseChunking}
                       >
                         <span className="settings-switch-label">
-                          {useChunking ? 'Chuncking' : 'Article-level'}
+                          {useChunking ? 'Semantic' : 'Article-level'}
                         </span>
                         <span className="retrieval-toggle-switch" aria-hidden="true">
                           <span className="retrieval-toggle-thumb" />
@@ -6207,7 +5836,7 @@ function App(): JSX.Element {
                       </button>
                     </div>
                     {!llmAgreementAvailable && supportedChunkingModes.includes('semantic') && (
-                      <p className="setting-help-text">Add SPARK_API_KEY or API_KEY to enable semantic chunking.</p>
+                      <p className="setting-help-text">Add SPARK_API_KEY or API_KEY to enable AI semantic chunking.</p>
                     )}
                   </div>
 
@@ -6216,7 +5845,7 @@ function App(): JSX.Element {
                     ref={agreementSettingsRef}
                     tabIndex={-1}
                   >
-                    <span>Agreement scorer</span>
+                    <span>AI agreement scorer</span>
                     <div className="retrieval-model-grid">
                       {canUseNliAgreement && (
                         <button
@@ -6229,8 +5858,8 @@ function App(): JSX.Element {
                           }}
                           disabled={useChunking}
                         >
-                          <strong>Fast</strong>
-                          <p>{useChunking ? 'Disabled while chunking is on.' : 'Uses Natural Language Inference (DeBERTa) to compare your thesis with the article.'}</p>
+                          <strong>AI NLI</strong>
+                          <p>{useChunking ? 'Disabled while AI chunking is on.' : 'Compare the selected thesis or stance against each extracted article claim with an AI DeBERTa NLI model.'}</p>
                         </button>
                       )}
                       {supportedStanceMethods.includes('llm') && (
@@ -6244,12 +5873,21 @@ function App(): JSX.Element {
                           }}
                           disabled={!canUseLlmAgreement}
                         >
-                          <strong>Enhanced</strong>
-                          <p>Uses an LLM (gpt-oss-20b) to compare your full essay with the article.</p>
+                          <strong>Spark AI RAG</strong>
+                          <p>Send retrieved article context and your stance or full essay to Spark AI for a 0-1 agreement score.</p>
                         </button>
                       )}
                     </div>
-          
+                    <p className="setting-help-text">
+                      {stanceMethod === 'llm'
+                        ? (useChunking
+                          ? 'The final agreement meter averages Spark AI scores across semantic chunks the AI marks relevant.'
+                          : 'The final agreement meter comes from Spark AI scoring the retrieved articles against your stance, thesis, or full essay.')
+                        : 'The final agreement meter comes from local AI NLI over extracted article claims.'}
+                      {!llmAgreementAvailable && supportedStanceMethods.includes('llm')
+                        ? ' Add SPARK_API_KEY or API_KEY to enable the AI scorer.'
+                        : ''}
+                    </p>
                   </div>
                 </div>
               </section>
@@ -6274,13 +5912,13 @@ function App(): JSX.Element {
                     />
                     <div className="parameter-help-list">
                       <p className="parameter-help-item">
-                        <strong>Topic match:</strong> How closely the article matches your topic.
+                        <strong>Topic weight:</strong> how much the final score prioritizes whole-text topical similarity.
                       </p>
                       <p className="parameter-help-item">
-                        <strong>Recency:</strong> How recent the article is.
+                        <strong>AI agreement weight:</strong> how much the final score prioritizes whether the article aligns with your stance, thesis, or essay.
                       </p>
                       <p className="parameter-help-item">
-                        <strong>Agreement:</strong> How much the article supports or challenges your viewpoint.
+                        <strong>Recency weight:</strong> how much the final score rewards newer publication dates.
                       </p>
                     </div>
                   </div>
