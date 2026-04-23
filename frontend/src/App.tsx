@@ -6,6 +6,7 @@ import {
   type ChangeEvent,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type SyntheticEvent,
 } from 'react'
@@ -409,6 +410,9 @@ const readApiJson = async <T,>(response: Response): Promise<T> => {
 type ResultsOverviewSource = NonNullable<ResultsOverview['sources']>[number]
 type ResultsOverviewEvidence = NonNullable<ResultsOverview['key_evidence']>[number]
 type ResultsOverviewArgument = NonNullable<ResultsOverview['supporting_arguments']>[number]
+type ResultsOverviewCitationSegment =
+  | { type: 'text'; value: string }
+  | { type: 'sources'; sourceIndices: number[] }
 
 const normalizeResultsOverviewSourceIndices = (value: unknown): number[] => {
   const rawValues = Array.isArray(value) ? value : [value]
@@ -423,6 +427,51 @@ const normalizeResultsOverviewSourceIndices = (value: unknown): number[] => {
   })
 
   return indices
+}
+
+const resultsOverviewCitationPattern = /\[\s*(?:#|\d+(?:\s*,\s*\d+)*)\s*\]/g
+
+const parseResultsOverviewCitationIndices = (value: string): number[] => (
+  normalizeResultsOverviewSourceIndices(value.match(/\d+/g) ?? [])
+)
+
+const getResultsOverviewCitationSegments = (
+  value: string,
+): {
+  segments: ResultsOverviewCitationSegment[]
+  sourceIndices: number[]
+} => {
+  const segments: ResultsOverviewCitationSegment[] = []
+  const sourceIndices: number[] = []
+  const seenSourceIndices = new Set<number>()
+  let currentIndex = 0
+
+  for (const match of value.matchAll(resultsOverviewCitationPattern)) {
+    const matchIndex = match.index ?? 0
+    const textBeforeCitation = value.slice(currentIndex, matchIndex).replace(/\s+$/u, '')
+    if (textBeforeCitation) {
+      segments.push({ type: 'text', value: textBeforeCitation })
+    }
+
+    const citationSourceIndices = parseResultsOverviewCitationIndices(match[0])
+    if (citationSourceIndices.length > 0) {
+      segments.push({ type: 'sources', sourceIndices: citationSourceIndices })
+    }
+
+    citationSourceIndices.forEach((sourceIndex) => {
+      if (seenSourceIndices.has(sourceIndex)) return
+      sourceIndices.push(sourceIndex)
+      seenSourceIndices.add(sourceIndex)
+    })
+    currentIndex = matchIndex + match[0].length
+  }
+
+  const textAfterCitations = value.slice(currentIndex)
+  if (textAfterCitations) {
+    segments.push({ type: 'text', value: textAfterCitations })
+  }
+
+  return { segments, sourceIndices }
 }
 
 const normalizeResultsOverviewEvidence = (
@@ -533,6 +582,85 @@ const normalizeResultsOverviewSources = (value: unknown): ResultsOverviewSource[
   }, [])
 }
 
+const easeOutCubic = (progress: number): number => 1 - (1 - progress) ** 3
+
+let resultsOverviewScrollAnimationFrame: number | null = null
+
+const cancelResultsOverviewScrollAnimation = (): void => {
+  if (typeof window === 'undefined' || resultsOverviewScrollAnimationFrame === null) return
+
+  window.cancelAnimationFrame(resultsOverviewScrollAnimationFrame)
+  resultsOverviewScrollAnimationFrame = null
+}
+
+const animateWindowScrollTo = (targetTop: number, durationMs = 380): void => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return
+
+  cancelResultsOverviewScrollAnimation()
+
+  const startTop = window.scrollY
+  const scrollHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)
+  const maxTop = Math.max(0, scrollHeight - window.innerHeight)
+  const resolvedTargetTop = Math.max(0, Math.min(targetTop, maxTop))
+  const distance = resolvedTargetTop - startTop
+
+  if (Math.abs(distance) < 1) {
+    window.scrollTo({ top: resolvedTargetTop, behavior: 'auto' })
+    return
+  }
+
+  const startTime = window.performance.now()
+
+  const step = (currentTime: number): void => {
+    const elapsed = currentTime - startTime
+    const progress = Math.min(1, elapsed / durationMs)
+    const nextTop = startTop + distance * easeOutCubic(progress)
+
+    window.scrollTo({ top: nextTop, behavior: 'auto' })
+
+    if (progress < 1) {
+      resultsOverviewScrollAnimationFrame = window.requestAnimationFrame(step)
+    } else {
+      resultsOverviewScrollAnimationFrame = null
+    }
+  }
+
+  resultsOverviewScrollAnimationFrame = window.requestAnimationFrame(step)
+}
+
+const scrollToResultsOverviewSource = (resultIndex: number): boolean => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return false
+
+  const target = document.getElementById(`result-${resultIndex}`)
+  if (!target) return false
+
+  const targetTop = window.scrollY + target.getBoundingClientRect().top - 16
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  if (prefersReducedMotion) {
+    cancelResultsOverviewScrollAnimation()
+    window.scrollTo({ top: Math.max(0, targetTop), behavior: 'auto' })
+  } else {
+    animateWindowScrollTo(targetTop)
+  }
+
+  const nextHash = `#result-${resultIndex}`
+  if (window.location.hash !== nextHash) {
+    window.history.pushState(null, '', `${window.location.pathname}${window.location.search}${nextHash}`)
+  }
+
+  return true
+}
+
+const handleResultsOverviewSourceClick = (
+  event: ReactMouseEvent<HTMLAnchorElement>,
+  resultIndex: number,
+): void => {
+  if (!scrollToResultsOverviewSource(resultIndex)) return
+
+  event.preventDefault()
+}
+
 const ResultsOverviewSources = ({
   sourceIndices,
   sources,
@@ -561,12 +689,48 @@ const ResultsOverviewSources = ({
             className="results-overview-source-chip"
             href={`#result-${source.result_index}`}
             title={source.title}
+            onClick={(event) => handleResultsOverviewSourceClick(event, source.result_index)}
           >
             {label}
           </a>
         )
       })}
     </span>
+  )
+}
+
+const ResultsOverviewCitedText = ({
+  text,
+  sourceIndices,
+  sources,
+}: {
+  text: string
+  sourceIndices?: number[] | null
+  sources?: ResultsOverviewSource[] | null
+}): JSX.Element => {
+  const { segments, sourceIndices: inlineSourceIndices } = getResultsOverviewCitationSegments(text)
+  const inlineSourceIndexSet = new Set(inlineSourceIndices)
+  const trailingSourceIndices = normalizeResultsOverviewSourceIndices(sourceIndices)
+    .filter(sourceIndex => !inlineSourceIndexSet.has(sourceIndex))
+  const renderedSegments = segments.length > 0 ? segments : [{ type: 'text' as const, value: text }]
+
+  return (
+    <>
+      {renderedSegments.map((segment, index) => {
+        if (segment.type === 'sources') {
+          return (
+            <ResultsOverviewSources
+              key={`source-${index}-${segment.sourceIndices.join('-')}`}
+              sourceIndices={segment.sourceIndices}
+              sources={sources}
+            />
+          )
+        }
+
+        return <span key={`text-${index}`}>{segment.value}</span>
+      })}
+      <ResultsOverviewSources sourceIndices={trailingSourceIndices} sources={sources} />
+    </>
   )
 }
 
@@ -588,15 +752,25 @@ const ResultsOverviewArgumentList = ({
         {items.map((item, index) => (
           <li key={`${title}-${index}-${item.argument}`}>
             <div className="results-overview-argument-main">
-              <span>{item.argument}</span>
-              <ResultsOverviewSources sourceIndices={item.source_indices} sources={sources} />
+              <span>
+                <ResultsOverviewCitedText
+                  text={item.argument}
+                  sourceIndices={item.source_indices}
+                  sources={sources}
+                />
+              </span>
             </div>
             {Array.isArray(item.evidence) && item.evidence.length > 0 && (
               <ul className="results-overview-evidence-list nested">
                 {item.evidence.map((evidence, evidenceIndex) => (
                   <li key={`${item.argument}-evidence-${evidenceIndex}`}>
-                    <span>{evidence.evidence}</span>
-                    <ResultsOverviewSources sourceIndices={evidence.source_indices} sources={sources} />
+                    <span>
+                      <ResultsOverviewCitedText
+                        text={evidence.evidence}
+                        sourceIndices={evidence.source_indices}
+                        sources={sources}
+                      />
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -4637,11 +4811,21 @@ function App(): JSX.Element {
 
                     {!resultsOverviewLoading && resultsOverview && (
                       <>
-                        <p className="results-overview-copy">{resultsOverview.overview}</p>
+                        <p className="results-overview-copy">
+                          <ResultsOverviewCitedText
+                            text={resultsOverview.overview}
+                            sources={resultsOverview.sources}
+                          />
+                        </p>
                         {Array.isArray(resultsOverview.key_points) && resultsOverview.key_points.length > 0 && (
                           <ul className="results-overview-list">
                             {resultsOverview.key_points.map((point) => (
-                              <li key={point}>{point}</li>
+                              <li key={point}>
+                                <ResultsOverviewCitedText
+                                  text={point}
+                                  sources={resultsOverview.sources}
+                                />
+                              </li>
                             ))}
                           </ul>
                         )}
@@ -4663,18 +4847,25 @@ function App(): JSX.Element {
                             <ul className="results-overview-evidence-list">
                               {resultsOverview.key_evidence.map((evidence, evidenceIndex) => (
                                 <li key={`overview-evidence-${evidenceIndex}-${evidence.evidence}`}>
-                                  <span>{evidence.evidence}</span>
-                                  <ResultsOverviewSources
-                                    sourceIndices={evidence.source_indices}
-                                    sources={resultsOverview.sources}
-                                  />
+                                  <span>
+                                    <ResultsOverviewCitedText
+                                      text={evidence.evidence}
+                                      sourceIndices={evidence.source_indices}
+                                      sources={resultsOverview.sources}
+                                    />
+                                  </span>
                                 </li>
                               ))}
                             </ul>
                           </div>
                         )}
                         {resultsOverview.caveat && (
-                          <p className="results-overview-caveat">{resultsOverview.caveat}</p>
+                          <p className="results-overview-caveat">
+                            <ResultsOverviewCitedText
+                              text={resultsOverview.caveat}
+                              sources={resultsOverview.sources}
+                            />
+                          </p>
                         )}
                       </>
                     )}
