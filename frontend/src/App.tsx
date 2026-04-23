@@ -5755,9 +5755,33 @@ function App(): JSX.Element {
                               />
                             </div>
                             <div className="sentiment-breakdown">
-                              <span>Negative {formatSentimentPercent(article.vader_sentiment.negative)}</span>
-                              <span>Neutral {formatSentimentPercent(article.vader_sentiment.neutral)}</span>
-                              <span>Positive {formatSentimentPercent(article.vader_sentiment.positive)}</span>
+                              <span
+                                className="sentiment-breakdown-segment negative"
+                                style={{ width: formatSentimentPercent(article.vader_sentiment.negative) }}
+                                aria-label={`Negative ${formatSentimentPercent(article.vader_sentiment.negative)}`}
+                              >
+                                <span className="sentiment-breakdown-text" aria-hidden="true">
+                                  Negative {formatSentimentPercent(article.vader_sentiment.negative)}
+                                </span>
+                              </span>
+                              <span
+                                className="sentiment-breakdown-segment neutral"
+                                style={{ width: formatSentimentPercent(article.vader_sentiment.neutral) }}
+                                aria-label={`Neutral ${formatSentimentPercent(article.vader_sentiment.neutral)}`}
+                              >
+                                <span className="sentiment-breakdown-text" aria-hidden="true">
+                                  Neutral {formatSentimentPercent(article.vader_sentiment.neutral)}
+                                </span>
+                              </span>
+                              <span
+                                className="sentiment-breakdown-segment positive"
+                                style={{ width: formatSentimentPercent(article.vader_sentiment.positive) }}
+                                aria-label={`Positive ${formatSentimentPercent(article.vader_sentiment.positive)}`}
+                              >
+                                <span className="sentiment-breakdown-text" aria-hidden="true">
+                                  Positive {formatSentimentPercent(article.vader_sentiment.positive)}
+                                </span>
+                              </span>
                             </div>
 
                             {article.vader_sentiment.text_scores && (
@@ -5825,7 +5849,7 @@ function App(): JSX.Element {
                         </details>
                       )}
 
-                      {(article.thesis_sentence || (article.support_sentences && article.support_sentences.length > 0)) && (
+                      {(article.thesis_sentence || (article.support_sentences && article.support_sentences.length > 0) || (article.keywords && article.keywords.length > 0)) && (
                         <details className="content-disclosure">
                           <summary className="content-disclosure-summary">
                             <span className="content-disclosure-copy">
@@ -5851,6 +5875,17 @@ function App(): JSX.Element {
                                 </ul>
                               </div>
                             )}
+
+                            {article.keywords && article.keywords.length > 0 && (
+                              <div className="overview-group">
+                                <div className="overview-label">Keywords</div>
+                                <div className="keyword-list">
+                                  {article.keywords.map((kw, index) => (
+                                    <span key={`${article.id}-keyword-${index}`} className="keyword-chip">{kw}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </details>
                       )}
@@ -5859,19 +5894,6 @@ function App(): JSX.Element {
                         <p className="claim-missing">
                           No extracted central claim is available for this article yet, so it stayed in the ranking based on topic or essay relevance alone.
                         </p>
-                      )}
-
-                      {article.keywords && article.keywords.length > 0 && (
-                        <div className="article-footer-row">
-                          <div className="keyword-block">
-                            <p>Keywords</p>
-                            <div className="keyword-list">
-                              {article.keywords.map((kw, index) => (
-                                <span key={`${article.id}-keyword-${index}`} className="keyword-chip">{kw}</span>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
                       )}
 
                       <div className="topic-feedback-action-row">
