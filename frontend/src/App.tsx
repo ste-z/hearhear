@@ -205,6 +205,7 @@ const similarArticlesPageSize = 5
 const searchFocusMinimumMs = 0
 const searchFocusClearMs = 850
 const searchFocusMaxWords = 34
+const searchLoadingDurationNote = 'This can take around 30 seconds.'
 
 const retrievalArtifactLabel = (
   retrievalModel: RetrievalModel,
@@ -262,6 +263,24 @@ const normalizeChunkingModes = (value: unknown): FrontendChunkingMode[] => {
   const filtered = value.filter(isFrontendChunkingMode)
   const unique = Array.from(new Set(filtered))
   return unique.length > 0 ? unique : defaultSupportedChunkingModes
+}
+
+const getSearchLoadingStatusText = (
+  mode: InputMode,
+  stanceMethod: StanceMethod,
+  useChunking: boolean,
+): string => {
+  const scorerLabel = stanceMethod === 'llm' ? 'LLM' : 'NLI model'
+
+  if (mode === 'essay') {
+    return `Scoring essay agreement with ${scorerLabel}`
+  }
+
+  if (useChunking) {
+    return `Searching article passages and scoring stance agreement with ${scorerLabel}`
+  }
+
+  return `Scoring stance agreement with ${scorerLabel}`
 }
 
 const resolvePreferredStanceMethod = (
@@ -2129,10 +2148,12 @@ const FloatingSearchFocus = ({
   mode,
   words,
   clearing,
+  statusText,
 }: {
   mode: InputMode
   words: SearchFocusWordSnapshot[]
   clearing: boolean
+  statusText: string
 }): JSX.Element => {
   const densityClass = words.length > 22
     ? 'dense'
@@ -2171,6 +2192,13 @@ const FloatingSearchFocus = ({
             </span>
           )
         })}
+      </div>
+      <div className="search-focus-status">
+        <p className="search-focus-status-label">{statusText}</p>
+        <div className="search-focus-progress" role="progressbar" aria-label="Search progress">
+          <span />
+        </div>
+        <p className="search-focus-duration-note">{searchLoadingDurationNote}</p>
       </div>
     </section>
   )
@@ -3061,6 +3089,11 @@ function App(): JSX.Element {
     ? selectedEssayCandidate?.sentence_id ?? null
     : null
   const effectiveStanceMethod: StanceMethod = useChunking ? 'llm' : stanceMethod
+  const searchLoadingStatusText = getSearchLoadingStatusText(
+    searchFocusSnapshot?.mode ?? inputMode,
+    effectiveStanceMethod,
+    useChunking,
+  )
   const isLlmAgreementSelected = effectiveStanceMethod === 'llm'
   const shouldUseEssayThesisStep = !isLlmAgreementSelected
   const canSubmitEssay = Boolean(
@@ -5781,6 +5814,7 @@ function App(): JSX.Element {
               mode={searchFocusSnapshot.mode}
               words={searchFocusSnapshot.words}
               clearing={searchFocusSnapshot.clearing}
+              statusText={searchLoadingStatusText}
             />
           )}
 
@@ -5817,12 +5851,11 @@ function App(): JSX.Element {
 
             {loading && !searchFocusSnapshot && (
               <div className="results-thinking-card" role="status" aria-live="polite">
-                <p className="results-thinking-label">Thinking</p>
-                <div className="results-thinking-dots" aria-hidden="true">
-                  <span />
-                  <span />
+                <p className="results-thinking-label">{searchLoadingStatusText}</p>
+                <div className="search-focus-progress results-thinking-progress" role="progressbar" aria-label="Search progress">
                   <span />
                 </div>
+                <p className="search-focus-duration-note">{searchLoadingDurationNote}</p>
               </div>
             )}
 

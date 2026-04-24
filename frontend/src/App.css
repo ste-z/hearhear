@@ -5877,7 +5877,7 @@
   inset: 0;
   z-index: 120;
   display: grid;
-  place-items: center;
+  place-items: start center;
   overflow: hidden;
   padding: 28px;
   box-sizing: border-box;
@@ -5902,6 +5902,59 @@
   inset: 0;
   z-index: 1;
   pointer-events: none;
+}
+
+.search-focus-status {
+  position: relative;
+  z-index: 2;
+  width: min(360px, 86vw);
+  margin-top: clamp(36px, 9vh, 92px);
+  display: grid;
+  gap: 9px;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 248, 237, 0.18);
+  border-radius: 8px;
+  background: rgba(13, 11, 9, 0.42);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(14px) saturate(0.9);
+}
+
+.search-focus-status-label {
+  margin: 0;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 248, 237, 0.92);
+}
+
+.search-focus-progress {
+  position: relative;
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 248, 237, 0.2);
+}
+
+.search-focus-progress span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #fff8ed, #c58f22);
+  transform-origin: left center;
+  animation: search-focus-progress-fill 30s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.search-focus-duration-note {
+  margin: 0;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: rgba(255, 248, 237, 0.76);
 }
 
 .search-focus-overlay.clearing .search-focus-field {
@@ -5944,6 +5997,18 @@
   border: 1px solid rgba(101, 78, 54, 0.14);
   background: rgba(255, 255, 255, 0.55);
   color: #2a2016;
+}
+
+.results-thinking-progress {
+  background: rgba(122, 95, 67, 0.16);
+}
+
+.results-thinking-progress span {
+  background: linear-gradient(90deg, #365741, #c58f22);
+}
+
+.results-thinking-card .search-focus-duration-note {
+  color: #6a5a44;
 }
 
 .results-empty-card.error {
@@ -6874,6 +6939,23 @@ a.results-overview-source-chip:hover {
   }
 }
 
+@keyframes search-focus-progress-fill {
+  0% {
+    transform: scaleX(0.08);
+    opacity: 0.72;
+  }
+
+  65% {
+    transform: scaleX(0.76);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scaleX(0.94);
+    opacity: 1;
+  }
+}
+
 @keyframes search-focus-word-float-away {
   0% {
     opacity: 0;
@@ -6889,13 +6971,19 @@ a.results-overview-source-chip:hover {
 
   50% {
     opacity: 1;
-    filter: blur(0);
+    filter: blur(1.5px);
     transform: translate3d(calc(var(--drift-x) * 0.5), calc(var(--drift-y) * 0.5), 0);
   }
 
+  75% {
+    opacity: 0.76;
+    filter: blur(4px);
+    transform: translate3d(calc(var(--drift-x) * 0.76), calc(var(--drift-y) * 0.76), 0);
+  }
+
   100% {
-    opacity: 1;
-    filter: blur(0);
+    opacity: 0.46;
+    filter: blur(8px);
     transform: translate3d(var(--drift-x), var(--drift-y), 0);
   }
 }
@@ -6976,6 +7064,10 @@ a.results-overview-source-chip:hover {
 
   .search-focus-overlay {
     padding: 18px 12px;
+  }
+
+  .search-focus-status {
+    margin-top: clamp(24px, 7vh, 56px);
   }
 
   .search-focus-word {
@@ -7315,6 +7407,7 @@ a.results-overview-source-chip:hover {
   .search-focus-glow,
   .search-focus-field,
   .search-focus-word,
+  .search-focus-progress span,
   .intro-cue-arrow,
   .results-thinking-dots span {
     transition: none;
