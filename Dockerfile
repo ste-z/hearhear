@@ -35,6 +35,7 @@ COPY backend/ $CONTAINER_HOME/backend/
 COPY data/ $CONTAINER_HOME/data/
 
 RUN python -m backend.text_processing.text_preprocess --ensure-postings
+RUN python -m backend.services.chunk_retrieval_service --ensure-row-store
 
 # Stage 4: Final runtime image
 FROM python:3.10-slim

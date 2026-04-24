@@ -38,6 +38,7 @@ data/processed/vector_index/guardian_tfidf_meta.json
 data/processed/vector_index/guardian_tfidf_term_doc_matrix.npz
 data/processed/vector_index/guardian_tfidf_terms.json
 data/processed/vector_index/guardian_tfidf_vectorizer.pkl
+data/processed/vector_index/*_chunk_rows.sqlite
 data/processed/vector_index/tmp*.npy
 backend/data/processed/vector_index/guardian_tfidf_articles.pkl
 backend/data/processed/vector_index/guardian_tfidf_doc_ids.json

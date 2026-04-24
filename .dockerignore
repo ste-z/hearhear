@@ -54,6 +54,7 @@ data/processed/openai_claim_batches/
 data/processed/guardian_articles_filtered.parquet
 !data/processed/vector_index/
 !data/processed/vector_index/**
+data/processed/vector_index/*_chunk_rows.sqlite
 # Keep the 2010-2025 yearly Guardian CSVs in the image as a rebuild fallback.
 data/raw/guardian_opinion_2005_2025.parquet
 data/raw/guardian_by_year/guardian_opinion_2005.csv

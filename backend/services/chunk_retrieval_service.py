@@ -2,6 +2,7 @@ import argparse
 import gc
 import json
 import re
+import sqlite3
 from pathlib import Path
 from threading import Lock
 
@@ -31,6 +32,7 @@ from backend.text_processing.semantic_chunker import (
 from backend.text_processing.indexing.artifacts import (
     _artifact_exists,
     _artifact_within_size_limit,
+    _materialized_artifact_path,
 )
 from backend.text_processing.indexing.corpus import (
     DEFAULT_DB_PATH,
@@ -72,6 +74,7 @@ DEFAULT_CHUNK_BUILD_PROGRESS_INTERVAL = 1000
 DEFAULT_CHUNK_RETRIEVAL_CHUNKING_MODE = "semantic"
 DEFAULT_CHUNK_SVD_INDEX_NAME = "guardian_chunk_svd_semantic"
 CHUNK_INDEX_SCHEMA_VERSION = 2
+CHUNK_ROW_STORE_SCHEMA_VERSION = 1
 DEFAULT_CHUNK_AUTO_THRESHOLDS = {
     "tfidf": 0.12,
     "svd": 0.35,
@@ -575,12 +578,18 @@ def preprocess_chunk_svd_index(
             index_name=index_name,
             db_row_count=db_row_count,
         )
+        row_store_path = ensure_chunk_row_store(
+            index_dir=index_dir,
+            index_name=index_name,
+            force_rebuild=False,
+        )
         return {
             "built": False,
             "reason": "up_to_date",
             "db_row_count": db_row_count,
             "index_dir": str(index_dir),
             "index_name": index_name,
+            "row_store_path": str(row_store_path),
         }
 
     semantic_processor = None
@@ -724,8 +733,43 @@ def load_chunk_svd_index(
     )
 
 
-def _chunk_rows_from_svd_processor(processor):
-    articles = getattr(processor, "articles", None)
+def _chunk_row_store_path(index_dir=DEFAULT_INDEX_DIR, index_name=DEFAULT_CHUNK_SVD_INDEX_NAME):
+    return Path(index_dir) / f"{index_name}_chunk_rows.sqlite"
+
+
+def _is_chunk_row_store_fresh(store_path, expected_row_count=None, expected_saved_at_utc=None):
+    path = Path(store_path)
+    if not path.exists():
+        return False
+
+    try:
+        with sqlite3.connect(path) as conn:
+            schema_version = conn.execute(
+                "SELECT value FROM meta WHERE key = 'schema_version'"
+            ).fetchone()
+            row_count = conn.execute(
+                "SELECT value FROM meta WHERE key = 'row_count'"
+            ).fetchone()
+            saved_at = conn.execute(
+                "SELECT value FROM meta WHERE key = 'index_saved_at_utc'"
+            ).fetchone()
+    except sqlite3.Error:
+        return False
+
+    try:
+        if int(schema_version[0]) != CHUNK_ROW_STORE_SCHEMA_VERSION:
+            return False
+        if expected_row_count is not None and int(row_count[0]) != int(expected_row_count):
+            return False
+        if expected_saved_at_utc and str(saved_at[0]) != str(expected_saved_at_utc):
+            return False
+    except (TypeError, ValueError):
+        return False
+
+    return True
+
+
+def _chunk_rows_from_articles_frame(articles, include_text=True):
     if articles is None or not isinstance(articles, pd.DataFrame):
         raise RuntimeError("Chunk retrieval index is missing its precomputed chunk metadata.")
 
@@ -752,19 +796,218 @@ def _chunk_rows_from_svd_processor(processor):
         chunk_id = string_value(row_value(row, "id"))
         if not chunk_id:
             continue
-        rows.append({
+        payload = {
             "chunk_id": chunk_id,
             "article_id": string_value(row_value(row, "article_id")),
             "chunk_index": _safe_int(row_value(row, "chunk_index")),
-            "text": normalize_paragraph_text(row_value(row, "text")),
             "source": row_value(row, "source"),
             "year": _safe_int(row_value(row, "year")),
             "character_count": _safe_int(row_value(row, "character_count")),
             "word_count": _safe_int(row_value(row, "word_count")),
             "sentence_start_index": row_value(row, "sentence_start_index"),
             "sentence_end_index": row_value(row, "sentence_end_index"),
-        })
+        }
+        if include_text:
+            payload["text"] = normalize_paragraph_text(row_value(row, "text"))
+        rows.append(payload)
     return rows
+
+
+def _chunk_rows_from_svd_processor(processor, include_text=True):
+    return _chunk_rows_from_articles_frame(
+        getattr(processor, "articles", None),
+        include_text=include_text,
+    )
+
+
+def _iter_chunk_row_store_records(articles):
+    if articles is None or not isinstance(articles, pd.DataFrame):
+        raise RuntimeError("Chunk retrieval index is missing its precomputed chunk metadata.")
+
+    columns = {column_name: idx for idx, column_name in enumerate(articles.columns)}
+
+    def row_value(row, column_name, default=None):
+        idx = columns.get(column_name)
+        if idx is None:
+            return default
+        return row[idx]
+
+    def string_value(value):
+        if value is None:
+            return ""
+        try:
+            if pd.isna(value):
+                return ""
+        except (TypeError, ValueError):
+            pass
+        return str(value).strip()
+
+    for row_index, row in enumerate(articles.itertuples(index=False, name=None)):
+        chunk_id = string_value(row_value(row, "id"))
+        if not chunk_id:
+            continue
+        yield (
+            row_index,
+            chunk_id,
+            string_value(row_value(row, "article_id")),
+            _safe_int(row_value(row, "chunk_index")),
+            normalize_paragraph_text(row_value(row, "text")),
+            string_value(row_value(row, "source")),
+            _safe_int(row_value(row, "year")),
+            _safe_int(row_value(row, "character_count")),
+            _safe_int(row_value(row, "word_count")),
+            _safe_int(row_value(row, "sentence_start_index"), default=-1),
+            _safe_int(row_value(row, "sentence_end_index"), default=-1),
+        )
+
+
+def _build_chunk_row_store(index_dir, index_name, meta):
+    paths = TruncatedSvdIndex.artifact_paths(index_dir, index_name)
+    if not _artifact_exists(paths["articles"]):
+        raise FileNotFoundError(
+            f"Missing chunk metadata artifact for row store: {paths['articles']}"
+        )
+
+    store_path = _chunk_row_store_path(index_dir=index_dir, index_name=index_name)
+    temp_path = store_path.with_suffix(f"{store_path.suffix}.tmp")
+    if temp_path.exists():
+        temp_path.unlink()
+
+    log_runtime_event(
+        "chunk_row_store.build_start",
+        index_name=index_name,
+        store_path=str(store_path),
+    )
+    with _materialized_artifact_path(paths["articles"]) as articles_path:
+        articles = pd.read_pickle(articles_path)
+
+    try:
+        with sqlite3.connect(temp_path) as conn:
+            conn.execute("PRAGMA journal_mode = OFF")
+            conn.execute("PRAGMA synchronous = OFF")
+            conn.execute("PRAGMA temp_store = MEMORY")
+            conn.execute(
+                "CREATE TABLE chunk_rows ("
+                "row_index INTEGER PRIMARY KEY, "
+                "chunk_id TEXT NOT NULL, "
+                "article_id TEXT NOT NULL, "
+                "chunk_index INTEGER NOT NULL, "
+                "text TEXT NOT NULL, "
+                "source TEXT, "
+                "year INTEGER NOT NULL, "
+                "character_count INTEGER NOT NULL, "
+                "word_count INTEGER NOT NULL, "
+                "sentence_start_index INTEGER NOT NULL, "
+                "sentence_end_index INTEGER NOT NULL"
+                ")"
+            )
+            conn.execute("CREATE INDEX ix_chunk_rows_article_id ON chunk_rows (article_id)")
+            conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            conn.executemany(
+                "INSERT INTO chunk_rows VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                _iter_chunk_row_store_records(articles),
+            )
+            row_count = conn.execute("SELECT COUNT(*) FROM chunk_rows").fetchone()[0]
+            conn.executemany(
+                "INSERT INTO meta (key, value) VALUES (?, ?)",
+                [
+                    ("schema_version", str(CHUNK_ROW_STORE_SCHEMA_VERSION)),
+                    ("index_name", str(index_name)),
+                    ("row_count", str(row_count)),
+                    ("index_saved_at_utc", str(meta.get("saved_at_utc") or "")),
+                ],
+            )
+            conn.commit()
+    finally:
+        del articles
+        gc.collect()
+
+    temp_path.replace(store_path)
+    log_runtime_event(
+        "chunk_row_store.build_done",
+        index_name=index_name,
+        store_path=str(store_path),
+        row_count=row_count,
+    )
+    return store_path
+
+
+def ensure_chunk_row_store(index_dir=DEFAULT_INDEX_DIR, index_name=DEFAULT_CHUNK_SVD_INDEX_NAME, force_rebuild=False):
+    paths = TruncatedSvdIndex.artifact_paths(index_dir, index_name)
+    meta = _load_index_meta(paths["meta"])
+    if not meta:
+        raise FileNotFoundError(f"Missing chunk SVD metadata artifact: {paths['meta']}")
+
+    expected_row_count = meta.get("n_docs") or meta.get("chunk_count")
+    store_path = _chunk_row_store_path(index_dir=index_dir, index_name=index_name)
+    if (
+        not force_rebuild
+        and _is_chunk_row_store_fresh(
+            store_path,
+            expected_row_count=expected_row_count,
+            expected_saved_at_utc=meta.get("saved_at_utc"),
+        )
+    ):
+        log_runtime_event(
+            "chunk_row_store.up_to_date",
+            index_name=index_name,
+            store_path=str(store_path),
+            row_count=_safe_int(expected_row_count),
+        )
+        return store_path
+
+    return _build_chunk_row_store(index_dir=index_dir, index_name=index_name, meta=meta)
+
+
+def _chunk_row_metadata_from_store(store_path):
+    path = Path(store_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Chunk row store not found: {path}")
+
+    rows = []
+    with sqlite3.connect(path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT row_index, chunk_id, article_id, chunk_index, source, year, "
+            "character_count, word_count, sentence_start_index, sentence_end_index "
+            "FROM chunk_rows ORDER BY row_index"
+        )
+        for row in cursor:
+            rows.append({
+                "row_index": int(row["row_index"]),
+                "chunk_id": row["chunk_id"],
+                "article_id": row["article_id"],
+                "chunk_index": int(row["chunk_index"] or 0),
+                "source": row["source"],
+                "year": int(row["year"] or 0),
+                "character_count": int(row["character_count"] or 0),
+                "word_count": int(row["word_count"] or 0),
+                "sentence_start_index": None
+                if int(row["sentence_start_index"]) < 0
+                else int(row["sentence_start_index"]),
+                "sentence_end_index": None
+                if int(row["sentence_end_index"]) < 0
+                else int(row["sentence_end_index"]),
+            })
+    return rows
+
+
+def _chunk_rows_by_indices_from_store(store_path, row_indices):
+    indices = sorted({int(index) for index in row_indices})
+    if not indices:
+        return {}
+
+    placeholders = ", ".join("?" for _index in indices)
+    with sqlite3.connect(Path(store_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            f"SELECT row_index, text FROM chunk_rows WHERE row_index IN ({placeholders})",
+            indices,
+        )
+        return {
+            int(row["row_index"]): {"text": normalize_paragraph_text(row["text"])}
+            for row in cursor
+        }
 
 
 class ChunkRetrievalIndex:
@@ -775,6 +1018,7 @@ class ChunkRetrievalIndex:
         processor,
         chunk_rows,
         chunk_matrix=None,
+        chunk_row_store_path=None,
     ):
         self.retrieval_model = normalize_retrieval_model(retrieval_model)
         if self.retrieval_model not in SUPPORTED_CHUNK_RETRIEVAL_MODELS:
@@ -784,6 +1028,9 @@ class ChunkRetrievalIndex:
         self.vectorizer = getattr(processor, "vectorizer", None)
         self.chunk_rows = list(chunk_rows)
         self.chunk_matrix = chunk_matrix
+        self.chunk_row_store_path = (
+            Path(chunk_row_store_path) if chunk_row_store_path is not None else None
+        )
         self.n_chunks = len(self.chunk_rows)
         self.svd_components = (
             np.asarray(processor.components, dtype=np.float32)
@@ -812,6 +1059,14 @@ class ChunkRetrievalIndex:
         self.article_word_counts = np.asarray(
             [int(row.get("word_count") or 0) for row in self.chunk_rows],
             dtype=np.int32,
+        )
+
+    def _stored_rows_for_indices(self, chunk_indices):
+        if self.chunk_row_store_path is None:
+            return {}
+        return _chunk_rows_by_indices_from_store(
+            self.chunk_row_store_path,
+            chunk_indices,
         )
 
     def _dense_chunk_embeddings(self):
@@ -973,10 +1228,17 @@ class ChunkRetrievalIndex:
         else:
             sorted_positions = np.argsort(filtered_scores)[::-1]
 
+        selected = [
+            (int(candidate_indices[int(pos)]), int(pos))
+            for pos in sorted_positions
+        ]
+        selected_chunk_indices = [chunk_idx for chunk_idx, _pos in selected]
+        stored_rows = self._stored_rows_for_indices(selected_chunk_indices)
+
         results = []
-        for rank, pos in enumerate(sorted_positions, start=1):
-            chunk_idx = int(candidate_indices[int(pos)])
+        for rank, (chunk_idx, pos) in enumerate(selected, start=1):
             row = dict(self.chunk_rows[chunk_idx])
+            row.update(stored_rows.get(chunk_idx, {}))
             row["score"] = float(filtered_scores[int(pos)])
             row["chunk_rank"] = int(rank)
             row["retrieval_model"] = self.retrieval_model
@@ -1041,22 +1303,30 @@ def build_chunk_retrieval_index(
                 force_rebuild=False,
                 chunking_mode=resolved_chunking_mode,
             )
+            row_store_path = ensure_chunk_row_store(
+                index_dir=DEFAULT_INDEX_DIR,
+                index_name=DEFAULT_CHUNK_SVD_INDEX_NAME,
+                force_rebuild=False,
+            )
             processor, meta = load_chunk_svd_index(
                 index_name=DEFAULT_CHUNK_SVD_INDEX_NAME,
-                load_articles=True,
+                load_articles=False,
             )
         else:
             preprocess_minilm_indexes(
                 index_dir=DEFAULT_INDEX_DIR,
                 force_rebuild=False,
             )
+            row_store_path = ensure_chunk_row_store(
+                index_dir=DEFAULT_INDEX_DIR,
+                index_name=DEFAULT_CHUNK_SVD_INDEX_NAME,
+                force_rebuild=False,
+            )
             processor, meta = load_minilm_chunk_index(
                 index_name=DEFAULT_MINILM_CHUNK_INDEX_NAME,
-                load_articles=True,
+                load_articles=False,
             )
-        chunk_rows = _chunk_rows_from_svd_processor(processor)
-        processor.articles = None
-        gc.collect()
+        chunk_rows = _chunk_row_metadata_from_store(row_store_path)
         if not chunk_rows:
             raise RuntimeError("The precomputed chunk retrieval index has no chunk rows.")
 
@@ -1065,6 +1335,7 @@ def build_chunk_retrieval_index(
             chunking_mode=resolved_chunking_mode,
             processor=processor,
             chunk_rows=chunk_rows,
+            chunk_row_store_path=row_store_path,
         )
         index.index_saved_at_utc = meta.get("saved_at_utc")
         _chunk_indexes[cache_key] = index
@@ -1394,17 +1665,32 @@ def _parse_args():
         type=int,
         default=DEFAULT_SVD_N_COMPONENTS,
     )
+    parser.add_argument(
+        "--ensure-row-store",
+        action="store_true",
+        help="Build or refresh the disk-backed chunk row store for the existing index.",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
-    result = preprocess_chunk_svd_index(
-        db_path=args.db_path,
-        index_dir=args.index_dir,
-        index_name=args.index_name,
-        force_rebuild=args.force_rebuild,
-        chunking_mode=args.chunking_mode,
-        n_components=args.n_components,
-    )
+    if args.ensure_row_store:
+        row_store_path = ensure_chunk_row_store(
+            index_dir=args.index_dir,
+            index_name=args.index_name,
+            force_rebuild=args.force_rebuild,
+        )
+        result = {
+            "row_store_path": str(row_store_path),
+        }
+    else:
+        result = preprocess_chunk_svd_index(
+            db_path=args.db_path,
+            index_dir=args.index_dir,
+            index_name=args.index_name,
+            force_rebuild=args.force_rebuild,
+            chunking_mode=args.chunking_mode,
+            n_components=args.n_components,
+        )
     print(json.dumps(result, indent=2))
