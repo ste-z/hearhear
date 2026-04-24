@@ -6,6 +6,10 @@ export type SvdLatentDimension = {
   pole: 'positive' | 'negative'
   label_terms: string[]
   label_text: string
+  display_label?: string | null
+  dimension_name?: string | null
+  name?: string | null
+  label?: string | null
 }
 
 export type SentimentLabel = 'negative' | 'neutral' | 'positive'

@@ -195,14 +195,6 @@ def cached_svd_dimension_labels(
     index_name=DEFAULT_SVD_INDEX_NAME,
     require_fresh=True,
 ):
-    artifact = load_svd_dimension_label_artifact(
-        index_dir=index_dir,
-        index_name=index_name,
-        require_fresh=require_fresh,
-    )
-    if not artifact:
-        return []
-
     requested = []
     seen = set()
     for raw_index in dimension_indices:
@@ -215,6 +207,43 @@ def cached_svd_dimension_labels(
         requested.append(index)
         seen.add(index)
 
+    labels_by_index = cached_svd_dimension_label_map(
+        requested,
+        index_dir=index_dir,
+        index_name=index_name,
+        require_fresh=require_fresh,
+    )
+
+    return [
+        {"dimension_index": index, "label": labels_by_index[index]}
+        for index in requested
+        if index in labels_by_index
+    ]
+
+
+def cached_svd_dimension_label_map(
+    dimension_indices=None,
+    index_dir=DEFAULT_INDEX_DIR,
+    index_name=DEFAULT_SVD_INDEX_NAME,
+    require_fresh=True,
+):
+    artifact = load_svd_dimension_label_artifact(
+        index_dir=index_dir,
+        index_name=index_name,
+        require_fresh=require_fresh,
+    )
+    if not artifact:
+        return {}
+
+    requested = None
+    if dimension_indices is not None:
+        requested = set()
+        for raw_index in dimension_indices:
+            try:
+                requested.add(int(raw_index))
+            except (TypeError, ValueError):
+                continue
+
     labels_by_index = {}
     for item in artifact.get("labels") or []:
         if not isinstance(item, dict):
@@ -223,15 +252,13 @@ def cached_svd_dimension_labels(
             index = int(item.get("dimension_index"))
         except (TypeError, ValueError):
             continue
+        if requested is not None and index not in requested:
+            continue
         label = _clean_label_text(item.get("label"))
         if label:
             labels_by_index[index] = label
 
-    return [
-        {"dimension_index": index, "label": labels_by_index[index]}
-        for index in requested
-        if index in labels_by_index
-    ]
+    return labels_by_index
 
 
 def build_svd_dimension_label_artifact(

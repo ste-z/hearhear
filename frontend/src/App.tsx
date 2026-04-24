@@ -1271,16 +1271,54 @@ const buildSvdLabelLines = (dimension: SvdLatentDimension): string[] => {
   ].filter(Boolean)
 }
 
+const cleanSvdDisplayLabel = (value?: string | null): string => {
+  const label = String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^(concept|dimension)\s+\d+\s*[:\-]\s*/i, '')
+    .trim()
+  if (!label || /^(concept|dimension)?\s*\d+$/i.test(label)) return ''
+  return label
+}
+
+const getEmbeddedSvdDimensionLabel = (
+  dimension?: SvdLatentDimension | null,
+): string => {
+  if (!dimension) return ''
+  return (
+    cleanSvdDisplayLabel(dimension.display_label) ||
+    cleanSvdDisplayLabel(dimension.dimension_name) ||
+    cleanSvdDisplayLabel(dimension.name) ||
+    cleanSvdDisplayLabel(dimension.label)
+  )
+}
+
+const collectEmbeddedSvdDimensionLabels = (
+  dimensions: Array<SvdLatentDimension | null | undefined>,
+): SvdDimensionLabelMap => {
+  const labels: SvdDimensionLabelMap = {}
+  for (const dimension of dimensions) {
+    if (!dimension || typeof dimension.dimension_index !== 'number') continue
+    const label = getEmbeddedSvdDimensionLabel(dimension)
+    if (label) {
+      labels[dimension.dimension_index] = label
+    }
+  }
+  return labels
+}
+
 const buildSvdDisplayLabelLines = (
   dimension: SvdLatentDimension,
   dimensionLabels?: SvdDimensionLabelMap | null,
 ): string[] => {
-  const llmLabel = dimensionLabels?.[dimension.dimension_index]?.trim()
-  if (!llmLabel) return buildSvdLabelLines(dimension)
+  const displayLabel = (
+    dimensionLabels?.[dimension.dimension_index]?.trim() ||
+    getEmbeddedSvdDimensionLabel(dimension)
+  )
+  if (!displayLabel) return buildSvdLabelLines(dimension)
 
   const firstTerms = dimension.label_terms.slice(0, 3).join(' · ')
   return [
-    llmLabel,
+    displayLabel,
     firstTerms,
   ].filter(Boolean)
 }
@@ -1568,7 +1606,7 @@ function SvdConceptBarChart(
             >
               <div className="svd-concept-bar-copy">
                 <div className="svd-dimension-title">
-                  {dimensionLabels?.[dimension.dimension_index]?.trim() || `Concept ${dimension.dimension_label}`}
+                  {dimensionLabels?.[dimension.dimension_index]?.trim() || getEmbeddedSvdDimensionLabel(dimension) || `Concept ${dimension.dimension_label}`}
                 </div>
                 <div className="svd-dimension-terms">
                   {dimension.label_text}
@@ -4668,6 +4706,9 @@ function App(): JSX.Element {
       return true
     })
   }
+  const getArticleEmbeddedSvdDimensionLabels = (article: Article): SvdDimensionLabelMap => (
+    collectEmbeddedSvdDimensionLabels(getSvdDimensionsForLabeling(article))
+  )
   const hasStanceSignals = (article: Article): boolean => (
     article.stance_entailment_prob != null ||
     article.stance_neutral_prob != null ||
@@ -4931,10 +4972,23 @@ function App(): JSX.Element {
     loading: boolean
     error: string | null
     labels: SvdDimensionLabelMap
-  } => svdDimensionLabelStates[getRankingExplanationKey(article)] ?? {
-    loading: false,
-    error: null,
-    labels: {},
+  } => {
+    const dimensions = getSvdDimensionsForLabeling(article)
+    const embeddedLabels = getArticleEmbeddedSvdDimensionLabels(article)
+    const storedState = svdDimensionLabelStates[getRankingExplanationKey(article)]
+    const labels = {
+      ...embeddedLabels,
+      ...(storedState?.labels ?? {}),
+    }
+    const expectedLabelCount = new Set(
+      dimensions.map(dimension => dimension.dimension_index),
+    ).size
+    const hasExpectedLabels = expectedLabelCount > 0 && Object.keys(labels).length >= expectedLabelCount
+    return {
+      loading: storedState?.loading ?? false,
+      error: hasExpectedLabels ? null : (storedState?.error ?? null),
+      labels,
+    }
   }
 
   const getRankingExplanationQueryText = (): string => {
@@ -4990,16 +5044,22 @@ function App(): JSX.Element {
 
   const requestSvdDimensionLabels = async (article: Article): Promise<SvdDimensionLabelMap> => {
     const currentState = getSvdDimensionLabelState(article)
-    if (currentState.loading || Object.keys(currentState.labels).length > 0) {
-      return currentState.labels
-    }
-
     const dimensions = getSvdDimensionsForLabeling(article)
     if (dimensions.length === 0) return currentState.labels
 
+    const requestedDimensionCount = new Set(
+      dimensions.map(dimension => dimension.dimension_index),
+    ).size
+    if (
+      currentState.loading ||
+      Object.keys(currentState.labels).length >= requestedDimensionCount
+    ) {
+      return currentState.labels
+    }
+
     if (useLlm !== true) {
       setSvdDimensionLabelState(article, {
-        error: 'LLM labels are turned off in the backend config.',
+        error: 'Precomputed concept labels are not available from the backend.',
       })
       return currentState.labels
     }
@@ -5021,7 +5081,7 @@ function App(): JSX.Element {
       })
 
       const data = await readApiJson<{ labels?: Array<{ dimension_index?: number; label?: string }> }>(response)
-      const nextLabels: SvdDimensionLabelMap = {}
+      const nextLabels: SvdDimensionLabelMap = { ...currentState.labels }
       for (const item of data.labels ?? []) {
         if (typeof item.dimension_index !== 'number') continue
         const label = String(item.label || '').trim()
@@ -5030,7 +5090,7 @@ function App(): JSX.Element {
         }
       }
       if (Object.keys(nextLabels).length === 0) {
-        throw new Error('No concept labels were returned.')
+        throw new Error('No precomputed concept labels were returned.')
       }
 
       setSvdDimensionLabelState(article, {
@@ -5042,7 +5102,7 @@ function App(): JSX.Element {
     } catch (fetchError) {
       setSvdDimensionLabelState(article, {
         loading: false,
-        error: fetchError instanceof Error ? fetchError.message : 'SVD concept labeling failed.',
+        error: fetchError instanceof Error ? fetchError.message : 'SVD concept label loading failed.',
       })
       return currentState.labels
     }
@@ -6229,10 +6289,10 @@ function App(): JSX.Element {
                             {(svdDimensionLabelState.loading || svdDimensionLabelState.error) && (
                               <p
                                 className={`svd-section-copy ${svdDimensionLabelState.loading ? 'svd-label-loading' : ''}`}
-                                data-text={svdDimensionLabelState.loading ? 'Labeling latent concepts with the LLM...' : undefined}
+                                data-text={svdDimensionLabelState.loading ? 'Loading precomputed latent concept labels...' : undefined}
                               >
                                 {svdDimensionLabelState.loading
-                                  ? 'Labeling latent concepts with the LLM...'
+                                  ? 'Loading precomputed latent concept labels...'
                                   : svdDimensionLabelState.error}
                               </p>
                             )}
