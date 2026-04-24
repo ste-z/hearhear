@@ -272,6 +272,22 @@ def _existing_data_needs_refresh(expected_years=None, allow_missing_body_text=Fa
     }
     year_range_mismatch = bool(expected_year_set) and existing_years != expected_year_set
 
+    if allow_missing_body_text:
+        metadata_reasons = []
+        if missing_author_exists:
+            metadata_reasons.append("missing_author")
+        if missing_summary_exists:
+            metadata_reasons.append("missing_summary")
+        if missing_length_metadata_exists:
+            metadata_reasons.append("missing_length_metadata")
+        if metadata_reasons:
+            log_runtime_event(
+                "guardian_data.metadata_refresh_skipped",
+                reasons=metadata_reasons,
+                allow_missing_body_text=True,
+            )
+        return bool(year_range_mismatch)
+
     return any([
         missing_author_exists,
         missing_body_exists,

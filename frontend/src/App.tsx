@@ -78,6 +78,7 @@ type RuntimeArtifactTask = {
   retrievalModel?: RetrievalModel
   chunkingMode?: FrontendChunkingMode
   loadModel?: boolean
+  releaseRetrievalIndexes?: boolean
 }
 type RuntimeArtifactLoadingState = {
   message: string
@@ -3116,6 +3117,7 @@ function App(): JSX.Element {
         retrievalModel: nextModel,
         chunkingMode: nextChunkingMode,
         loadModel: nextModel === 'minilm',
+        releaseRetrievalIndexes: true,
       }
     }
 
@@ -3138,12 +3140,7 @@ function App(): JSX.Element {
         ? firstSemanticRetrievalModel
         : nextModel
     )
-    const tasks: RuntimeArtifactTask[] = []
-    if (nextUseChunking && nextChunkingMode === 'semantic') {
-      tasks.push(runtimeRetrievalTask('svd', false))
-    }
-    tasks.push(runtimeRetrievalTask(resolvedModel, nextUseChunking, nextChunkingMode))
-    return tasks
+    return [runtimeRetrievalTask(resolvedModel, nextUseChunking, nextChunkingMode)]
   }
 
   const buildAgreementPreloadTasks = (nextMethod: StanceMethod): RuntimeArtifactTask[] => {
@@ -3166,9 +3163,7 @@ function App(): JSX.Element {
         ? firstSemanticRetrievalModel
         : nextModel
     )
-    const keepRetrievalModels: RetrievalModel[] = nextUseChunking
-      ? (nextChunkingMode === 'semantic' ? ['svd'] : [])
-      : [resolvedModel]
+    const keepRetrievalModels: RetrievalModel[] = nextUseChunking ? [] : [resolvedModel]
     const keepChunkIndexes = nextUseChunking
       ? [{
         retrieval_model: resolvedModel,
@@ -3221,6 +3216,7 @@ function App(): JSX.Element {
             retrieval_model: task.retrievalModel,
             chunking_mode: task.chunkingMode,
             load_model: task.loadModel,
+            release_retrieval_indexes: task.releaseRetrievalIndexes,
           }),
         })
         await readApiJson<{ ok?: boolean }>(response)
@@ -7456,7 +7452,7 @@ function App(): JSX.Element {
                           : 'How many top retrieval matches move into the agreement reranking stage.')
                         : (useChunking
                           ? `Chunks at or above this raw relevance threshold are pooled first, capped by the global chunk pool, then grouped into articles for agreement reranking.`
-                          : `Articles at or above this raw topic relevance threshold move into the agreement reranking stage, with at most ${maxAutoRerankCandidates} articles reranked.`)}
+                          : `Articles at or above this raw topic relevance threshold are considered from up to ${maxAutoRerankCandidates} retrieved matches, with at most ${rerankTopK} sent into agreement reranking.`)}
                     </p>
                   </div>
 

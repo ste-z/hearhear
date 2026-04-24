@@ -193,6 +193,13 @@ def _preload_runtime_artifact(payload):
         if chunking_mode == "none":
             chunking_mode = "semantic"
 
+        if _coerce_bool(payload.get("release_retrieval_indexes"), False):
+            from backend.text_processing.search_helpers import unload_retrieval_processors
+
+            unloaded = unload_retrieval_processors(keep_models=[])
+            if unloaded:
+                gc.collect()
+
         index = build_chunk_retrieval_index(
             retrieval_model=retrieval_model,
             chunking_mode=chunking_mode,

@@ -52,7 +52,16 @@ elif not runtime_logger.handlers:
 register_routes(app)
 
 
+def _env_flag(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return bool(default)
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _should_warm_runtime_assets():
+    if os.environ.get("WARM_RUNTIME_ASSETS") is not None:
+        return _env_flag("WARM_RUNTIME_ASSETS")
     # Skip heavy warm-up in the Werkzeug reloader parent process.
     if __name__ == "__main__":
         return os.environ.get("WERKZEUG_RUN_MAIN") == "true"

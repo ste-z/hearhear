@@ -231,9 +231,11 @@ def select_rerank_candidates(
         rerank_threshold,
         retrieval_model=resolved_model,
     )
+    auto_candidate_limit = MAX_AUTO_RERANK_CANDIDATES
+    auto_selected_limit = min(MAX_AUTO_RERANK_CANDIDATES, resolved_top_n)
     matches = retrieval_search(
         query,
-        top_n=MAX_AUTO_RERANK_CANDIDATES,
+        top_n=auto_candidate_limit,
         retrieval_model=resolved_model,
         year_start=year_start,
         year_end=year_end,
@@ -249,7 +251,7 @@ def select_rerank_candidates(
     selected_matches = _filter_matches_by_topic_threshold(
         matches,
         threshold=resolved_threshold,
-    )[:MAX_AUTO_RERANK_CANDIDATES]
+    )[:auto_selected_limit]
     empty_results_message = None
     if not selected_matches:
         retrieval_label = (
@@ -264,7 +266,8 @@ def select_rerank_candidates(
     log_runtime_event(
         "rerank_candidates.automatic_done",
         retrieval_model=resolved_model,
-        candidate_limit=MAX_AUTO_RERANK_CANDIDATES,
+        candidate_limit=auto_candidate_limit,
+        selected_limit=auto_selected_limit,
         threshold=resolved_threshold,
         retrieved_count=len(matches),
         selected_count=len(selected_matches),

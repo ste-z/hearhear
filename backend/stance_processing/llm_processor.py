@@ -9,7 +9,7 @@ from backend.runtime.runtime_debug import log_runtime_event
 from backend.text_processing.paragraph_splitter import paragraph_rows_from_text
 
 
-DEFAULT_LLM_BATCH_SIZE = 20
+DEFAULT_LLM_BATCH_SIZE = 50
 DEFAULT_MAX_ARTICLE_CHARS = 50000
 DEFAULT_LLM_PARAGRAPH_BATCH_SIZE = 100
 DEFAULT_MAX_PARAGRAPHS_PER_ARTICLE = 40
@@ -43,10 +43,11 @@ Also assign an irrelevant flag:
 Be conservative. When in doubt, use 0. Energy policy is related to climate
 change. An article about free buses is not related to free speech.
 
-Return valid JSON only: a single array in the exact same order as the
-article_ids list. Each item must be [agreement_score, irrelevant_flag]. Do not
-return article IDs, labels, rationale, markdown, comments, or prose. Example:
-[[0.9, 0], [0.5, 0], [0.5, 1]]
+Return valid JSON only: a single array with exactly one object for each
+article_id. Each object must include article_id, agreement_score, and
+irrelevant. Do not return labels, rationale, markdown, comments, or prose.
+Example:
+[{"article_id": "article_1", "agreement_score": 0.9, "irrelevant": 0}]
 """.strip()
 
 LLM_PARAGRAPH_AGREEMENT_SYSTEM_PROMPT = """
@@ -74,10 +75,10 @@ counterarguments, nearby subtopics, causes, consequences, and policy details are
 relevant if they connect to the broad issue. Energy policy is related to climate
 change. A chunk about free buses is not related to free speech.
 
-Return valid JSON only: a single array in the exact same order as the
-chunk_ids list. Each item must be [agreement_score, irrelevant_flag]. Do not
-return chunk IDs, labels, rationale, markdown, comments, or prose. Example:
-[[0.9, 0], [0.5, 0], [0.5, 1]]
+Return valid JSON only: a single array with exactly one object for each
+chunk_id. Each object must include chunk_id, agreement_score, and irrelevant.
+Do not return labels, rationale, markdown, comments, or prose. Example:
+[{"chunk_id": "chunk_1", "agreement_score": 0.9, "irrelevant": 0}]
 """.strip()
 
 
@@ -364,7 +365,7 @@ def build_llm_agreement_messages(
         f"{json.dumps(article_ids, ensure_ascii=False)}\n\n"
         "Retrieved articles in the same order:\n"
         f"{json.dumps(article_payload, ensure_ascii=False, indent=2)}\n\n"
-        f"Return exactly {len(article_ids)} [score, irrelevant] pairs as a JSON array in the article_ids order."
+        f"Return exactly {len(article_ids)} JSON objects, one per article_id."
     )
     return [
         {"role": "system", "content": LLM_ARTICLE_AGREEMENT_SYSTEM_PROMPT},
@@ -420,8 +421,12 @@ def _score_values_from_payload(payload):
         return payload
     if isinstance(payload, dict):
         scores = payload.get("scores")
-        if isinstance(scores, list):
+        if isinstance(scores, (list, dict)):
             return scores
+        if any(key in payload for key in ("article_id", "chunk_id", "paragraph_id", "id")):
+            return [payload]
+        if all(isinstance(key, str) for key in payload.keys()):
+            return payload
     raise RuntimeError("The LLM agreement JSON must be a list of scores.")
 
 
@@ -467,6 +472,74 @@ def _score_pair(value):
     return value, 0
 
 
+def _score_item_id(value, id_keys):
+    if not isinstance(value, dict):
+        return ""
+    for key in id_keys:
+        text = _clean_text(value.get(key))
+        if text:
+            return text
+    return ""
+
+
+def _ordered_score_values(
+    score_values,
+    ordered_ids,
+    event_prefix,
+    id_keys,
+    default_score,
+):
+    expected_count = len(ordered_ids)
+    returned_count = len(score_values) if hasattr(score_values, "__len__") else 0
+    if returned_count != expected_count:
+        log_runtime_event(
+            f"{event_prefix}.score_count_mismatch",
+            expected_count=expected_count,
+            returned_count=returned_count,
+        )
+
+    score_by_id = {}
+    if isinstance(score_values, dict):
+        score_by_id = {
+            _clean_text(item_id): score_value
+            for item_id, score_value in score_values.items()
+            if _clean_text(item_id)
+        }
+    elif isinstance(score_values, list):
+        score_by_id = {
+            item_id: score_value
+            for score_value in score_values
+            for item_id in [_score_item_id(score_value, id_keys)]
+            if item_id
+        }
+
+    ordered_id_set = set(ordered_ids)
+    if score_by_id:
+        missing_ids = [
+            item_id for item_id in ordered_ids
+            if item_id not in score_by_id
+        ]
+        extra_count = len(set(score_by_id) - ordered_id_set)
+        if missing_ids or extra_count:
+            log_runtime_event(
+                f"{event_prefix}.score_id_mismatch",
+                missing_count=len(missing_ids),
+                extra_count=extra_count,
+            )
+        return [
+            score_by_id.get(item_id, default_score)
+            for item_id in ordered_ids
+        ]
+
+    if isinstance(score_values, list):
+        return [
+            score_values[index] if index < returned_count else default_score
+            for index, _item_id in enumerate(ordered_ids)
+        ]
+
+    return [default_score for _item_id in ordered_ids]
+
+
 def _score_row(article_id, score_value):
     score_value, irrelevant_value = _score_pair(score_value)
     score = _coerce_unit_score(score_value, default=0.5)
@@ -504,7 +577,7 @@ def build_llm_paragraph_agreement_messages(thesis, paragraph_rows):
         f"{json.dumps(paragraph_ids, ensure_ascii=False)}\n\n"
         "Retrieved chunks in the same order:\n"
         f"{json.dumps(paragraph_payload, ensure_ascii=False, indent=2)}\n\n"
-        f"Return exactly {len(paragraph_ids)} [score, irrelevant] pairs as a JSON array in the chunk_ids order."
+        f"Return exactly {len(paragraph_ids)} JSON objects, one per chunk_id."
     )
     return [
         {"role": "system", "content": LLM_PARAGRAPH_AGREEMENT_SYSTEM_PROMPT},
@@ -514,18 +587,18 @@ def build_llm_paragraph_agreement_messages(thesis, paragraph_rows):
 
 def _normalize_paragraph_batch_scores(payload, paragraph_rows):
     score_values = _score_values_from_payload(payload)
-    expected_count = len(paragraph_rows)
-    returned_count = len(score_values)
-    if returned_count != expected_count:
-        log_runtime_event(
-            "llm_paragraph_agreement.score_count_mismatch",
-            expected_count=expected_count,
-            returned_count=returned_count,
-        )
+    paragraph_ids = [row["paragraph_id"] for row in paragraph_rows]
+    ordered_scores = _ordered_score_values(
+        score_values=score_values,
+        ordered_ids=paragraph_ids,
+        event_prefix="llm_paragraph_agreement",
+        id_keys=("chunk_id", "paragraph_id", "id"),
+        default_score=[0.5, 1],
+    )
 
     rows = []
     for index, paragraph_row in enumerate(paragraph_rows):
-        score_value = score_values[index] if index < returned_count else [0.5, 1]
+        score_value = ordered_scores[index]
         score_value, irrelevant_value = _score_pair(score_value)
         score = _coerce_unit_score(score_value, default=0.5)
         rows.append(
@@ -770,18 +843,17 @@ def _aggregate_paragraph_scores(article_rows, paragraph_scores):
 
 def _normalize_batch_scores(payload, article_ids):
     score_values = _score_values_from_payload(payload)
-    expected_count = len(article_ids)
-    returned_count = len(score_values)
-    if returned_count != expected_count:
-        log_runtime_event(
-            "llm_agreement.score_count_mismatch",
-            expected_count=expected_count,
-            returned_count=returned_count,
-        )
+    ordered_scores = _ordered_score_values(
+        score_values=score_values,
+        ordered_ids=article_ids,
+        event_prefix="llm_agreement",
+        id_keys=("article_id", "id"),
+        default_score=0.5,
+    )
 
     rows = []
     for index, article_id in enumerate(article_ids):
-        score_value = score_values[index] if index < returned_count else 0.5
+        score_value = ordered_scores[index]
         rows.append(_score_row(article_id, score_value))
     return rows
 

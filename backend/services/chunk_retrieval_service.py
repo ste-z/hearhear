@@ -1,4 +1,5 @@
 import argparse
+import gc
 import json
 import re
 from pathlib import Path
@@ -726,24 +727,42 @@ def load_chunk_svd_index(
 def _chunk_rows_from_svd_processor(processor):
     articles = getattr(processor, "articles", None)
     if articles is None or not isinstance(articles, pd.DataFrame):
-        raise RuntimeError("Chunk SVD index is missing its precomputed chunk metadata.")
+        raise RuntimeError("Chunk retrieval index is missing its precomputed chunk metadata.")
+
+    columns = {column_name: idx for idx, column_name in enumerate(articles.columns)}
+
+    def row_value(row, column_name, default=None):
+        idx = columns.get(column_name)
+        if idx is None:
+            return default
+        return row[idx]
+
+    def string_value(value):
+        if value is None:
+            return ""
+        try:
+            if pd.isna(value):
+                return ""
+        except (TypeError, ValueError):
+            pass
+        return str(value).strip()
 
     rows = []
-    for row in articles.to_dict(orient="records"):
-        chunk_id = str(row.get("id") or "").strip()
+    for row in articles.itertuples(index=False, name=None):
+        chunk_id = string_value(row_value(row, "id"))
         if not chunk_id:
             continue
         rows.append({
             "chunk_id": chunk_id,
-            "article_id": str(row.get("article_id") or "").strip(),
-            "chunk_index": _safe_int(row.get("chunk_index")),
-            "text": normalize_paragraph_text(row.get("text")),
-            "source": row.get("source"),
-            "year": _safe_int(row.get("year")),
-            "character_count": _safe_int(row.get("character_count")),
-            "word_count": _safe_int(row.get("word_count")),
-            "sentence_start_index": row.get("sentence_start_index"),
-            "sentence_end_index": row.get("sentence_end_index"),
+            "article_id": string_value(row_value(row, "article_id")),
+            "chunk_index": _safe_int(row_value(row, "chunk_index")),
+            "text": normalize_paragraph_text(row_value(row, "text")),
+            "source": row_value(row, "source"),
+            "year": _safe_int(row_value(row, "year")),
+            "character_count": _safe_int(row_value(row, "character_count")),
+            "word_count": _safe_int(row_value(row, "word_count")),
+            "sentence_start_index": row_value(row, "sentence_start_index"),
+            "sentence_end_index": row_value(row, "sentence_end_index"),
         })
     return rows
 
@@ -1036,6 +1055,8 @@ def build_chunk_retrieval_index(
                 load_articles=True,
             )
         chunk_rows = _chunk_rows_from_svd_processor(processor)
+        processor.articles = None
+        gc.collect()
         if not chunk_rows:
             raise RuntimeError("The precomputed chunk retrieval index has no chunk rows.")
 

@@ -46,6 +46,9 @@ ENV PYTHONPATH=$CONTAINER_HOME
 ENV HF_HOME=/opt/huggingface
 ENV TRANSFORMERS_CACHE=/opt/huggingface
 ENV TRANSFORMERS_OFFLINE=1
+ENV WARM_RUNTIME_ASSETS=0
+ENV GUNICORN_TIMEOUT=180
+ENV GUNICORN_LOG_LEVEL=debug
 
 WORKDIR $CONTAINER_HOME
 
@@ -57,4 +60,4 @@ COPY --from=backend-artifacts $CONTAINER_HOME/backend/ $CONTAINER_HOME/backend/
 COPY --from=backend-artifacts $CONTAINER_HOME/data/ $CONTAINER_HOME/data/
 COPY --from=frontend-build /app/frontend/dist $CONTAINER_HOME/frontend/dist
 
-CMD ["python", "-m", "gunicorn", "backend.app:app", "--bind", "0.0.0.0:5000", "--log-level", "debug"]
+CMD ["sh", "-c", "exec python -m gunicorn backend.app:app --bind 0.0.0.0:${PORT:-5000} --log-level ${GUNICORN_LOG_LEVEL:-debug} --timeout ${GUNICORN_TIMEOUT:-180}"]
