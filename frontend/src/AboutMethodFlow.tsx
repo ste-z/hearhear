@@ -20,10 +20,16 @@ type RetrievalMode = 'lexical' | 'semantic' | 'enhanced'
 type AgreementMode = 'nli' | 'llm'
 type NodeKind = 'artifact' | 'process' | 'input' | 'result' | 'output'
 type EdgeTone = 'neutral' | 'active' | 'support'
+type SectionTone = 'primary' | 'stage'
 
 type AboutMethodFlowProps = {
   mode: SearchMode
   onModeChange?: (mode: SearchMode) => void
+}
+
+type ModelReference = {
+  href?: string
+  label: string
 }
 
 type DomainNode = {
@@ -33,8 +39,8 @@ type DomainNode = {
   id: string
   inputs?: string[]
   kind: NodeKind
-  notes?: string[]
   outputs?: string[]
+  references?: ModelReference[]
   title: string
   w: number
 }
@@ -63,13 +69,14 @@ type MethodNodeData = {
   details: string[]
   inputs?: string[]
   kind: NodeKind
-  notes?: string[]
   outputs?: string[]
+  references?: ModelReference[]
   related: boolean
   title: string
 }
 
 type SectionNodeData = {
+  tone: SectionTone
   title: string
 }
 
@@ -101,6 +108,7 @@ type SectionRecord = {
   height: number
   id: string
   position: { x: number; y: number }
+  tone?: SectionTone
   title: string
   width: number
 }
@@ -123,21 +131,10 @@ const searchModeLabels: Record<SearchMode, string> = {
   essay: 'Essay-Guided Search',
 }
 
-const searchModeNotes: Record<SearchMode, string> = {
-  stance: 'Show the compact prompt path that starts from a topic and an opinion.',
-  essay: 'Show the longer writing path that starts from a full draft and can extract a thesis.',
-}
-
 const retrievalModeLabels: Record<RetrievalMode, string> = {
   lexical: 'Lexical',
   semantic: 'Semantic',
   enhanced: 'Enhanced Semantic',
-}
-
-const retrievalModeNotes: Record<RetrievalMode, string> = {
-  lexical: 'Use TF-IDF vectors and an inverted index for exact-term topic matching.',
-  semantic: 'Use truncated-SVD latent vectors for broader topical similarity.',
-  enhanced: 'Use MiniLM embeddings for the most meaning-driven Stage 1 branch.',
 }
 
 const agreementModeLabels: Record<AgreementMode, string> = {
@@ -145,17 +142,12 @@ const agreementModeLabels: Record<AgreementMode, string> = {
   llm: 'LLM Agreement',
 }
 
-const agreementModeNotes: Record<AgreementMode, string> = {
-  nli: 'Route the candidate set into claim pairing and DeBERTa-style stance comparison.',
-  llm: 'Route the candidate set into article-context prompts for Spark-based agreement scoring.',
-}
-
 const nodeKindLabels: Record<NodeKind, string> = {
-  artifact: 'Data / artifact',
-  process: 'Process / method',
+  artifact: 'Prepared data',
+  process: 'Processing step',
   input: 'User input',
-  result: 'Data / result',
-  output: 'User-facing output',
+  result: 'Score / result',
+  output: 'Shown result',
 }
 
 const sectionLabels = [
@@ -165,12 +157,30 @@ const sectionLabels = [
 ] as const
 
 const shapeLegend = [
-  { kind: 'artifact', label: 'Data / artifact' },
-  { kind: 'process', label: 'Process / method' },
+  { kind: 'artifact', label: 'Prepared data' },
+  { kind: 'process', label: 'Processing step' },
   { kind: 'input', label: 'Input' },
   { kind: 'result', label: 'Score / result' },
-  { kind: 'output', label: 'Output' },
+  { kind: 'output', label: 'Shown result' },
 ] as const satisfies ReadonlyArray<{ kind: NodeKind; label: string }>
+
+const modelReferences = {
+  gpt5Nano: {
+    href: 'https://developers.openai.com/api/docs/models/gpt-5-nano',
+    label: 'GPT-5 nano',
+  },
+  gptOss20b: {
+    label: 'gpt-oss-20b',
+  },
+  minilm: {
+    href: 'https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2',
+    label: 'all-MiniLM-L6-v2',
+  },
+  nliDeberta: {
+    href: 'https://huggingface.co/cross-encoder/nli-deberta-v3-small',
+    label: 'NLI DeBERTa v3 small',
+  },
+} as const satisfies Record<string, ModelReference>
 
 const handles: Array<{ id: HandleId; position: Position; type: 'source' | 'target' }> = [
   { id: 'left-in', position: Position.Left, type: 'target' },
@@ -219,7 +229,7 @@ function MethodNode({ data }: NodeProps<Node<MethodNodeData>>): JSX.Element {
 
 function SectionNode({ data }: NodeProps<Node<SectionNodeData>>): JSX.Element {
   return (
-    <div className="about-flow-section-node">
+    <div className={`about-flow-section-node tone-${data.tone}`}>
       <span>{data.title}</span>
     </div>
   )
@@ -265,167 +275,191 @@ const edgeTypes = {
 
 const baseNodes = (): DomainNode[] => [
   {
-    description: 'The Guardian opinion archive is the shared source corpus for every retrieval, ranking, and explanation step.',
+    description: 'The app starts with Guardian opinion articles and keeps their text, links, dates, and article metadata together.',
     details: [
-      'All branches begin from the same article collection.',
-      'Metadata such as publication date can later become part of the final ranking.',
+      'Article text is used for topic matching and summary generation.',
+      'Publication dates stay attached so freshness can be used later in the final rank.',
     ],
     h: 134,
     id: 'corpus',
     kind: 'artifact',
-    notes: ['Guardian archive'],
     outputs: ['Article text', 'Metadata', 'Publication dates'],
     title: 'Guardian opinion archive',
     w: 320,
   },
   {
-    description: 'Publication dates are normalized into a reusable recency feature that can lift newer articles during final ranking.',
+    description: "Each article's publication date becomes a freshness score that can lift newer pieces in the final ranking.",
     details: [
-      'Recency stays separate from topic and agreement scoring.',
-      'This makes freshness an explicit ranking input instead of a hidden assumption.',
+      'The score comes from the article date, not from the user query.',
+      'It stays separate from topic relevance and stance agreement so the ranking weights can treat freshness explicitly.',
     ],
     h: 122,
     id: 'recency',
-    inputs: ['Publication dates'],
-    kind: 'artifact',
-    notes: ['Freshness signal'],
-    outputs: ['Recency feature'],
-    title: 'Recency signal',
+    inputs: ['Article publication date'],
+    kind: 'result',
+    outputs: ['Recency score'],
+    title: 'Recency score',
     w: 300,
   },
   {
-    description: 'An LLM condenses long articles into shorter claim-like snippets that can be compared and synthesized later.',
+    description: 'Before live searching, GPT-5 nano condenses long articles into short summaries of their main claims.',
     details: [
-      'This makes the processing step explicit instead of hiding it inside the summaries artifact.',
-      'The same summary bank later supports NLI-style agreement and the post-ranking overview.',
+      'Article summaries can be generated or recomputed with GPT-5 nano.',
+      'The summaries make it easier to compare a user stance or thesis with each article.',
+      'The same summary bank helps the agreement scorer and the AI overview after results are ranked.',
     ],
     h: 138,
     id: 'summary-process',
     inputs: ['Guardian article text'],
     kind: 'process',
-    notes: ['LLM'],
     outputs: ['Claim-style summary generation'],
+    references: [modelReferences.gpt5Nano],
     title: 'LLM summary generation',
     w: 330,
   },
   {
-    description: 'The generated claim-like snippets become a reusable article-summary bank for later reasoning steps.',
+    description: 'The saved article summaries give each article a shorter claim-focused version for later steps.',
     details: [
-      'This is a stored artifact rather than a method.',
-      'It is most visible when Stage 2 uses NLI and when the interpretation layer writes a debate overview.',
+      'NLI agreement uses these summaries when it compares article claims with the user position.',
+      'The overview can also use them to describe patterns across the retrieved articles.',
     ],
     h: 134,
     id: 'summaries',
     inputs: ['LLM-generated article summaries'],
     kind: 'artifact',
-    notes: ['Claim bank'],
     outputs: ['Claim-style summaries', 'Short article representations'],
+    references: [modelReferences.gpt5Nano],
     title: 'Article summaries',
     w: 340,
   },
   {
-    description: 'Stage 1 produces a topic-relevance score for each article in the corpus.',
+    description: 'Stage 1 gives articles or chunks a topic relevance score based on the selected retrieval method.',
     details: [
-      'This is a data artifact, not a method.',
-      'It becomes the input to candidate filtering before any agreement scoring runs.',
+      'A higher score means the article is closer to the topic query.',
+      'The score helps choose which articles continue and later contributes to the overall score.',
     ],
     h: 122,
     id: 'topic-scores',
     inputs: ['Cosine retrieval outputs'],
-    kind: 'artifact',
-    notes: ['Per-article scores'],
+    kind: 'result',
     outputs: ['Topic relevance scores'],
     title: 'Topic relevance scores',
     w: 300,
   },
   {
-    description: 'The topic-score distribution is filtered so only promising articles continue to the more expensive second stage.',
+    description: 'The app narrows the topic matches before agreement scoring using the Fixed Number or Smart Filter setting.',
     details: [
-      'This is a process block because it decides which articles continue.',
-      'It corresponds to the top-k or threshold gate in the larger method.',
+      'Fixed Number always uses a set number of top matches.',
+      'Smart Filter only sends articles or chunks that are at least the selected relevance level.',
     ],
     h: 136,
     id: 'candidate-selection',
     inputs: ['Topic relevance scores'],
     kind: 'process',
-    notes: ['Top-k', 'Threshold'],
-    outputs: ['Candidate filtering decision'],
+    outputs: ['Candidate articles'],
     title: 'Candidate filtering',
     w: 320,
   },
   {
-    description: 'The filtered candidate set is a reusable article subset that feeds both Stage 2 and the final merger.',
+    description: 'The articles that pass candidate filtering move forward as the candidate set for deeper scoring.',
     details: [
-      'This artifact separates the selected article set from the filtering process that produced it.',
-      'That separation makes the ranking arrows much cleaner and more explainable.',
+      'This keeps the more expensive agreement step focused on likely matches.',
+      'Article-level retrieval and chunk retrieval both end here as article candidates.',
     ],
     h: 124,
     id: 'candidate-set',
     inputs: ['Filtered article ids'],
     kind: 'artifact',
-    notes: ['Stage 1 survivors'],
     outputs: ['Candidate articles'],
     title: 'Candidate set',
     w: 320,
   },
   {
-    description: 'The final ranking method merges topic relevance, agreement, and optional recency into one overall score.',
+    description: 'The final ranking weights combine topic relevance, stance agreement, and recency into one score.',
     details: [
-      'This block is the score merger itself, not the ranked result artifact.',
-      'The incoming arrows show the three score ingredients: topic relevance, stance agreement, and recency.',
+      'Topic relevance answers how closely the article matches the issue.',
+      'Stance agreement answers how the article relates to the user position or thesis.',
+      'Recency can lift newer articles when its ranking weight is enabled.',
     ],
     h: 144,
     id: 'ranking',
-    inputs: ['Topic relevance scores', 'Stance agreement scores', 'Recency signal'],
+    inputs: ['Topic relevance scores', 'Stance agreement scores', 'Recency score'],
     kind: 'process',
-    notes: ['Weighted merge'],
-    outputs: ['Merged ranking score'],
+    outputs: ['Final weighted score'],
     title: 'Weighted score merger',
     w: 320,
   },
   {
-    description: 'The final ranked set is turned into a concrete result artifact that downstream AI tools can read.',
+    description: 'Each candidate article receives one overall score after the weighted merge.',
     details: [
-      'This block separates the ranking method from the ranked article artifact.',
-      'That separation keeps the interpretation arrows out of the ranking process box.',
+      'This score is what the result list uses for ordering.',
+      'Keeping it visible makes clear where the final rank comes from.',
+    ],
+    h: 122,
+    id: 'overall-score',
+    inputs: ['Final weighted score'],
+    kind: 'result',
+    outputs: ['Overall scores'],
+    title: 'Overall score',
+    w: 300,
+  },
+  {
+    description: 'Articles are sorted by overall score and shown as the final results list.',
+    details: [
+      'The ranked list keeps score details, article summaries, dates, and links available for inspection.',
+      'The same results feed the AI overview, per-result explanation, and results chat.',
     ],
     h: 134,
     id: 'ranked-results',
-    inputs: ['Merged ranking score'],
+    inputs: ['Overall scores'],
     kind: 'output',
-    notes: ['Search results'],
     outputs: ['Ordered Guardian articles'],
     title: 'Ranked articles',
     w: 320,
   },
   {
-    description: 'A post-ranking LLM reads the ranked articles and writes a user-friendly overview of support, challenge, and nuance.',
+    description: 'gpt-oss-20b reads the top ranked articles and summarizes the main pattern of support, challenge, and nuance.',
     details: [
-      'This block is a process, not a stored artifact.',
-      'It explains the results after ranking instead of affecting the score order.',
+      'The overview describes the result set as a whole instead of listing one article at a time.',
+      'It uses only the retrieved results and cites the source results it relies on.',
     ],
     h: 140,
     id: 'overview',
     inputs: ['Ranked articles', 'Article summaries'],
     kind: 'process',
-    notes: ['LLM synthesis'],
     outputs: ['Narrative overview', 'Grouped viewpoints'],
+    references: [modelReferences.gptOss20b],
     title: 'LLM results overview',
     w: 320,
   },
   {
-    description: 'The ranked results can also power an interactive chat layer for follow-up questions about the retrieved articles.',
+    description: 'gpt-oss-20b can explain why an individual article ranked where it did.',
     details: [
-      'This is a post-ranking process, not a ranking method.',
-      'It keeps responses grounded in the already ranked article set.',
+      'The explanation uses the query, score breakdown, retrieved evidence, and article metadata.',
+      'It helps users interpret a result after ranking and does not change the article order.',
+    ],
+    h: 140,
+    id: 'ranking-explanation',
+    inputs: ['Ranked articles', 'Score breakdown', 'Retrieved evidence'],
+    kind: 'process',
+    outputs: ['Plain-language rank explanation'],
+    references: [modelReferences.gptOss20b],
+    title: 'LLM ranking explanation',
+    w: 320,
+  },
+  {
+    description: 'LLM results chat lets the user ask follow-up questions grounded in the ranked Guardian articles.',
+    details: [
+      'The chat can answer from the full result set or from selected attached articles.',
+      'It uses the retrieved snippets and article text available to the results page.',
     ],
     h: 140,
     id: 'chat',
     inputs: ['Ranked articles', 'User follow-up questions'],
     kind: 'process',
-    notes: ['Results chat'],
     outputs: ['Source-linked answers'],
-    title: 'Follow-up chat',
+    references: [modelReferences.gptOss20b],
+    title: 'LLM results chat',
     w: 320,
   },
 ]
@@ -433,16 +467,15 @@ const baseNodes = (): DomainNode[] => [
 const getRetrievalArtifactNode = (retrievalMode: RetrievalMode): DomainNode => {
   if (retrievalMode === 'lexical') {
     return {
-      description: 'TF-IDF vectors and a lexical index capture exact-term overlap for the most literal Stage 1 branch.',
+      description: 'A TF-IDF index records which words are distinctive across Guardian articles for exact-term matching.',
       details: [
-        'This corresponds to the TF-IDF and inverted-index path in your original diagram.',
-        'It is a reusable retrieval artifact rather than the retrieval method itself.',
+        'This works best when the topic uses concrete names, phrases, policies, or events likely to appear in article text.',
+        'The live search compares the query against this index to produce topic relevance scores.',
       ],
       h: 142,
       id: 'artifact',
       inputs: ['Guardian article text'],
       kind: 'artifact',
-      notes: ['TF-IDF'],
       outputs: ['TF-IDF vectors', 'Lexical index'],
       title: 'Lexical retrieval index',
       w: 340,
@@ -451,16 +484,15 @@ const getRetrievalArtifactNode = (retrievalMode: RetrievalMode): DomainNode => {
 
   if (retrievalMode === 'semantic') {
     return {
-      description: 'Truncated-SVD projections compress the corpus into a latent semantic space for broader topic matching.',
+      description: 'A truncated-SVD topic map helps the app match articles by broader themes, not only exact words.',
       details: [
-        'This is the semantic artifact branch derived from the TF-IDF representation.',
-        'It stores the searchable latent space rather than performing the search itself.',
+        'The map is built from the article text before the user searches.',
+        'It lets related wording land near the same topic area when Stage 1 scores relevance.',
       ],
       h: 142,
       id: 'artifact',
       inputs: ['TF-IDF term-document matrix'],
       kind: 'artifact',
-      notes: ['SVD'],
       outputs: ['Latent semantic vectors', 'SVD index'],
       title: 'Semantic latent space',
       w: 340,
@@ -468,57 +500,65 @@ const getRetrievalArtifactNode = (retrievalMode: RetrievalMode): DomainNode => {
   }
 
   return {
-    description: 'MiniLM embeddings map articles into a dense meaning space that can be searched semantically at query time.',
+    description: 'MiniLM embeddings store article or chunk meaning in a dense semantic index.',
     details: [
-      'This is the strongest meaning-based retrieval artifact in the chart.',
-      'It stores dense vectors rather than being the retrieval method itself.',
+      'This is useful when the user and an article talk about the same issue with different wording.',
+      'When chunk search is on, the embedding path can search smaller article passages before grouping them back into articles.',
     ],
     h: 142,
     id: 'artifact',
     inputs: ['Guardian article text or semantic chunks'],
     kind: 'artifact',
-    notes: ['MiniLM'],
     outputs: ['Dense embeddings', 'Embedding index'],
+    references: [modelReferences.minilm],
     title: 'Embedding index',
     w: 340,
   }
 }
 
-const getSearchNodes = (
-  searchMode: SearchMode,
-  agreementMode: AgreementMode,
-): DomainNode[] => {
+const getSearchNodes = (searchMode: SearchMode, agreementMode: AgreementMode): DomainNode[] => {
   if (searchMode === 'stance') {
     return [
       {
-        description: 'The stance workflow starts from the compact prompt already used in the interface: a topic plus a position statement.',
+        description: 'The user enters a topic to search for and a position to compare articles against.',
         details: [
-          'This is the main user-provided input artifact.',
-          'It gives the system both a topical anchor and a stance signal from the start.',
+          'The topic field drives Stage 1 topic retrieval.',
+          'The stance field is used later to decide whether candidate articles support, challenge, or complicate the position.',
         ],
         h: 132,
         id: 'input',
         kind: 'input',
-        notes: ['User prompt'],
         outputs: ['Topic + stance query'],
         title: 'Topic + stance prompt',
         w: 320,
       },
       {
-        description: agreementMode === 'llm'
-          ? 'The prompt can be cleaned and then reused both for retrieval and for Stage 2 LLM scoring.'
-          : 'The prompt can be cleaned before retrieval, correcting typos or sharpening wording without taking control away from the user.',
+        description: 'The app can flag likely typos in the topic using the retrieval vocabulary, then lets the user choose a correction or search anyway.',
         details: [
-          'This is a process block because it transforms the query.',
-          'The cleaned prompt can continue into Stage 1 retrieval and Stage 2 setup.',
+          'The correction is spelling-focused; it does not try to change the user stance.',
+          'It is useful when a misspelled topic would otherwise miss relevant articles.',
         ],
         h: 126,
         id: 'refine',
         inputs: ['Topic + stance query'],
         kind: 'process',
-        notes: ['Query cleanup'],
-        outputs: ['Cleaned stance query'],
-        title: 'Query cleanup',
+        outputs: ['Corrected topic option'],
+        title: 'Query typo correction',
+        w: 320,
+      },
+      {
+        description: 'gpt-oss-20b can propose clearer topic and stance alternatives while preserving the user position.',
+        details: [
+          'The rewritten topic is tuned to the selected Stage 1 retrieval method.',
+          'The rewritten stance should make agreement scoring clearer without changing the underlying belief.',
+        ],
+        h: 136,
+        id: 'query-rewrite',
+        inputs: ['Corrected topic option', 'Original stance'],
+        kind: 'process',
+        outputs: ['Rewritten topic + stance options'],
+        references: [modelReferences.gptOss20b],
+        title: 'Query rewrite with LLM',
         w: 320,
       },
     ]
@@ -527,15 +567,14 @@ const getSearchNodes = (
   if (agreementMode === 'llm') {
     return [
       {
-        description: 'The essay workflow begins with the full draft, which can directly drive both retrieval and Stage 2 LLM scoring.',
+        description: 'The user provides an essay draft that can drive both article retrieval and LLM agreement scoring.',
         details: [
-          'This is the user-provided input artifact.',
-          'When LLM agreement is selected, the full essay can remain the Stage 2 context without extracting a thesis sentence.',
+          'The full draft is used as the topic query for Stage 1.',
+          'With LLM Agreement, the full essay can also provide context for the agreement judgment.',
         ],
         h: 132,
         id: 'input',
         kind: 'input',
-        notes: ['Full essay'],
         outputs: ['Essay draft'],
         title: 'Essay intake',
         w: 320,
@@ -545,30 +584,28 @@ const getSearchNodes = (
 
   return [
     {
-      description: 'The essay workflow begins with the full draft, which drives topic retrieval before a compact thesis is selected.',
+      description: 'The user provides an essay draft that drives topic retrieval before a thesis is selected for NLI scoring.',
       details: [
-        'This is the main essay input artifact.',
-        'The whole draft stays useful for Stage 1 even though Stage 2 NLI will later use a thesis sentence.',
+        'The full draft is used as the topic query for Stage 1.',
+        'For NLI Agreement, the app also needs a shorter thesis-style statement for the stance comparison.',
       ],
       h: 132,
       id: 'input',
       kind: 'input',
-      notes: ['Full essay'],
       outputs: ['Essay draft'],
       title: 'Essay intake',
       w: 320,
     },
     {
-      description: 'A thesis sentence is proposed from the draft and then confirmed or overridden by the user before NLI agreement scoring.',
+      description: 'The app proposes a thesis sentence from the essay, and the user can accept or override it before NLI scoring.',
       details: [
-        'This is a processing block because it transforms the essay into a compact claim representation.',
-        'It condenses the claimness-scoring and user-choice loop from the original chart.',
+        'The selected thesis becomes the statement that candidate articles are compared against.',
+        'The full essay still remains useful for Stage 1 topic retrieval.',
       ],
       h: 126,
       id: 'refine',
       inputs: ['Essay draft'],
       kind: 'process',
-      notes: ['Thesis selection'],
       outputs: ['Selected thesis sentence'],
       title: 'Thesis selection',
       w: 320,
@@ -576,10 +613,7 @@ const getSearchNodes = (
   ]
 }
 
-const getRetrievalProcessNode = (
-  searchMode: SearchMode,
-  retrievalMode: RetrievalMode,
-): DomainNode => {
+const getRetrievalProcessNode = (searchMode: SearchMode, retrievalMode: RetrievalMode): DomainNode => {
   const title = (
     retrievalMode === 'lexical'
       ? 'Cosine retrieval over TF-IDF'
@@ -590,26 +624,26 @@ const getRetrievalProcessNode = (
 
   const description = (
     retrievalMode === 'lexical'
-      ? 'The cleaned query is compared against TF-IDF article vectors so exact terms and distinctive vocabulary drive topic relevance.'
+      ? 'The topic query is compared with TF-IDF article vectors so exact terms and distinctive vocabulary drive relevance.'
       : retrievalMode === 'semantic'
-        ? 'The query is compared inside a latent semantic space so related topics can surface even without exact phrase overlap.'
-        : 'The query is compared inside a dense embedding space so semantic closeness can drive topic retrieval.'
+        ? 'The topic query is compared inside the SVD topic map so related themes can surface even without exact phrase overlap.'
+        : 'The topic query is compared inside the MiniLM embedding index so semantic closeness can drive retrieval.'
   )
 
   const details = (
     retrievalMode === 'lexical'
       ? [
-          'This is the most literal Stage 1 method.',
-          'The retrieval artifact stays separate from the cosine-similarity method used to score it.',
+          'Lexical retrieval is strongest when the query wording matches article wording.',
+          'It produces the first topic relevance scores before agreement scoring begins.',
         ]
       : retrievalMode === 'semantic'
         ? [
-            'This is the semantic Stage 1 method over an SVD-based artifact.',
-            'The method is still cosine-style comparison even though the artifact is different.',
+            'Semantic retrieval is useful when articles use related terms rather than the exact same words.',
+            'It produces the first topic relevance scores before agreement scoring begins.',
           ]
         : [
-            'This is the embedding-based Stage 1 method.',
-            'The method compares dense vectors rather than exact term weights.',
+            'Enhanced semantic retrieval uses all-MiniLM-L6-v2 over article-level embeddings or semantic chunks.',
+            'It produces the first topic relevance scores before agreement scoring begins.',
           ]
   )
 
@@ -619,7 +653,7 @@ const getRetrievalProcessNode = (
     h: 150,
     id: 'retrieval',
     inputs: [
-      searchMode === 'stance' ? 'Cleaned stance query' : 'Essay draft',
+      searchMode === 'stance' ? 'Topic query' : 'Essay draft',
       retrievalMode === 'lexical'
         ? 'TF-IDF lexical index'
         : retrievalMode === 'semantic'
@@ -627,35 +661,33 @@ const getRetrievalProcessNode = (
           : 'Embedding index',
     ],
     kind: 'process',
-    notes: ['Cosine similarity'],
     outputs: ['Topic similarity computation'],
+    references: retrievalMode === 'enhanced' ? [modelReferences.minilm] : undefined,
     title,
     w: 380,
   }
 }
 
-const getStageTwoPreparationNode = (
-  searchMode: SearchMode,
-  agreementMode: AgreementMode,
-): DomainNode => {
+const getStageTwoPreparationNode = (searchMode: SearchMode, agreementMode: AgreementMode): DomainNode => {
   if (agreementMode === 'nli') {
     return {
       description: searchMode === 'stance'
-        ? 'The candidate set is paired with the user stance and article-summary claims to prepare premise-hypothesis comparisons.'
-        : 'The candidate set is paired with the selected thesis sentence and article-summary claims to prepare premise-hypothesis comparisons.',
+        ? 'Candidate articles are paired with the user stance and article summaries so NLI can compare claims.'
+        : 'Candidate articles are paired with the selected thesis and article summaries so NLI can compare claims.',
       details: [
-        'This is a process block that constructs Stage 2 inputs.',
-        'The summaries remain a separate artifact, while the pairing itself is the method.',
+        'The article summary becomes one side of the comparison.',
+        searchMode === 'stance'
+          ? 'The user stance becomes the other side.'
+          : 'The selected thesis becomes the other side.',
       ],
       h: 140,
       id: 'stage-two-prep',
       inputs: [
         'Candidate set',
-        searchMode === 'stance' ? 'Cleaned stance query' : 'Selected thesis sentence',
+        searchMode === 'stance' ? 'User stance' : 'Selected thesis sentence',
         'Article summaries',
       ],
       kind: 'process',
-      notes: ['Pair construction'],
       outputs: ['Premise / hypothesis pairs'],
       title: 'Claim pairing',
       w: 340,
@@ -664,46 +696,42 @@ const getStageTwoPreparationNode = (
 
   return {
     description: searchMode === 'stance'
-      ? 'The candidate set is packaged with the cleaned stance prompt so an LLM can judge support, contradiction, and nuance.'
-      : 'The candidate set is packaged with the full essay so an LLM can judge support, contradiction, and nuance in context.',
+      ? 'Candidate articles are packaged with the user stance so an LLM can judge support, contradiction, and nuance.'
+      : 'Candidate articles are packaged with the full essay so an LLM can judge support, contradiction, and nuance in context.',
     details: [
-      'This is a process block that assembles the LLM comparison context.',
-      'It makes the prompt-building step explicit instead of hiding it inside the scorer.',
+      'The LLM sees the user argument and the article context together.',
+      'This is where the app prepares the comparison prompt before asking for an agreement judgment.',
     ],
     h: 140,
     id: 'stage-two-prep',
     inputs: [
       'Candidate set',
-      searchMode === 'stance' ? 'Cleaned stance query' : 'Essay draft',
+      searchMode === 'stance' ? 'User stance' : 'Essay draft',
       'Retrieved article context',
     ],
     kind: 'process',
-    notes: ['Prompt assembly'],
     outputs: ['LLM comparison prompts'],
     title: 'Prompt assembly',
     w: 340,
   }
 }
 
-const getAgreementNode = (
-  searchMode: SearchMode,
-  agreementMode: AgreementMode,
-): DomainNode => {
+const getAgreementNode = (searchMode: SearchMode, agreementMode: AgreementMode): DomainNode => {
   if (agreementMode === 'nli') {
     return {
       description: searchMode === 'stance'
-        ? 'An NLI model rescales candidate articles by whether they support, challenge, or stay neutral toward the user stance.'
-        : 'An NLI model rescales candidate articles by whether they support, challenge, or stay neutral toward the selected thesis.',
+        ? 'The NLI DeBERTa model scores whether each article supports, challenges, or stays neutral toward the user stance.'
+        : 'The NLI DeBERTa model scores whether each article supports, challenges, or stays neutral toward the selected thesis.',
       details: [
-        'This block is the Stage 2 method itself.',
-        'It consumes paired claims and produces agreement judgments.',
+        'It compares short claim pairs instead of reading the whole essay or article.',
+        'The output becomes a stance agreement score for each candidate article.',
       ],
       h: 140,
       id: 'agreement',
       inputs: ['Premise / hypothesis pairs'],
       kind: 'process',
-      notes: ['NLI', 'DeBERTa'],
       outputs: ['Per-candidate stance judgments'],
+      references: [modelReferences.nliDeberta],
       title: 'NLI agreement scorer',
       w: 300,
     }
@@ -711,18 +739,18 @@ const getAgreementNode = (
 
   return {
     description: searchMode === 'stance'
-      ? 'An LLM rescales candidate articles by interpreting their relationship to the user’s stated position.'
-      : 'An LLM rescales candidate articles by interpreting their relationship to the full essay argument and context.',
+      ? 'gpt-oss-20b scores how each candidate article relates to the user position.'
+      : 'gpt-oss-20b scores how each candidate article relates to the full essay argument and context.',
     details: [
-      'This block is the Stage 2 method itself.',
-      'It uses richer context than NLI, which can help capture nuance beyond short claim pairs.',
+      'The LLM can use richer article context than the short NLI claim pairs.',
+      'The output becomes a stance agreement score for each candidate article.',
     ],
     h: 140,
     id: 'agreement',
     inputs: ['LLM comparison prompts'],
     kind: 'process',
-    notes: ['LLM', 'Spark'],
     outputs: ['Per-candidate stance judgments'],
+    references: [modelReferences.gptOss20b],
     title: 'LLM agreement scorer',
     w: 300,
   }
@@ -730,18 +758,18 @@ const getAgreementNode = (
 
 const getAgreementScoresNode = (agreementMode: AgreementMode): DomainNode => ({
   description: agreementMode === 'nli'
-    ? 'The NLI judgments become per-candidate stance agreement scores for the final weighted merge.'
-    : 'The LLM judgments become per-candidate stance agreement scores for the final weighted merge.',
+    ? 'The NLI judgments become stance agreement scores for the candidate articles.'
+    : 'The LLM judgments become stance agreement scores for the candidate articles.',
   details: [
-    'This is a scoring result, not the scoring method.',
-    'It makes the final score inputs explicit beside topic relevance and recency.',
+    'These scores say how strongly each candidate aligns with the user stance or thesis.',
+    'They join topic relevance and recency in the final weighted score.',
   ],
   h: 112,
   id: 'agreement-scores',
   inputs: ['Per-candidate stance judgments'],
   kind: 'result',
-  notes: [agreementMode === 'nli' ? 'NLI output' : 'LLM output'],
   outputs: ['Stance agreement scores'],
+  references: agreementMode === 'nli' ? [modelReferences.nliDeberta] : [modelReferences.gptOss20b],
   title: 'Stance agreement scores',
   w: 280,
 })
@@ -765,15 +793,15 @@ const buildDomainGraph = (
     {
       id: 'corpus-to-artifact',
       source: 'corpus',
-      sourceHandle: 'bottom-out',
+      sourceHandle: 'right-out',
       target: 'artifact',
-      targetHandle: 'top-in',
+      targetHandle: 'left-in',
       tone: 'active',
     },
     {
       id: 'corpus-to-summary-process',
       source: 'corpus',
-      sourceHandle: 'left-out',
+      sourceHandle: 'right-out',
       target: 'summary-process',
       targetHandle: 'left-in',
       tone: 'support',
@@ -829,17 +857,17 @@ const buildDomainGraph = (
     {
       id: 'stage-two-prep-to-agreement',
       source: 'stage-two-prep',
-      sourceHandle: 'bottom-out',
+      sourceHandle: 'right-out',
       target: 'agreement',
-      targetHandle: 'top-in',
+      targetHandle: 'left-in',
       tone: 'active',
     },
     {
       id: 'agreement-to-agreement-scores',
       source: 'agreement',
-      sourceHandle: 'bottom-out',
+      sourceHandle: 'right-out',
       target: 'agreement-scores',
-      targetHandle: 'top-in',
+      targetHandle: 'left-in',
       tone: 'active',
     },
     {
@@ -861,14 +889,22 @@ const buildDomainGraph = (
     {
       id: 'recency-to-ranking',
       source: 'recency',
-      sourceHandle: 'right-out',
+      sourceHandle: 'top-out',
       target: 'ranking',
       targetHandle: 'bottom-in',
       tone: 'support',
     },
     {
-      id: 'ranking-to-ranked-results',
+      id: 'ranking-to-overall-score',
       source: 'ranking',
+      sourceHandle: 'right-out',
+      target: 'overall-score',
+      targetHandle: 'left-in',
+      tone: 'active',
+    },
+    {
+      id: 'overall-score-to-ranked-results',
+      source: 'overall-score',
       sourceHandle: 'right-out',
       target: 'ranked-results',
       targetHandle: 'left-in',
@@ -879,7 +915,15 @@ const buildDomainGraph = (
       source: 'ranked-results',
       sourceHandle: 'top-out',
       target: 'overview',
-      targetHandle: 'bottom-in',
+      targetHandle: 'left-in',
+      tone: 'support',
+    },
+    {
+      id: 'ranked-results-to-ranking-explanation',
+      source: 'ranked-results',
+      sourceHandle: 'right-out',
+      target: 'ranking-explanation',
+      targetHandle: 'left-in',
       tone: 'support',
     },
     {
@@ -887,7 +931,7 @@ const buildDomainGraph = (
       source: 'ranked-results',
       sourceHandle: 'bottom-out',
       target: 'chat',
-      targetHandle: 'top-in',
+      targetHandle: 'left-in',
       tone: 'support',
     },
   ]
@@ -897,17 +941,25 @@ const buildDomainGraph = (
       {
         id: 'input-to-refine',
         source: 'input',
-        sourceHandle: 'bottom-out',
+        sourceHandle: 'top-out',
         target: 'refine',
-        targetHandle: 'top-in',
+        targetHandle: 'bottom-in',
         tone: 'support',
       },
       {
-        id: 'refine-to-retrieval',
+        id: 'refine-to-query-rewrite',
         source: 'refine',
-        sourceHandle: 'bottom-out',
+        sourceHandle: 'top-out',
+        target: 'query-rewrite',
+        targetHandle: 'bottom-in',
+        tone: 'support',
+      },
+      {
+        id: 'query-rewrite-to-retrieval',
+        source: 'query-rewrite',
+        sourceHandle: 'top-out',
         target: 'retrieval',
-        targetHandle: 'top-in',
+        targetHandle: 'bottom-in',
         tone: 'neutral',
       },
     )
@@ -916,33 +968,32 @@ const buildDomainGraph = (
       {
         id: 'input-to-retrieval',
         source: 'input',
-        sourceHandle: 'left-out',
+        sourceHandle: 'top-out',
         target: 'retrieval',
-        targetHandle: 'left-in',
+        targetHandle: 'bottom-in',
         tone: 'neutral',
       },
       {
         id: 'input-to-refine',
         source: 'input',
-        sourceHandle: 'bottom-out',
+        sourceHandle: 'top-out',
         target: 'refine',
-        targetHandle: 'top-in',
+        targetHandle: 'bottom-in',
         tone: 'support',
       },
     )
   } else {
-    edges.push(
-      {
-        id: 'input-to-retrieval',
-        source: 'input',
-        sourceHandle: 'left-out',
-        target: 'retrieval',
-        targetHandle: 'left-in',
-        tone: 'neutral',
-      },
-    )
+    edges.push({
+      id: 'input-to-retrieval',
+      source: 'input',
+      sourceHandle: 'top-out',
+      target: 'retrieval',
+      targetHandle: 'bottom-in',
+      tone: 'neutral',
+    })
   }
-  return { nodes, edges }
+
+  return { edges, nodes }
 }
 
 const sectionLayout: SectionRecord[] = [
@@ -950,70 +1001,79 @@ const sectionLayout: SectionRecord[] = [
     height: 940,
     id: 'section-source',
     position: { x: 40, y: 40 },
+    tone: 'primary',
     title: sectionLabels[0],
-    width: 320,
+    width: 700,
   },
   {
     height: 940,
     id: 'section-live',
-    position: { x: 400, y: 40 },
+    position: { x: 760, y: 40 },
+    tone: 'primary',
     title: sectionLabels[1],
-    width: 1420,
+    width: 2760,
+  },
+  {
+    height: 240,
+    id: 'section-stage-one',
+    position: { x: 840, y: 130 },
+    tone: 'stage',
+    title: 'Stage 1: Topic relevance',
+    width: 820,
+  },
+  {
+    height: 250,
+    id: 'section-stage-two',
+    position: { x: 1840, y: 620 },
+    tone: 'stage',
+    title: 'Stage 2: Stance agreement',
+    width: 1000,
   },
   {
     height: 940,
     id: 'section-interpretation',
-    position: { x: 1860, y: 40 },
+    position: { x: 3570, y: 40 },
+    tone: 'primary',
     title: sectionLabels[2],
-    width: 360,
+    width: 800,
   },
 ]
 
 const methodNodeLayout: Record<string, LayoutBox> = {
-  agreement: { height: 124, width: 260, x: 1200, y: 545 },
-  'agreement-scores': { height: 112, width: 260, x: 1200, y: 735 },
-  artifact: { height: 116, width: 250, x: 75, y: 260 },
-  'candidate-selection': { height: 118, width: 250, x: 795, y: 435 },
-  'candidate-set': { height: 110, width: 250, x: 795, y: 650 },
-  chat: { height: 124, width: 270, x: 1910, y: 745 },
-  corpus: { height: 108, width: 250, x: 75, y: 105 },
-  input: { height: 112, width: 250, x: 445, y: 105 },
-  overview: { height: 124, width: 270, x: 1910, y: 250 },
-  'ranked-results': { height: 118, width: 270, x: 1910, y: 545 },
-  ranking: { height: 126, width: 280, x: 1530, y: 735 },
-  recency: { height: 110, width: 250, x: 75, y: 770 },
-  refine: { height: 110, width: 250, x: 445, y: 275 },
-  retrieval: { height: 124, width: 250, x: 445, y: 470 },
-  'stage-two-prep': { height: 124, width: 260, x: 1200, y: 330 },
-  summaries: { height: 110, width: 250, x: 75, y: 620 },
-  'summary-process': { height: 110, width: 250, x: 75, y: 450 },
-  'topic-scores': { height: 110, width: 250, x: 795, y: 275 },
+  agreement: { height: 118, width: 280, x: 2220, y: 686 },
+  'agreement-scores': { height: 112, width: 280, x: 2540, y: 689 },
+  artifact: { height: 126, width: 280, x: 430, y: 185 },
+  'candidate-selection': { height: 124, width: 300, x: 1280, y: 410 },
+  'candidate-set': { height: 118, width: 300, x: 1280, y: 686 },
+  chat: { height: 124, width: 320, x: 3970, y: 850 },
+  corpus: { height: 110, width: 250, x: 85, y: 300 },
+  input: { height: 118, width: 300, x: 880, y: 730 },
+  overview: { height: 124, width: 320, x: 3970, y: 490 },
+  'overall-score': { height: 118, width: 300, x: 3225, y: 686 },
+  'query-rewrite': { height: 124, width: 300, x: 880, y: 410 },
+  'ranked-results': { height: 118, width: 300, x: 3610, y: 686 },
+  ranking: { height: 126, width: 300, x: 2880, y: 682 },
+  'ranking-explanation': { height: 124, width: 320, x: 3970, y: 683 },
+  recency: { height: 110, width: 300, x: 2880, y: 860 },
+  refine: { height: 118, width: 300, x: 880, y: 570 },
+  retrieval: { height: 126, width: 300, x: 880, y: 185 },
+  'stage-two-prep': { height: 118, width: 280, x: 1900, y: 686 },
+  summaries: { height: 118, width: 280, x: 430, y: 585 },
+  'summary-process': { height: 124, width: 280, x: 430, y: 385 },
+  'topic-scores': { height: 112, width: 300, x: 1280, y: 192 },
 }
 
 const manualEdgeWaypoints: Record<string, (start: RoutePoint, end: RoutePoint) => RoutePoint[]> = {
+  'corpus-to-artifact': (start, end) => [
+    { x: start.x + 45, y: start.y },
+    { x: start.x + 45, y: end.y },
+  ],
   'corpus-to-summary-process': (start, end) => [
-    { x: 56, y: start.y },
-    { x: 56, y: end.y },
-  ],
-  'candidate-set-to-stage-two-prep': (start, end) => [
-    { x: 1110, y: start.y },
-    { x: 1110, y: end.y },
-  ],
-  'input-to-retrieval': (start, end) => [
-    { x: 415, y: start.y },
-    { x: 415, y: end.y },
+    { x: start.x + 45, y: start.y },
+    { x: start.x + 45, y: end.y },
   ],
   'topic-scores-to-ranking': (start, end) => [
     { x: end.x, y: start.y },
-  ],
-  'recency-to-ranking': (start, end) => [
-    { x: 380, y: start.y },
-    { x: 380, y: 925 },
-    { x: end.x, y: 925 },
-  ],
-  'topic-scores-to-candidate-selection': (start, end) => [
-    { x: start.x, y: 405 },
-    { x: end.x, y: 405 },
   ],
 }
 
@@ -1069,11 +1129,7 @@ const cleanRoutePoints = (points: RoutePoint[]): RoutePoint[] => (
   }, [])
 )
 
-const defaultEdgeWaypoints = (
-  edge: DomainEdge,
-  start: RoutePoint,
-  end: RoutePoint,
-): RoutePoint[] => {
+const defaultEdgeWaypoints = (edge: DomainEdge, start: RoutePoint, end: RoutePoint): RoutePoint[] => {
   const sourceIsHorizontal = isHorizontalHandle(edge.sourceHandle)
   const targetIsHorizontal = isHorizontalHandle(edge.targetHandle)
 
@@ -1100,10 +1156,7 @@ const defaultEdgeWaypoints = (
   return [{ x: start.x, y: end.y }]
 }
 
-const routeEdge = (
-  edge: DomainEdge,
-  nodesById: Map<string, LayoutNodeRecord>,
-): RoutePoint[] => {
+const routeEdge = (edge: DomainEdge, nodesById: Map<string, LayoutNodeRecord>): RoutePoint[] => {
   const sourceNode = nodesById.get(edge.source)
   const targetNode = nodesById.get(edge.target)
 
@@ -1116,6 +1169,55 @@ const routeEdge = (
   const waypoints = manualEdgeWaypoints[edge.id]?.(start, end) ?? defaultEdgeWaypoints(edge, start, end)
 
   return cleanRoutePoints([start, ...waypoints, end])
+}
+
+const layoutGraph = (
+  searchMode: SearchMode,
+  retrievalMode: RetrievalMode,
+  agreementMode: AgreementMode,
+): { edges: LayoutEdgeRecord[]; nodes: LayoutNodeRecord[]; sections: SectionRecord[] } => {
+  const domain = buildDomainGraph(searchMode, retrievalMode, agreementMode)
+  const nodes = domain.nodes.map((node) => {
+    const layoutNode = methodNodeLayout[node.id] ?? {
+      height: node.h,
+      width: node.w,
+      x: 0,
+      y: 0,
+    }
+
+    return {
+      data: {
+        description: node.description,
+        details: node.details,
+        inputs: node.inputs,
+        kind: node.kind,
+        outputs: node.outputs,
+        references: node.references,
+        related: false,
+        title: node.title,
+      },
+      height: layoutNode.height,
+      id: node.id,
+      position: {
+        x: layoutNode.x,
+        y: layoutNode.y,
+      },
+      width: layoutNode.width,
+    }
+  })
+
+  const nodesById = new Map(nodes.map((node) => [node.id, node]))
+  const edges = domain.edges.map((edge) => ({
+    id: edge.id,
+    points: routeEdge(edge, nodesById),
+    source: edge.source,
+    sourceHandle: edge.sourceHandle,
+    target: edge.target,
+    targetHandle: edge.targetHandle,
+    tone: edge.tone,
+  }))
+
+  return { edges, nodes, sections: sectionLayout }
 }
 
 const decorateFlow = (
@@ -1141,6 +1243,7 @@ const decorateFlow = (
 
   const sectionNodes: Array<Node<SectionNodeData>> = layoutSections.map((section) => ({
     data: {
+      tone: section.tone ?? 'primary',
       title: section.title,
     },
     draggable: false,
@@ -1152,7 +1255,7 @@ const decorateFlow = (
       width: section.width,
     },
     type: 'section',
-    zIndex: 0,
+    zIndex: section.tone === 'stage' ? 1 : 0,
   }))
 
   const methodNodes: Array<Node<MethodNodeData>> = layoutNodes.map((node) => ({
@@ -1194,71 +1297,16 @@ const decorateFlow = (
   }
 }
 
-const layoutGraph = async (
-  searchMode: SearchMode,
-  retrievalMode: RetrievalMode,
-  agreementMode: AgreementMode,
-): Promise<{ edges: LayoutEdgeRecord[]; nodes: LayoutNodeRecord[]; sections: SectionRecord[] }> => {
-  const domain = buildDomainGraph(searchMode, retrievalMode, agreementMode)
-
-  const nodes = domain.nodes.map((node) => {
-    const layoutNode = methodNodeLayout[node.id] ?? {
-      height: node.h,
-      width: node.w,
-      x: 0,
-      y: 0,
-    }
-
-    return {
-      data: {
-        description: node.description,
-        details: node.details,
-        inputs: node.inputs,
-        kind: node.kind,
-        notes: node.notes,
-        outputs: node.outputs,
-        related: false,
-        title: node.title,
-      },
-      height: layoutNode.height,
-      id: node.id,
-      position: {
-        x: layoutNode.x,
-        y: layoutNode.y,
-      },
-      width: layoutNode.width,
-    }
-  })
-
-  const nodesById = new Map(nodes.map((node) => [node.id, node]))
-
-  const edges = domain.edges.map((edge) => (
-    {
-      id: edge.id,
-      points: routeEdge(edge, nodesById),
-      source: edge.source,
-      sourceHandle: edge.sourceHandle,
-      target: edge.target,
-      targetHandle: edge.targetHandle,
-      tone: edge.tone,
-    }
-  ))
-
-  return { edges, nodes, sections: sectionLayout }
-}
-
 const renderControlGroup = <T extends string>(
   label: string,
   options: readonly T[],
   activeOption: T,
   onChange: (option: T) => void,
   labels: Record<T, string>,
-  note: string,
 ): JSX.Element => (
   <section className="about-system-control-group">
     <div className="about-system-control-copy">
       <span>{label}</span>
-      <p>{note}</p>
     </div>
 
     <div className="about-system-selector" role="tablist" aria-label={label}>
@@ -1292,25 +1340,10 @@ function AboutMethodFlow({ mode, onModeChange }: AboutMethodFlowProps): JSX.Elem
   }, [mode])
 
   useEffect(() => {
-    let cancelled = false
-
-    layoutGraph(searchMode, retrievalMode, agreementMode)
-      .then(({ nodes, edges, sections }) => {
-        if (cancelled) {
-          return
-        }
-
-        setLayoutNodes(nodes)
-        setLayoutEdges(edges)
-        setLayoutSections(sections)
-      })
-      .catch((error) => {
-        console.error('Failed to layout method flow', error)
-      })
-
-    return () => {
-      cancelled = true
-    }
+    const layout = layoutGraph(searchMode, retrievalMode, agreementMode)
+    setLayoutNodes(layout.nodes)
+    setLayoutEdges(layout.edges)
+    setLayoutSections(layout.sections)
   }, [searchMode, retrievalMode, agreementMode])
 
   useEffect(() => {
@@ -1352,32 +1385,9 @@ function AboutMethodFlow({ mode, onModeChange }: AboutMethodFlowProps): JSX.Elem
       </div>
 
       <div className="about-system-controls">
-        {renderControlGroup(
-          'Search mode',
-          searchModes,
-          searchMode,
-          handleSearchModeChange,
-          searchModeLabels,
-          searchModeNotes[searchMode],
-        )}
-
-        {renderControlGroup(
-          'Stage 1',
-          retrievalModes,
-          retrievalMode,
-          setRetrievalMode,
-          retrievalModeLabels,
-          retrievalModeNotes[retrievalMode],
-        )}
-
-        {renderControlGroup(
-          'Stage 2',
-          agreementModes,
-          agreementMode,
-          setAgreementMode,
-          agreementModeLabels,
-          agreementModeNotes[agreementMode],
-        )}
+        {renderControlGroup('Search mode', searchModes, searchMode, handleSearchModeChange, searchModeLabels)}
+        {renderControlGroup('Stage 1', retrievalModes, retrievalMode, setRetrievalMode, retrievalModeLabels)}
+        {renderControlGroup('Stage 2', agreementModes, agreementMode, setAgreementMode, agreementModeLabels)}
       </div>
 
       <div className="about-flow-meta">
@@ -1437,21 +1447,17 @@ function AboutMethodFlow({ mode, onModeChange }: AboutMethodFlowProps): JSX.Elem
         <section className={`about-system-detail kind-${activeNode.data.kind}`} aria-live="polite">
           <div className="about-system-detail-header">
             <div>
-              <p className="about-system-detail-eyebrow">Focused block</p>
+              <p className="about-system-detail-eyebrow">Selected step</p>
               <h4>{activeNode.data.title}</h4>
             </div>
+            <span className={`about-system-type-tag kind-${activeNode.data.kind}`}>
+              {nodeKindLabels[activeNode.data.kind]}
+            </span>
           </div>
 
           <p className="about-system-detail-summary">{activeNode.data.description}</p>
 
           <div className="about-system-detail-grid">
-            <div className="about-system-detail-card">
-              <span>Type</span>
-              <ul>
-                <li>{nodeKindLabels[activeNode.data.kind]}</li>
-              </ul>
-            </div>
-
             {Array.isArray(activeNode.data.inputs) && activeNode.data.inputs.length > 0 && (
               <div className="about-system-detail-card">
                 <span>Inputs</span>
@@ -1464,7 +1470,7 @@ function AboutMethodFlow({ mode, onModeChange }: AboutMethodFlowProps): JSX.Elem
             )}
 
             <div className="about-system-detail-card">
-              <span>Details</span>
+              <span>How it works</span>
               <ul>
                 {activeNode.data.details.map((detail) => (
                   <li key={detail}>{detail}</li>
@@ -1483,14 +1489,28 @@ function AboutMethodFlow({ mode, onModeChange }: AboutMethodFlowProps): JSX.Elem
               </div>
             )}
 
-            {Array.isArray(activeNode.data.notes) && activeNode.data.notes.length > 0 && (
-              <div className="about-system-detail-card">
-                <span>Notes</span>
-                <ul>
-                  {activeNode.data.notes.map((item) => (
-                    <li key={item}>{item}</li>
+            {Array.isArray(activeNode.data.references) && activeNode.data.references.length > 0 && (
+              <div className="about-system-detail-card about-system-reference-card">
+                <span>Models and references</span>
+                <div className="about-system-detail-tags">
+                  {activeNode.data.references.map((reference) => (
+                    reference.href ? (
+                      <a
+                        key={`${reference.label}-${reference.href}`}
+                        className="about-system-detail-tag"
+                        href={reference.href}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {reference.label}
+                      </a>
+                    ) : (
+                      <span key={reference.label} className="about-system-detail-tag">
+                        {reference.label}
+                      </span>
+                    )
                   ))}
-                </ul>
+                </div>
               </div>
             )}
           </div>

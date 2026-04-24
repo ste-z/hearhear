@@ -2867,6 +2867,9 @@ function App(): JSX.Element {
         behavior: 'smooth',
       })
     }
+    setIntroStage(2)
+    setTypedTopic(finalIntroTopic)
+    setTypedClaim(introClaimSequence[introClaimSequence.length - 1])
     setActiveTopNavPage('search')
     setIsSearchStageVisible(true)
   }
