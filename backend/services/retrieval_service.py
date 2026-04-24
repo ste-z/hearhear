@@ -936,12 +936,15 @@ def stance_search(
     chunking_mode="none",
     chunk_candidate_top_k=DEFAULT_CHUNK_CANDIDATE_TOP_K,
     chunk_article_top_k=DEFAULT_CHUNK_ARTICLE_TOP_K,
+    progress_callback=None,
 ):
     from backend.stance_processing.stance_rerank import rerank_article_matches
 
     topic_text = str(topic or "").strip()
     opinion_text = str(opinion or "").strip()
     if len(topic_text) < 2 or len(opinion_text) < 2:
+        if progress_callback:
+            progress_callback("complete", "Search complete", 1.0, result_count=0)
         return {
             "results": [],
             "empty_results_message": None,
@@ -951,6 +954,8 @@ def stance_search(
         resolved_model = "svd"
     resolved_selection_mode = normalize_rerank_selection_mode(rerank_selection_mode)
 
+    if progress_callback:
+        progress_callback("topic", "Scoring topic relevance", 0.08)
     candidate_payload = select_rerank_candidates(
         query=topic_text,
         top_n=top_n,
@@ -973,6 +978,13 @@ def stance_search(
         chunk_article_top_k=chunk_article_top_k,
     )
     topic_matches = candidate_payload["matches"]
+    if progress_callback:
+        progress_callback(
+            "topic",
+            "Topic relevance scored",
+            0.38,
+            candidate_count=len(topic_matches),
+        )
     if not topic_matches:
         log_runtime_event(
             "stance_search.no_topic_matches",
@@ -1000,6 +1012,14 @@ def stance_search(
         use_chunking=bool(use_chunking),
         chunking_mode=chunking_mode,
     )
+    if progress_callback:
+        scorer_label = "LLM" if stance_method == "llm" or use_chunking else "NLI model"
+        progress_callback(
+            "agreement",
+            f"Scoring stance agreement with {scorer_label}",
+            0.45,
+            candidate_count=len(topic_matches),
+        )
     reranked = rerank_article_matches(
         article_matches=topic_matches,
         topic=topic_text,
@@ -1012,7 +1032,10 @@ def stance_search(
         stance_method=stance_method,
         use_chunking=use_chunking,
         chunking_mode=chunking_mode,
+        progress_callback=progress_callback,
     )
+    if progress_callback:
+        progress_callback("ranking", "Finalizing ranking", 0.86, result_count=len(reranked))
     return {
         "results": reranked,
         "empty_results_message": candidate_payload.get("empty_results_message"),

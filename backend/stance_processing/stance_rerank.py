@@ -224,6 +224,7 @@ def rerank_article_matches_by_statement(
     stance_method=DEFAULT_STANCE_METHOD,
     use_chunking=False,
     chunking_mode=DEFAULT_CHUNKING_MODE,
+    progress_callback=None,
 ):
     resolved_top_n = _resolve_top_n(top_n)
     resolved_chunking_mode = normalize_chunking_mode(chunking_mode)
@@ -273,9 +274,42 @@ def rerank_article_matches_by_statement(
         claim_premise_count=len(premises),
         match_count=len(matches),
     )
+    if progress_callback:
+        progress_callback(
+            "agreement",
+            (
+                "Scoring stance agreement with LLM"
+                if resolved_stance_method == "llm"
+                else "Scoring stance agreement with NLI model"
+            ),
+            0.5,
+            candidate_count=len(matches),
+            claim_premise_count=len(premises),
+        )
 
     normalize_nli_stance_score = None
     nli_stance_label_from_probs = None
+
+    def agreement_batch_progress(batch_index=None, batch_total=None, **_fields):
+        if not progress_callback:
+            return
+        try:
+            completed = float(batch_index or 0)
+            total = max(1.0, float(batch_total or 1))
+            fraction = max(0.0, min(1.0, completed / total))
+        except (TypeError, ValueError):
+            fraction = 0.0
+        progress_callback(
+            "agreement",
+            (
+                "Scoring stance agreement with LLM"
+                if resolved_stance_method == "llm"
+                else "Scoring stance agreement with NLI model"
+            ),
+            0.5 + (0.32 * fraction),
+            batch_index=batch_index,
+            batch_total=batch_total,
+        )
 
     if resolved_stance_method == "llm":
         from backend.stance_processing.llm_processor import (
@@ -288,9 +322,14 @@ def rerank_article_matches_by_statement(
                 matches,
                 query_statement,
                 chunking_mode=resolved_chunking_mode,
+                progress_callback=agreement_batch_progress,
             )
         else:
-            stance_rows = score_llm_article_agreement(matches, query_statement)
+            stance_rows = score_llm_article_agreement(
+                matches,
+                query_statement,
+                progress_callback=agreement_batch_progress,
+            )
         log_runtime_event(
             "stance_rerank.llm_done",
             llm_row_count=len(stance_rows),
@@ -305,7 +344,15 @@ def rerank_article_matches_by_statement(
             stance_label_from_probs as nli_stance_label_from_probs,
         )
 
-        nli_rows = score_nli_pairs(premises, query_statement) if premises else []
+        nli_rows = (
+            score_nli_pairs(
+                premises,
+                query_statement,
+                progress_callback=agreement_batch_progress,
+            )
+            if premises
+            else []
+        )
         log_runtime_event("stance_rerank.nli_done", nli_row_count=len(nli_rows))
         stance_by_match_idx = dict(zip(indexed_claims, nli_rows))
 
@@ -420,6 +467,8 @@ def rerank_article_matches_by_statement(
         match["rerank_position"] = rank_idx
 
     log_runtime_event("stance_rerank.done", reranked_count=len(reranked))
+    if progress_callback:
+        progress_callback("ranking", "Finalizing ranking", 0.86, reranked_count=len(reranked))
     return reranked
 
 
@@ -435,6 +484,7 @@ def rerank_article_matches(
     stance_method=DEFAULT_STANCE_METHOD,
     use_chunking=False,
     chunking_mode=DEFAULT_CHUNKING_MODE,
+    progress_callback=None,
 ):
     return rerank_article_matches_by_statement(
         article_matches=article_matches,
@@ -447,4 +497,5 @@ def rerank_article_matches(
         stance_method=stance_method,
         use_chunking=use_chunking,
         chunking_mode=chunking_mode,
+        progress_callback=progress_callback,
     )

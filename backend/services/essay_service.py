@@ -64,10 +64,13 @@ def essay_search(
     chunking_mode="none",
     chunk_candidate_top_k=DEFAULT_CHUNK_CANDIDATE_TOP_K,
     chunk_article_top_k=DEFAULT_CHUNK_ARTICLE_TOP_K,
+    progress_callback=None,
 ):
     resolved_essay = str(essay_text or "").strip()
     resolved_thesis = str(selected_thesis_sentence or "").strip()
     if len(resolved_essay) < 3:
+        if progress_callback:
+            progress_callback("complete", "Search complete", 1.0, result_count=0)
         return {
             "results": [],
             "empty_results_message": None,
@@ -77,6 +80,8 @@ def essay_search(
         resolved_model = "svd"
     resolved_selection_mode = normalize_rerank_selection_mode(rerank_selection_mode)
 
+    if progress_callback:
+        progress_callback("topic", "Scoring topic relevance", 0.08)
     candidate_payload = select_rerank_candidates(
         query=resolved_essay,
         top_n=top_n,
@@ -99,6 +104,13 @@ def essay_search(
         chunk_article_top_k=chunk_article_top_k,
     )
     topic_matches = candidate_payload["matches"]
+    if progress_callback:
+        progress_callback(
+            "topic",
+            "Topic relevance scored",
+            0.38,
+            candidate_count=len(topic_matches),
+        )
     if not topic_matches:
         log_runtime_event(
             "essay_search.no_topic_matches",
@@ -154,6 +166,14 @@ def essay_search(
         use_chunking=bool(resolved_use_chunking),
         chunking_mode=resolved_chunking_mode,
     )
+    if progress_callback:
+        scorer_label = "LLM" if resolved_stance_method == "llm" else "NLI model"
+        progress_callback(
+            "agreement",
+            f"Scoring essay agreement with {scorer_label}",
+            0.45,
+            candidate_count=len(topic_matches),
+        )
     reranked = rerank_article_matches_by_statement(
         article_matches=topic_matches,
         statement=agreement_statement,
@@ -165,6 +185,7 @@ def essay_search(
         stance_method=resolved_stance_method,
         use_chunking=resolved_use_chunking,
         chunking_mode=resolved_chunking_mode,
+        progress_callback=progress_callback,
     )
     for match in reranked:
         match["selected_thesis_sentence"] = resolved_thesis

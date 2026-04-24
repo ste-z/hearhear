@@ -88,6 +88,7 @@ def score_nli_pairs(
     model_name=MODEL_NAME,
     batch_size=DEFAULT_BATCH_SIZE,
     max_length=DEFAULT_MAX_LENGTH,
+    progress_callback=None,
 ):
     cleaned_premises = [str(premise or "").strip() for premise in premises]
     cleaned_hypothesis = str(hypothesis or "").strip()
@@ -136,6 +137,8 @@ def score_nli_pairs(
             batch_index=batch_idx,
             batch_total=total_batches,
         )
+        if progress_callback:
+            progress_callback(batch_index=batch_idx, batch_total=total_batches)
 
         for row in probs:
             entailment_prob = float(row[label_map["entailment"]])

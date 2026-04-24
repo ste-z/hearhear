@@ -5946,7 +5946,7 @@
   border-radius: inherit;
   background: linear-gradient(90deg, #fff8ed, #c58f22);
   transform-origin: left center;
-  animation: search-focus-progress-fill 30s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transform: scaleX(0.03);
 }
 
 .search-focus-duration-note {
@@ -6936,23 +6936,6 @@ a.results-overview-source-chip:hover {
   to {
     opacity: 0;
     filter: blur(5px);
-  }
-}
-
-@keyframes search-focus-progress-fill {
-  0% {
-    transform: scaleX(0.08);
-    opacity: 0.72;
-  }
-
-  65% {
-    transform: scaleX(0.76);
-    opacity: 1;
-  }
-
-  100% {
-    transform: scaleX(0.94);
-    opacity: 1;
   }
 }
 

@@ -865,6 +865,7 @@ def score_llm_article_agreement(
     api_key=None,
     batch_size=DEFAULT_LLM_BATCH_SIZE,
     max_article_chars=DEFAULT_MAX_ARTICLE_CHARS,
+    progress_callback=None,
 ):
     article_rows = list(articles or [])
     cleaned_thesis = _clean_text(thesis)
@@ -915,6 +916,8 @@ def score_llm_article_agreement(
             batch_index=batch_index,
             batch_total=total_batches,
         )
+        if progress_callback:
+            progress_callback(batch_index=batch_index, batch_total=total_batches)
 
     log_runtime_event("llm_agreement.done", row_count=len(rows))
     return rows
@@ -930,6 +933,7 @@ def score_llm_article_agreement_by_paragraphs(
     max_paragraphs_per_article=DEFAULT_MAX_PARAGRAPHS_PER_ARTICLE,
     max_paragraph_chars=DEFAULT_MAX_PARAGRAPH_CHARS,
     semantic_break_threshold=DEFAULT_SEMANTIC_BREAK_SIMILARITY_THRESHOLD,
+    progress_callback=None,
 ):
     article_rows = list(articles or [])
     cleaned_thesis = _clean_text(thesis)
@@ -998,6 +1002,8 @@ def score_llm_article_agreement_by_paragraphs(
             batch_index=batch_index,
             batch_total=total_batches,
         )
+        if progress_callback:
+            progress_callback(batch_index=batch_index, batch_total=total_batches)
 
     rows = _aggregate_paragraph_scores(article_rows, paragraph_scores)
     for row in rows:

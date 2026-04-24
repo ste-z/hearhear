@@ -5,11 +5,18 @@ To enable AI chat, set USE_LLM = True below. See backend/api/llm_routes.py for A
 """
 import os
 import gc
+import json
 
-from flask import send_from_directory, request, jsonify
+from flask import Response, send_from_directory, request, jsonify, stream_with_context
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from backend.runtime.runtime_debug import log_runtime_event
+from backend.runtime.search_progress import (
+    normalize_progress_id,
+    publish_search_progress,
+    remove_progress_channel,
+    stream_search_progress,
+)
 from backend.services.filters.article_filters import (
     available_article_character_range,
     available_article_reading_time_range,
@@ -152,6 +159,23 @@ def _coerce_string_list(value):
         normalized.append(text)
         seen.add(text)
     return normalized
+
+
+def _progress_callback(progress_id):
+    normalized_id = normalize_progress_id(progress_id)
+    if not normalized_id:
+        return None
+
+    def publish(stage, label, progress, **fields):
+        publish_search_progress(
+            normalized_id,
+            stage=stage,
+            label=label,
+            progress=progress,
+            **fields,
+        )
+
+    return publish
 
 
 def _preload_runtime_artifact(payload):
@@ -412,6 +436,10 @@ def _extract_request_context():
         or payload.get("ignore_typo_correction"),
         False,
     )
+    search_progress_id = normalize_progress_id(
+        payload.get("search_progress_id")
+        or payload.get("progress_id")
+    )
 
     typed_text = (
         payload.get("q")
@@ -460,6 +488,7 @@ def _extract_request_context():
         "selected_thesis_id": selected_thesis_id,
         "topic_feedback_irrelevant_article_ids": topic_feedback_irrelevant_article_ids,
         "skip_typo_correction": skip_typo_correction,
+        "search_progress_id": search_progress_id,
         "essay_text": essay_text,
     }
 
@@ -573,11 +602,45 @@ def register_routes(app):
             app.logger.exception("API request to /api/runtime/unload failed")
             return _api_error_response(exc)
 
+    @app.route("/api/articles/progress/<progress_id>", methods=["GET"])
+    def articles_progress(progress_id):
+        normalized_id = normalize_progress_id(progress_id)
+        if not normalized_id:
+            return jsonify({"error": "Invalid search progress id."}), 400
+
+        def generate():
+            try:
+                for event in stream_search_progress(normalized_id):
+                    if event.get("type") == "heartbeat":
+                        yield ": heartbeat\n\n"
+                        continue
+                    yield f"event: progress\ndata: {json.dumps(event)}\n\n"
+            finally:
+                remove_progress_channel(normalized_id)
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     @app.route("/api/articles", methods=["GET", "POST"])
     @app.route("/api/articles/search", methods=["POST"])
     def articles_search():
+        progress = None
         try:
             context = _extract_request_context()
+            progress = _progress_callback(context["search_progress_id"])
+            if progress:
+                progress(
+                    "received",
+                    "Preparing search request",
+                    0.03,
+                    mode=context["mode"],
+                )
             log_runtime_event(
                 "articles_search.start",
                 mode=context["mode"],
@@ -627,6 +690,7 @@ def register_routes(app):
                     chunk_candidate_top_k=context["chunk_candidate_top_k"],
                     chunk_article_top_k=context["chunk_article_top_k"],
                     topic_feedback_irrelevant_article_ids=context["topic_feedback_irrelevant_article_ids"],
+                    progress_callback=progress,
                 )
             elif context["mode"] == "essay":
                 search_payload = essay_search(
@@ -656,8 +720,11 @@ def register_routes(app):
                     chunk_candidate_top_k=context["chunk_candidate_top_k"],
                     chunk_article_top_k=context["chunk_article_top_k"],
                     topic_feedback_irrelevant_article_ids=context["topic_feedback_irrelevant_article_ids"],
+                    progress_callback=progress,
                 )
             else:
+                if progress:
+                    progress("topic", "Scoring topic relevance", 0.1)
                 search_payload = {
                     "results": json_search(
                         context["essay_text"],
@@ -675,12 +742,16 @@ def register_routes(app):
                     ),
                     "empty_results_message": None,
                 }
+                if progress:
+                    progress("metadata", "Preparing result details", 0.88)
             results = list(search_payload.get("results") or [])
             empty_results_message = search_payload.get("empty_results_message")
             if context["mode"] == "stance":
                 query_text = context["topic"]
             else:
                 query_text = context["essay_text"]
+            if progress:
+                progress("metadata", "Preparing result details", 0.9)
             typo_suggestion = (
                 retrieval_query_typo_suggestion(
                     query_text,
@@ -710,6 +781,13 @@ def register_routes(app):
                 result_count=len(results),
                 empty_results_message=empty_results_message,
             )
+            if progress:
+                progress(
+                    "complete",
+                    "Search complete",
+                    1.0,
+                    result_count=len(results),
+                )
             return jsonify({
                 "results": results,
                 "query_svd_dimensions": query_svd_dimensions,
@@ -719,6 +797,13 @@ def register_routes(app):
             })
         except Exception as exc:
             app.logger.exception("API request to /api/articles failed")
+            if progress:
+                progress(
+                    "error",
+                    "Search failed",
+                    1.0,
+                    message=str(exc),
+                )
             return _api_error_response(exc)
 
     @app.route("/api/articles/similar", methods=["POST"])

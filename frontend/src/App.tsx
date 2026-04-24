@@ -70,6 +70,16 @@ type SearchFocusSnapshot = {
   words: SearchFocusWordSnapshot[]
   clearing: boolean
 }
+type SearchProgressState = {
+  label: string
+  progress: number
+  stage: string
+}
+type SearchProgressEventPayload = {
+  label?: string
+  progress?: number
+  stage?: string
+}
 type RuntimeArtifactKind = 'retrieval_index' | 'chunk_index' | 'nli_model'
 type RuntimeArtifactTask = {
   artifact: RuntimeArtifactKind
@@ -265,22 +275,60 @@ const normalizeChunkingModes = (value: unknown): FrontendChunkingMode[] => {
   return unique.length > 0 ? unique : defaultSupportedChunkingModes
 }
 
-const getSearchLoadingStatusText = (
-  mode: InputMode,
-  stanceMethod: StanceMethod,
-  useChunking: boolean,
-): string => {
-  const scorerLabel = stanceMethod === 'llm' ? 'LLM' : 'NLI model'
+const clampProgressValue = (value: unknown, fallback = 0): number => {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return fallback
+  return Math.max(0, Math.min(1, numeric))
+}
 
-  if (mode === 'essay') {
-    return `Scoring essay agreement with ${scorerLabel}`
+const createSearchProgressId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
   }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+}
 
-  if (useChunking) {
-    return `Searching article passages and scoring stance agreement with ${scorerLabel}`
+const initialSearchProgress = (useChunking: boolean): SearchProgressState => ({
+  label: useChunking ? 'Scoring passage relevance' : 'Scoring topic relevance',
+  progress: 0.03,
+  stage: 'topic',
+})
+
+const searchProgressStageCaps: Record<string, number> = {
+  received: 0.08,
+  topic: 0.36,
+  agreement: 0.82,
+  ranking: 0.9,
+  metadata: 0.96,
+  complete: 1,
+  error: 1,
+}
+
+const searchProgressTricklePerMs = 0.000006
+
+const normalizeSearchProgressPayload = (
+  payload: SearchProgressEventPayload,
+  fallback: SearchProgressState,
+): SearchProgressState => {
+  const nextLabel = typeof payload.label === 'string' && payload.label.trim()
+    ? payload.label.trim()
+    : fallback.label
+  return {
+    label: nextLabel,
+    progress: clampProgressValue(payload.progress, fallback.progress),
+    stage: typeof payload.stage === 'string' && payload.stage.trim()
+      ? payload.stage.trim()
+      : fallback.stage,
   }
+}
 
-  return `Scoring stance agreement with ${scorerLabel}`
+const searchProgressSoftTarget = (progress: SearchProgressState): number => {
+  const backendProgress = clampProgressValue(progress.progress)
+  const stageCap = searchProgressStageCaps[progress.stage]
+  if (typeof stageCap === 'number') {
+    return Math.max(backendProgress, stageCap)
+  }
+  return Math.min(0.96, Math.max(backendProgress, backendProgress + 0.08))
 }
 
 const resolvePreferredStanceMethod = (
@@ -2149,11 +2197,13 @@ const FloatingSearchFocus = ({
   words,
   clearing,
   statusText,
+  progress,
 }: {
   mode: InputMode
   words: SearchFocusWordSnapshot[]
   clearing: boolean
   statusText: string
+  progress: number
 }): JSX.Element => {
   const densityClass = words.length > 22
     ? 'dense'
@@ -2195,8 +2245,15 @@ const FloatingSearchFocus = ({
       </div>
       <div className="search-focus-status">
         <p className="search-focus-status-label">{statusText}</p>
-        <div className="search-focus-progress" role="progressbar" aria-label="Search progress">
-          <span />
+        <div
+          className="search-focus-progress"
+          role="progressbar"
+          aria-label="Search progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(clampProgressValue(progress) * 100)}
+        >
+          <span style={{ transform: `scaleX(${clampProgressValue(progress)})` }} />
         </div>
         <p className="search-focus-duration-note">{searchLoadingDurationNote}</p>
       </div>
@@ -2308,6 +2365,8 @@ function App(): JSX.Element {
   const [loading, setLoading] = useState<boolean>(false)
   const [runtimeArtifactLoading, setRuntimeArtifactLoading] = useState<RuntimeArtifactLoadingState | null>(null)
   const [searchFocusSnapshot, setSearchFocusSnapshot] = useState<SearchFocusSnapshot | null>(null)
+  const [searchProgress, setSearchProgress] = useState<SearchProgressState>(() => initialSearchProgress(false))
+  const [displayedSearchProgress, setDisplayedSearchProgress] = useState<number>(() => initialSearchProgress(false).progress)
   const [error, setError] = useState<string | null>(null)
   const [emptyResultsMessage, setEmptyResultsMessage] = useState<string | null>(null)
   const [typoCorrection, setTypoCorrection] = useState<TypoCorrectionSuggestion | null>(null)
@@ -2355,6 +2414,7 @@ function App(): JSX.Element {
   const searchFocusKeyRef = useRef<number>(0)
   const searchFocusStartedAtRef = useRef<number>(0)
   const searchFocusTimeoutRef = useRef<number | null>(null)
+  const searchProgressSourceRef = useRef<EventSource | null>(null)
   const runtimeArtifactRequestIdRef = useRef<number>(0)
   const readyRuntimeArtifactKeysRef = useRef<Set<string>>(new Set())
   const lastAppliedFiltersRef = useRef<{
@@ -2384,6 +2444,44 @@ function App(): JSX.Element {
       window.clearTimeout(searchFocusTimeoutRef.current)
     }
     searchFocusTimeoutRef.current = null
+  }
+
+  const closeSearchProgressStream = (): void => {
+    searchProgressSourceRef.current?.close()
+    searchProgressSourceRef.current = null
+  }
+
+  const startSearchProgressStream = (progressId: string): void => {
+    closeSearchProgressStream()
+    const initialProgress = initialSearchProgress(useChunking)
+    setSearchProgress(initialProgress)
+    setDisplayedSearchProgress(initialProgress.progress)
+    if (typeof window === 'undefined' || typeof window.EventSource !== 'function') return
+
+    const source = new window.EventSource(`/api/articles/progress/${encodeURIComponent(progressId)}`)
+    searchProgressSourceRef.current = source
+    source.addEventListener('progress', (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent<string>).data) as SearchProgressEventPayload
+        setSearchProgress(current => normalizeSearchProgressPayload(payload, current))
+        if (payload.stage === 'complete' || payload.stage === 'error') {
+          setDisplayedSearchProgress(1)
+        }
+        if (payload.stage === 'complete' || payload.stage === 'error') {
+          source.close()
+          if (searchProgressSourceRef.current === source) {
+            searchProgressSourceRef.current = null
+          }
+        }
+      } catch {
+        // Ignore malformed progress messages; the search response still carries the real result.
+      }
+    })
+    source.addEventListener('error', () => {
+      if (source.readyState === EventSource.CLOSED && searchProgressSourceRef.current === source) {
+        searchProgressSourceRef.current = null
+      }
+    })
   }
 
   const startSearchFocus = (
@@ -2423,6 +2521,7 @@ function App(): JSX.Element {
     }
 
     clearSearchFocusTimer()
+    closeSearchProgressStream()
     searchFocusTimeoutRef.current = window.setTimeout(() => {
       setSearchFocusSnapshot(currentSnapshot => (
         currentSnapshot?.key === activeKey
@@ -2439,8 +2538,52 @@ function App(): JSX.Element {
   }
 
   useEffect(() => (
-    () => clearSearchFocusTimer()
+    () => {
+      clearSearchFocusTimer()
+      closeSearchProgressStream()
+    }
   ), [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      setDisplayedSearchProgress(clampProgressValue(searchProgress.progress))
+      return
+    }
+    if (!loading && !searchFocusSnapshot) {
+      setDisplayedSearchProgress(clampProgressValue(searchProgress.progress))
+      return
+    }
+
+    let frameId = 0
+    let previousTimestamp = window.performance.now()
+
+    const step = (timestamp: number): void => {
+      const elapsedMs = Math.min(120, Math.max(0, timestamp - previousTimestamp))
+      previousTimestamp = timestamp
+      setDisplayedSearchProgress(currentProgress => {
+        const backendTarget = clampProgressValue(searchProgress.progress)
+        const softTarget = searchProgressSoftTarget(searchProgress)
+        const target = Math.max(backendTarget, softTarget)
+
+        if (currentProgress >= target) {
+          return Math.max(currentProgress, backendTarget)
+        }
+
+        const distanceToBackend = backendTarget - currentProgress
+        const backendStep = distanceToBackend > 0
+          ? Math.max(distanceToBackend * 0.08, elapsedMs * 0.00002)
+          : 0
+        const trickleStep = elapsedMs * searchProgressTricklePerMs
+        const nextProgress = currentProgress + Math.max(backendStep, trickleStep)
+
+        return Math.min(target, nextProgress)
+      })
+      frameId = window.requestAnimationFrame(step)
+    }
+
+    frameId = window.requestAnimationFrame(step)
+    return () => window.cancelAnimationFrame(frameId)
+  }, [loading, searchFocusSnapshot, searchProgress])
 
   const buildStanceSearchFocusWords = (
     nextTopic: string,
@@ -3089,11 +3232,6 @@ function App(): JSX.Element {
     ? selectedEssayCandidate?.sentence_id ?? null
     : null
   const effectiveStanceMethod: StanceMethod = useChunking ? 'llm' : stanceMethod
-  const searchLoadingStatusText = getSearchLoadingStatusText(
-    searchFocusSnapshot?.mode ?? inputMode,
-    effectiveStanceMethod,
-    useChunking,
-  )
   const isLlmAgreementSelected = effectiveStanceMethod === 'llm'
   const shouldUseEssayThesisStep = !isLlmAgreementSelected
   const canSubmitEssay = Boolean(
@@ -4171,6 +4309,8 @@ function App(): JSX.Element {
     if (typeof document !== 'undefined') {
       document.body.style.overflow = ''
     }
+    const searchProgressId = createSearchProgressId()
+    startSearchProgressStream(searchProgressId)
     startSearchFocus(
       [
         nextTopic ? `Regarding ${nextTopic}` : null,
@@ -4196,6 +4336,7 @@ function App(): JSX.Element {
         },
         body: JSON.stringify({
           mode: 'stance',
+          search_progress_id: searchProgressId,
           topic: nextTopic,
           opinion: trimmedOpinion,
           topic_weight: topicWeight,
@@ -4349,6 +4490,8 @@ function App(): JSX.Element {
     if (typeof document !== 'undefined') {
       document.body.style.overflow = ''
     }
+    const searchProgressId = createSearchProgressId()
+    startSearchProgressStream(searchProgressId)
     startSearchFocus(
       [
         nextThesisSentence ? `Thesis ${nextThesisSentence}` : 'Essay topic',
@@ -4374,6 +4517,7 @@ function App(): JSX.Element {
         },
         body: JSON.stringify({
           mode: 'essay',
+          search_progress_id: searchProgressId,
           q: nextEssayText,
           selected_thesis_id: thesisId,
           selected_thesis_sentence: nextThesisSentence,
@@ -5814,7 +5958,8 @@ function App(): JSX.Element {
               mode={searchFocusSnapshot.mode}
               words={searchFocusSnapshot.words}
               clearing={searchFocusSnapshot.clearing}
-              statusText={searchLoadingStatusText}
+              statusText={searchProgress.label}
+              progress={displayedSearchProgress}
             />
           )}
 
@@ -5851,9 +5996,16 @@ function App(): JSX.Element {
 
             {loading && !searchFocusSnapshot && (
               <div className="results-thinking-card" role="status" aria-live="polite">
-                <p className="results-thinking-label">{searchLoadingStatusText}</p>
-                <div className="search-focus-progress results-thinking-progress" role="progressbar" aria-label="Search progress">
-                  <span />
+                <p className="results-thinking-label">{searchProgress.label}</p>
+                <div
+                  className="search-focus-progress results-thinking-progress"
+                  role="progressbar"
+                  aria-label="Search progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(clampProgressValue(displayedSearchProgress) * 100)}
+                >
+                  <span style={{ transform: `scaleX(${clampProgressValue(displayedSearchProgress)})` }} />
                 </div>
                 <p className="search-focus-duration-note">{searchLoadingDurationNote}</p>
               </div>
