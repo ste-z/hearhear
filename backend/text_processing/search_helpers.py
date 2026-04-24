@@ -33,6 +33,7 @@ _RETRIEVAL_MODEL_ALIASES = {
 _vector_processors = {}
 _vector_processor_doc_counts = {}
 _vector_index_lock = Lock()
+_svd_dimension_labels_by_index = None
 
 
 def _resolve_db_path():
@@ -45,6 +46,21 @@ def _get_value(article, key, default=None):
     if isinstance(article, dict):
         return article.get(key, default)
     return getattr(article, key, default)
+
+
+def _cached_svd_dimension_labels_by_index():
+    global _svd_dimension_labels_by_index
+    if _svd_dimension_labels_by_index is None:
+        try:
+            from backend.text_processing.svd_dimension_labels import (
+                cached_svd_dimension_label_map,
+            )
+
+            _svd_dimension_labels_by_index = cached_svd_dimension_label_map()
+        except Exception:
+            log_runtime_event("svd_dimension_labels.load_failed")
+            _svd_dimension_labels_by_index = {}
+    return _svd_dimension_labels_by_index
 
 
 def normalize_retrieval_model(value, default=DEFAULT_RETRIEVAL_MODEL):
@@ -270,7 +286,7 @@ def _svd_dimension_entry(dimension, raw_value, label_terms):
     value = float(raw_value)
     pole = "positive" if value >= 0 else "negative"
     resolved_label_terms = [str(term) for term in label_terms if str(term).strip()]
-    return {
+    entry = {
         "dimension_index": dim,
         "dimension_label": dim + 1,
         "value": value,
@@ -279,6 +295,10 @@ def _svd_dimension_entry(dimension, raw_value, label_terms):
         "label_terms": resolved_label_terms,
         "label_text": ", ".join(resolved_label_terms),
     }
+    display_label = _cached_svd_dimension_labels_by_index().get(dim)
+    if display_label:
+        entry["display_label"] = display_label
+    return entry
 
 
 def _svd_chart_dimension_payload(
