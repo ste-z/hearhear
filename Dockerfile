@@ -21,7 +21,7 @@ ENV TRANSFORMERS_CACHE=/opt/huggingface
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
-RUN python -c "from transformers import AutoModelForSequenceClassification, AutoTokenizer; model='cross-encoder/nli-deberta-v3-small'; AutoTokenizer.from_pretrained(model); AutoModelForSequenceClassification.from_pretrained(model)"
+RUN python -c "from transformers import AutoModel, AutoModelForSequenceClassification, AutoTokenizer; nli_model='cross-encoder/nli-deberta-v3-small'; minilm_model='sentence-transformers/all-MiniLM-L6-v2'; AutoTokenizer.from_pretrained(nli_model); AutoModelForSequenceClassification.from_pretrained(nli_model); AutoTokenizer.from_pretrained(minilm_model); AutoModel.from_pretrained(minilm_model)"
 
 # Stage 3: Prepare backend runtime artifacts
 FROM python-deps AS backend-artifacts
