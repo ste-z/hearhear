@@ -48,6 +48,8 @@ ENV HF_HOME=/opt/huggingface
 ENV TRANSFORMERS_CACHE=/opt/huggingface
 ENV TRANSFORMERS_OFFLINE=1
 ENV WARM_RUNTIME_ASSETS=0
+ENV GUNICORN_WORKERS=1
+ENV GUNICORN_THREADS=8
 ENV GUNICORN_TIMEOUT=180
 ENV GUNICORN_LOG_LEVEL=debug
 
@@ -61,4 +63,4 @@ COPY --from=backend-artifacts $CONTAINER_HOME/backend/ $CONTAINER_HOME/backend/
 COPY --from=backend-artifacts $CONTAINER_HOME/data/ $CONTAINER_HOME/data/
 COPY --from=frontend-build /app/frontend/dist $CONTAINER_HOME/frontend/dist
 
-CMD ["sh", "-c", "exec python -m gunicorn backend.app:app --bind 0.0.0.0:${PORT:-5000} --log-level ${GUNICORN_LOG_LEVEL:-debug} --timeout ${GUNICORN_TIMEOUT:-180}"]
+CMD ["sh", "-c", "exec python -m gunicorn backend.app:app --bind 0.0.0.0:${PORT:-5000} --workers ${GUNICORN_WORKERS:-1} --worker-class gthread --threads ${GUNICORN_THREADS:-8} --log-level ${GUNICORN_LOG_LEVEL:-debug} --timeout ${GUNICORN_TIMEOUT:-180}"]
