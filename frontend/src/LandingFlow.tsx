@@ -1,9 +1,12 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
   type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
+import { PersonaName } from './PersonaName'
 
 const INTRO_TOPICS = ['climate', 'immigration', 'minimum wage'] as const
 const INTRO_CLAIMS_BY_TOPIC: Record<typeof INTRO_TOPICS[number], readonly string[]> = {
@@ -12,12 +15,13 @@ const INTRO_CLAIMS_BY_TOPIC: Record<typeof INTRO_TOPICS[number], readonly string
   'minimum wage': ['wages should rise', 'pay should track inflation', 'work should pay enough'],
 }
 
+const LANDING_SEEN_KEY = 'hearhear.hasSeenLanding'
+
 type IntroPhase = 'topic' | 'claim' | 'done' | 'voice'
 type VoiceMode = 'stance' | 'essay'
 type EssaySource = 'paste' | 'envelope'
 
-type RetrievalModelLabel = 'Lexical (TF·IDF)' | 'Semantic (SVD)' | 'Enhanced (MiniLM)'
-type StanceLabel = 'NLI · red pencil' | 'LLM · lamplight'
+type LengthFilterUnit = 'characters' | 'words' | 'reading_time'
 
 export type LandingFlowProps = {
   topic: string
@@ -26,18 +30,69 @@ export type LandingFlowProps = {
   importedPdfName: string | null
   isImportingPdf: boolean
   loading: boolean
-  onTopicChange: (value: string) => void
-  onOpinionChange: (value: string) => void
+  // Accept React.Dispatch so the typewriter can append via functional updates
+  // (avoids stale-closure bugs when several keys are pressed in the same tick).
+  onTopicChange: React.Dispatch<React.SetStateAction<string>>
+  onOpinionChange: React.Dispatch<React.SetStateAction<string>>
   onEssayTextChange: (value: string) => void
   onImportPdf: (event: ChangeEvent<HTMLInputElement>) => void
   onSubmitStance: () => void
   onSubmitEssayDraft: () => void
   onOpenSettings: () => void
   onOpenAbout: () => void
-  retrievalModelLabel: RetrievalModelLabel
-  stanceLabel: StanceLabel
-  rerankModeLabel: string
+  onOpenMethod: () => void
   chunksLabel: string
+  // Persona ids drive the wavy-underline name component on the search page.
+  effectiveRetrievalModel: 'tfidf' | 'svd' | 'minilm'
+  // Determines whether the essay flow needs a thesis-extraction step (NLI) or not (LLM).
+  effectiveStanceMethod: 'nli' | 'llm'
+
+  // filters (folded back from settings)
+  yearStart: number | null
+  yearEnd: number | null
+  minYear: number | null
+  maxYear: number | null
+  onYearStartChange: (value: number | null) => void
+  onYearEndChange: (value: number | null) => void
+  lengthFilterUnit: LengthFilterUnit
+  onLengthFilterUnitChange: (next: LengthFilterUnit) => void
+  lengthRangeStart: number | null
+  lengthRangeEnd: number | null
+  lengthRangeMin: number | null
+  lengthRangeMax: number | null
+  onLengthRangeStartChange: (value: number | null) => void
+  onLengthRangeEndChange: (value: number | null) => void
+  // words-to-avoid (only meaningful for lexical / TF·IDF search)
+  wordsToAvoid: string[]
+  onWordsToAvoidChange: (next: string[]) => void
+  isLexicalSearchMode: boolean
+}
+
+function readLandingSeen(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(LANDING_SEEN_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function markLandingSeen(): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(LANDING_SEEN_KEY, 'true')
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearLandingSeen(): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(LANDING_SEEN_KEY)
+  } catch {
+    /* ignore */
+  }
 }
 
 function useTypewriterCycle(items: readonly string[], active: boolean): { value: string; done: boolean } {
@@ -88,36 +143,229 @@ function useTypewriterCycle(items: readonly string[], active: boolean): { value:
   return { value, done }
 }
 
-function RisingTypewriter(): JSX.Element {
+type TypewriterProps = {
+  onType: (char: string) => void
+  onBackspace: () => void
+  onEnter: () => void
+  disabled?: boolean
+  // When set, the matching key briefly shows a depressed state. Use to mirror real-keyboard input.
+  flashedKey?: string | null
+}
+
+const TYPEWRITER_WIDTH = 800
+const TYPEWRITER_HEIGHT = 248
+
+function TypewriterKey({
+  children,
+  onPress,
+  width = 36,
+  shape = 'circle',
+  fontSize = 14,
+  disabled,
+  flashed = false,
+}: {
+  children: React.ReactNode
+  onPress: () => void
+  width?: number
+  shape?: 'circle' | 'pill'
+  fontSize?: number
+  disabled?: boolean
+  flashed?: boolean
+}): JSX.Element {
+  const [pressed, setPressed] = useState(false)
+  const release = (): void => setPressed(false)
+  const isDown = pressed || flashed
   return (
-    <svg width="800" height="300" viewBox="0 0 800 300">
-      <g stroke="#1a1a1a" strokeWidth="1.4" fill="none" strokeLinecap="square">
-        <rect x="40" y="0" width="720" height="22" rx="11" fill="#fafaf7" />
-        <circle cx="40" cy="11" r="14" fill="#fafaf7" />
-        <circle cx="760" cy="11" r="14" fill="#fafaf7" />
-        <line x1="32" y1="11" x2="48" y2="11" />
-        <line x1="40" y1="3" x2="40" y2="19" />
-        <line x1="752" y1="11" x2="768" y2="11" />
-        <line x1="760" y1="3" x2="760" y2="19" />
-        <path d="M 80 50 L 720 50 Q 740 50 740 70 L 740 240 Q 740 260 720 260 L 80 260 Q 60 260 60 240 L 60 70 Q 60 50 80 50 Z" fill="#fafaf7" />
-        <line x1="80" y1="92" x2="720" y2="92" />
-        <rect x="360" y="62" width="80" height="22" />
-        <text x="400" y="77" fontSize="10" fontFamily="'IM Fell English', serif" textAnchor="middle" fill="#1a1a1a" stroke="none" letterSpacing="3">HEAR!HEAR!</text>
-        <g transform="translate(400 145)">
-          {[-45, -30, -15, 0, 15, 30, 45].map((a, i) => (
-            <line key={i} x1="0" y1="0" x2="0" y2="-30" transform={`rotate(${a})`} opacity="0.6" />
-          ))}
+    <button
+      type="button"
+      // preventDefault on mousedown keeps the focused input from blurring
+      // when the user clicks a key — input stays editable through the keyboard.
+      onMouseDown={(event) => {
+        event.preventDefault()
+        if (disabled) return
+        setPressed(true)
+      }}
+      onMouseUp={release}
+      onMouseLeave={release}
+      onTouchStart={(event) => {
+        event.preventDefault()
+        if (disabled) return
+        setPressed(true)
+      }}
+      onTouchEnd={release}
+      onClick={(event) => {
+        event.preventDefault()
+        if (disabled) return
+        onPress()
+      }}
+      disabled={disabled}
+      style={{
+        width,
+        height: 36,
+        border: '1.4px solid #1a1a1a',
+        borderRadius: shape === 'pill' ? 18 : '50%',
+        fontFamily: "'IM Fell English', serif",
+        fontSize,
+        lineHeight: 1,
+        color: '#1a1a1a',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.55 : 1,
+        padding: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transform: isDown ? 'translateY(2px)' : 'translateY(0)',
+        boxShadow: isDown ? 'none' : '0 2px 0 rgba(26,26,26,0.08)',
+        background: isDown && !pressed ? '#ece4d0' : '#fafaf7',
+        transition: 'transform 80ms ease, box-shadow 80ms ease, background 120ms ease',
+        userSelect: 'none',
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+function RisingTypewriter({ onType, onBackspace, onEnter, disabled, flashedKey }: TypewriterProps): JSX.Element {
+  const row1 = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P']
+  const row2 = ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L']
+  const row3 = ['Z', 'X', 'C', 'V', 'B', 'N', 'M']
+  const punctuation = [',', '.', '?']
+  const isFlashed = (id: string): boolean => flashedKey !== null && flashedKey !== undefined && flashedKey === id
+
+  return (
+    <div style={{ width: TYPEWRITER_WIDTH, height: TYPEWRITER_HEIGHT, position: 'relative' }}>
+      {/* Platen rod sticking out the top with knurled knobs at each end */}
+      <svg
+        width={TYPEWRITER_WIDTH}
+        height={22}
+        viewBox={`0 0 ${TYPEWRITER_WIDTH} 22`}
+        style={{ display: 'block', position: 'absolute', top: 0, left: 0 }}
+      >
+        <g stroke="#1a1a1a" strokeWidth="1.4" fill="#fafaf7" strokeLinecap="square">
+          <rect x="40" y="0" width="720" height="22" rx="11" />
+          <circle cx="40" cy="11" r="14" />
+          <circle cx="760" cy="11" r="14" />
+          <line x1="32" y1="11" x2="48" y2="11" />
+          <line x1="40" y1="3" x2="40" y2="19" />
+          <line x1="752" y1="11" x2="768" y2="11" />
+          <line x1="760" y1="3" x2="760" y2="19" />
         </g>
-        {[0, 1, 2].map(r => (
-          <g key={r}>
-            {Array.from({ length: 11 - r }).map((_, i) => (
-              <circle key={i} cx={140 + r * 10 + i * 52} cy={185 + r * 22} r="9" />
-            ))}
-          </g>
-        ))}
-        <rect x="280" y="240" width="240" height="10" rx="5" />
-      </g>
-    </svg>
+      </svg>
+
+      {/* Body shell — rounded rectangle housing the keyboard */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 18,
+          left: 60,
+          right: 60,
+          bottom: 0,
+          background: '#fafaf7',
+          border: '1.4px solid #1a1a1a',
+          borderRadius: '12px 12px 18px 18px',
+          padding: '12px 36px 14px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 6,
+        }}
+      >
+        <div style={{
+          fontFamily: "'IM Fell English', serif",
+          fontSize: 12,
+          letterSpacing: '0.32em',
+          color: '#1a1a1a',
+          marginBottom: 2,
+        }}>
+          ——— HEAR! HEAR! ———
+        </div>
+
+        {/* Row 1: QWERTYUIOP + Enter */}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+          {row1.map(k => (
+            <TypewriterKey
+              key={k}
+              onPress={() => onType(k.toLowerCase())}
+              disabled={disabled}
+              flashed={isFlashed(k.toLowerCase())}
+            >
+              {k}
+            </TypewriterKey>
+          ))}
+          <TypewriterKey onPress={onEnter} width={50} shape="pill" disabled={disabled} fontSize={16} flashed={isFlashed('enter')}>
+            ↵
+          </TypewriterKey>
+        </div>
+
+        {/* Row 2: ASDFGHJKL (slightly indented) */}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', paddingLeft: 18 }}>
+          {row2.map(k => (
+            <TypewriterKey
+              key={k}
+              onPress={() => onType(k.toLowerCase())}
+              disabled={disabled}
+              flashed={isFlashed(k.toLowerCase())}
+            >
+              {k}
+            </TypewriterKey>
+          ))}
+        </div>
+
+        {/* Row 3: Backspace + ZXCVBNM,.? */}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+          <TypewriterKey onPress={onBackspace} width={50} shape="pill" disabled={disabled} fontSize={16} flashed={isFlashed('backspace')}>
+            ⌫
+          </TypewriterKey>
+          {row3.map(k => (
+            <TypewriterKey
+              key={k}
+              onPress={() => onType(k.toLowerCase())}
+              disabled={disabled}
+              flashed={isFlashed(k.toLowerCase())}
+            >
+              {k}
+            </TypewriterKey>
+          ))}
+          {punctuation.map(p => (
+            <TypewriterKey
+              key={p}
+              onPress={() => onType(p)}
+              disabled={disabled}
+              fontSize={13}
+              flashed={isFlashed(p)}
+            >
+              {p}
+            </TypewriterKey>
+          ))}
+        </div>
+
+        {/* Spacebar */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 4 }}>
+          <button
+            type="button"
+            onMouseDown={(event) => { event.preventDefault() }}
+            onTouchStart={(event) => { event.preventDefault() }}
+            onClick={() => { if (!disabled) onType(' ') }}
+            disabled={disabled}
+            style={{
+              width: 280,
+              height: 22,
+              border: '1.4px solid #1a1a1a',
+              background: isFlashed('space') ? '#ece4d0' : '#fafaf7',
+              borderRadius: 14,
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              padding: 0,
+              opacity: disabled ? 0.55 : 1,
+              userSelect: 'none',
+              transform: isFlashed('space') ? 'translateY(2px)' : 'translateY(0)',
+              transition: 'transform 80ms ease, background 120ms ease',
+            }}
+            aria-label="space"
+          />
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -131,6 +379,7 @@ function IntroLine({
   active,
   onChange,
   onFocus,
+  onKeyDown,
   placeholder,
   inputRef,
 }: {
@@ -143,6 +392,7 @@ function IntroLine({
   active?: boolean
   onChange?: (value: string) => void
   onFocus?: () => void
+  onKeyDown?: (event: ReactKeyboardEvent<HTMLInputElement>) => void
   placeholder?: string
   inputRef?: (el: HTMLInputElement | null) => void
 }): JSX.Element {
@@ -164,6 +414,7 @@ function IntroLine({
           value={value}
           onChange={(event) => onChange && onChange(event.target.value)}
           onFocus={onFocus}
+          onKeyDown={onKeyDown}
           placeholder={placeholder}
           style={{
             fontFamily: "'Special Elite', monospace",
@@ -188,7 +439,7 @@ function IntroLine({
           minWidth: 520,
           display: 'inline-block',
         }}>
-          {value || ' '}
+          {value || ' '}
           {showCaret && <span className="tw-caret" />}
         </span>
       )}
@@ -256,6 +507,409 @@ function WaxEnvelope({
   )
 }
 
+function FilterPopover({
+  open,
+  anchorRect,
+  onClose,
+  children,
+}: {
+  open: boolean
+  anchorRect: DOMRect | null
+  onClose: () => void
+  children: React.ReactNode
+}): JSX.Element | null {
+  if (!open || !anchorRect) return null
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 50,
+      }}
+    >
+      <div
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          position: 'fixed',
+          top: anchorRect.bottom + 6,
+          left: Math.max(12, anchorRect.left - 10),
+          width: 320,
+          background: '#fafaf7',
+          border: '1px solid #1a1a1a',
+          boxShadow: '0 14px 30px rgba(26,26,26,0.16)',
+          padding: '14px 16px',
+          fontFamily: "'Old Standard TT', serif",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function FilterRow({
+  yearStart,
+  yearEnd,
+  minYear,
+  maxYear,
+  onYearStartChange,
+  onYearEndChange,
+  lengthFilterUnit,
+  onLengthFilterUnitChange,
+  lengthRangeStart,
+  lengthRangeEnd,
+  lengthRangeMin,
+  lengthRangeMax,
+  onLengthRangeStartChange,
+  onLengthRangeEndChange,
+  wordsToAvoid,
+  onWordsToAvoidChange,
+  isLexicalSearchMode,
+}: {
+  yearStart: number | null
+  yearEnd: number | null
+  minYear: number | null
+  maxYear: number | null
+  onYearStartChange: (value: number | null) => void
+  onYearEndChange: (value: number | null) => void
+  lengthFilterUnit: LengthFilterUnit
+  onLengthFilterUnitChange: (next: LengthFilterUnit) => void
+  lengthRangeStart: number | null
+  lengthRangeEnd: number | null
+  lengthRangeMin: number | null
+  lengthRangeMax: number | null
+  onLengthRangeStartChange: (value: number | null) => void
+  onLengthRangeEndChange: (value: number | null) => void
+  wordsToAvoid: string[]
+  onWordsToAvoidChange: (next: string[]) => void
+  isLexicalSearchMode: boolean
+}): JSX.Element {
+  const yearButtonRef = useRef<HTMLButtonElement | null>(null)
+  const lengthButtonRef = useRef<HTMLButtonElement | null>(null)
+  const avoidButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [openPopover, setOpenPopover] = useState<'year' | 'length' | 'avoid' | null>(null)
+  const [avoidDraft, setAvoidDraft] = useState('')
+
+  const addAvoidWord = (): void => {
+    const word = avoidDraft.trim()
+    if (!word) return
+    const lower = word.toLocaleLowerCase()
+    if (wordsToAvoid.some(w => w.toLocaleLowerCase() === lower)) {
+      setAvoidDraft('')
+      return
+    }
+    onWordsToAvoidChange([...wordsToAvoid, word])
+    setAvoidDraft('')
+  }
+  const removeAvoidWord = (word: string): void => {
+    onWordsToAvoidChange(wordsToAvoid.filter(w => w !== word))
+  }
+  const avoidActive = isLexicalSearchMode && wordsToAvoid.length > 0
+
+  const yearActive = minYear !== null && maxYear !== null
+    && (yearStart !== minYear || yearEnd !== maxYear)
+  const lengthActive = lengthRangeMin !== null && lengthRangeMax !== null
+    && (lengthRangeStart !== lengthRangeMin || lengthRangeEnd !== lengthRangeMax)
+
+  const yearLabel = yearStart !== null && yearEnd !== null
+    ? (yearActive ? `${yearStart} — ${yearEnd}` : `${yearStart} — ${yearEnd}`)
+    : 'any'
+
+  const lengthUnitLabel = lengthFilterUnit === 'reading_time' ? 'reading time' : lengthFilterUnit
+  const lengthSummary = !lengthActive
+    ? 'any'
+    : lengthRangeStart !== null && lengthRangeEnd !== null
+      ? `${lengthRangeStart.toLocaleString()} — ${lengthRangeEnd.toLocaleString()}`
+      : 'any'
+
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'center',
+      gap: 28,
+      fontFamily: "'Special Elite', monospace",
+      fontSize: 12,
+      color: '#3a3a36',
+    }}>
+      <button
+        ref={yearButtonRef}
+        type="button"
+        onClick={() => setOpenPopover(openPopover === 'year' ? null : 'year')}
+        style={{
+          background: 'transparent',
+          border: 0,
+          padding: '2px 6px',
+          fontFamily: 'inherit',
+          fontSize: 'inherit',
+          color: yearActive ? '#1a1a1a' : '#3a3a36',
+          cursor: 'pointer',
+          borderBottom: yearActive ? '1px solid #1a1a1a' : '1px dotted rgba(26,26,26,0.3)',
+        }}
+      >
+        year · {yearLabel}
+      </button>
+      <span style={{ color: '#9a9a92' }}>·</span>
+      <button
+        ref={lengthButtonRef}
+        type="button"
+        onClick={() => setOpenPopover(openPopover === 'length' ? null : 'length')}
+        style={{
+          background: 'transparent',
+          border: 0,
+          padding: '2px 6px',
+          fontFamily: 'inherit',
+          fontSize: 'inherit',
+          color: lengthActive ? '#1a1a1a' : '#3a3a36',
+          cursor: 'pointer',
+          borderBottom: lengthActive ? '1px solid #1a1a1a' : '1px dotted rgba(26,26,26,0.3)',
+        }}
+      >
+        length · {lengthUnitLabel} · {lengthSummary}
+      </button>
+      <span style={{ color: '#9a9a92' }}>·</span>
+      <button
+        ref={avoidButtonRef}
+        type="button"
+        onClick={() => setOpenPopover(openPopover === 'avoid' ? null : 'avoid')}
+        title={isLexicalSearchMode ? 'words to avoid' : 'available only in TF·IDF (lexical) compositor mode'}
+        style={{
+          background: 'transparent',
+          border: 0,
+          padding: '2px 6px',
+          fontFamily: 'inherit',
+          fontSize: 'inherit',
+          color: !isLexicalSearchMode ? 'var(--ink-faint)' : (avoidActive ? '#1a1a1a' : '#3a3a36'),
+          cursor: 'pointer',
+          borderBottom: avoidActive ? '1px solid #1a1a1a' : '1px dotted rgba(26,26,26,0.3)',
+        }}
+      >
+        avoid · {avoidActive ? `${wordsToAvoid.length} ${wordsToAvoid.length === 1 ? 'word' : 'words'}` : 'none'}
+      </button>
+
+      <FilterPopover
+        open={openPopover === 'year'}
+        anchorRect={yearButtonRef.current?.getBoundingClientRect() ?? null}
+        onClose={() => setOpenPopover(null)}
+      >
+        <div className="tracker" style={{ marginBottom: 8 }}>year published</div>
+        {minYear === null || maxYear === null ? (
+          <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: '#6a6a62', fontSize: 13 }}>
+            year bounds unavailable
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Special Elite', monospace", fontSize: 12, color: '#1a1a1a' }}>
+              <span>{yearStart ?? minYear}</span>
+              <span>{yearEnd ?? maxYear}</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
+              <input
+                type="range"
+                className="tw-range"
+                min={minYear}
+                max={maxYear}
+                step={1}
+                value={yearStart ?? minYear}
+                onChange={(event) => {
+                  const next = parseInt(event.target.value, 10)
+                  onYearStartChange(Math.min(next, yearEnd ?? maxYear))
+                }}
+              />
+              <input
+                type="range"
+                className="tw-range"
+                min={minYear}
+                max={maxYear}
+                step={1}
+                value={yearEnd ?? maxYear}
+                onChange={(event) => {
+                  const next = parseInt(event.target.value, 10)
+                  onYearEndChange(Math.max(next, yearStart ?? minYear))
+                }}
+              />
+            </div>
+            <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)' }}>
+              <span>{minYear}</span>
+              <button
+                type="button"
+                onClick={() => { onYearStartChange(minYear); onYearEndChange(maxYear) }}
+                style={{ background: 'transparent', border: 0, color: 'var(--ink-mute)', cursor: 'pointer', fontFamily: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', fontSize: 'inherit' }}
+              >
+                ↻ reset
+              </button>
+              <span>{maxYear}</span>
+            </div>
+          </>
+        )}
+      </FilterPopover>
+
+      <FilterPopover
+        open={openPopover === 'length'}
+        anchorRect={lengthButtonRef.current?.getBoundingClientRect() ?? null}
+        onClose={() => setOpenPopover(null)}
+      >
+        <div className="tracker" style={{ marginBottom: 8 }}>article length</div>
+        <div style={{ display: 'flex', borderTop: '1px solid #1a1a1a', borderBottom: '1px solid #1a1a1a', marginBottom: 10 }}>
+          {(['characters', 'words', 'reading_time'] as LengthFilterUnit[]).map((unit, i) => (
+            <button
+              key={unit}
+              type="button"
+              onClick={() => onLengthFilterUnitChange(unit)}
+              style={{
+                flex: 1,
+                background: lengthFilterUnit === unit ? '#1a1a1a' : 'transparent',
+                color: lengthFilterUnit === unit ? '#fafaf7' : '#1a1a1a',
+                border: 0,
+                borderLeft: i === 0 ? 0 : '1px solid #1a1a1a',
+                padding: '6px 4px',
+                cursor: 'pointer',
+                fontFamily: "'IM Fell English', serif",
+                fontSize: 12,
+              }}
+            >
+              {unit === 'reading_time' ? 'reading' : unit}
+            </button>
+          ))}
+        </div>
+        {lengthRangeMin === null || lengthRangeMax === null ? (
+          <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: '#6a6a62', fontSize: 13 }}>
+            length bounds unavailable
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Special Elite', monospace", fontSize: 12, color: '#1a1a1a' }}>
+              <span>{(lengthRangeStart ?? lengthRangeMin).toLocaleString()}</span>
+              <span>{(lengthRangeEnd ?? lengthRangeMax).toLocaleString()}</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
+              <input
+                type="range"
+                className="tw-range"
+                min={lengthRangeMin}
+                max={lengthRangeMax}
+                step={1}
+                value={lengthRangeStart ?? lengthRangeMin}
+                onChange={(event) => {
+                  const next = parseInt(event.target.value, 10)
+                  onLengthRangeStartChange(Math.min(next, lengthRangeEnd ?? lengthRangeMax))
+                }}
+              />
+              <input
+                type="range"
+                className="tw-range"
+                min={lengthRangeMin}
+                max={lengthRangeMax}
+                step={1}
+                value={lengthRangeEnd ?? lengthRangeMax}
+                onChange={(event) => {
+                  const next = parseInt(event.target.value, 10)
+                  onLengthRangeEndChange(Math.max(next, lengthRangeStart ?? lengthRangeMin))
+                }}
+              />
+            </div>
+            <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)' }}>
+              <span>{lengthRangeMin.toLocaleString()}</span>
+              <button
+                type="button"
+                onClick={() => { onLengthRangeStartChange(lengthRangeMin); onLengthRangeEndChange(lengthRangeMax) }}
+                style={{ background: 'transparent', border: 0, color: 'var(--ink-mute)', cursor: 'pointer', fontFamily: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', fontSize: 'inherit' }}
+              >
+                ↻ reset
+              </button>
+              <span>{lengthRangeMax.toLocaleString()}</span>
+            </div>
+          </>
+        )}
+      </FilterPopover>
+
+      <FilterPopover
+        open={openPopover === 'avoid'}
+        anchorRect={avoidButtonRef.current?.getBoundingClientRect() ?? null}
+        onClose={() => setOpenPopover(null)}
+      >
+        <div className="tracker" style={{ marginBottom: 8 }}>words to avoid (TF·IDF only)</div>
+        {!isLexicalSearchMode && (
+          <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)', margin: '0 0 10px' }}>
+            This stoplist is honoured only when the compositor is set to <strong>TF·IDF (Old Hewitt)</strong>. The semantic compositors ignore it.
+          </p>
+        )}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            value={avoidDraft}
+            onChange={(event) => setAvoidDraft(event.target.value)}
+            placeholder="word to suppress…"
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                addAvoidWord()
+              }
+            }}
+            disabled={!isLexicalSearchMode}
+            style={{
+              flex: 1,
+              border: '1px solid #1a1a1a',
+              background: '#fafaf7',
+              padding: '6px 10px',
+              fontFamily: "'Special Elite', monospace",
+              fontSize: 12,
+              color: '#1a1a1a',
+              outline: 'none',
+            }}
+          />
+          <button
+            type="button"
+            onClick={addAvoidWord}
+            disabled={!isLexicalSearchMode}
+            style={{
+              background: 'transparent',
+              border: '1px solid #1a1a1a',
+              padding: '6px 12px',
+              fontFamily: "'IM Fell DW Pica SC', serif",
+              fontSize: 9,
+              letterSpacing: '0.24em',
+              textTransform: 'uppercase',
+              cursor: isLexicalSearchMode ? 'pointer' : 'not-allowed',
+              color: '#1a1a1a',
+            }}
+          >
+            add
+          </button>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+          {wordsToAvoid.map(word => (
+            <span key={word} style={{
+              border: '1px solid #1a1a1a',
+              padding: '3px 9px',
+              fontFamily: "'IM Fell DW Pica SC', serif",
+              fontSize: 9,
+              letterSpacing: '0.16em',
+              textTransform: 'uppercase',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+            }}>
+              {word}
+              <button
+                type="button"
+                onClick={() => removeAvoidWord(word)}
+                style={{ background: 'transparent', border: 0, color: '#7a1d1d', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {wordsToAvoid.length === 0 && (
+            <span style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>
+              no words yet
+            </span>
+          )}
+        </div>
+      </FilterPopover>
+    </div>
+  )
+}
+
 export function LandingFlow(props: LandingFlowProps): JSX.Element {
   const {
     topic,
@@ -272,19 +926,56 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
     onSubmitEssayDraft,
     onOpenSettings,
     onOpenAbout,
-    retrievalModelLabel,
-    stanceLabel,
-    rerankModeLabel,
+    onOpenMethod,
     chunksLabel,
+    effectiveRetrievalModel,
+    effectiveStanceMethod,
+    yearStart,
+    yearEnd,
+    minYear,
+    maxYear,
+    onYearStartChange,
+    onYearEndChange,
+    lengthFilterUnit,
+    onLengthFilterUnitChange,
+    lengthRangeStart,
+    lengthRangeEnd,
+    lengthRangeMin,
+    lengthRangeMax,
+    onLengthRangeStartChange,
+    onLengthRangeEndChange,
+    wordsToAvoid,
+    onWordsToAvoidChange,
+    isLexicalSearchMode,
   } = props
 
-  const [phase, setPhase] = useState<IntroPhase>('topic')
+  // Persist landing-seen across visits — animation only plays on first visit.
+  const [phase, setPhase] = useState<IntroPhase>(() => readLandingSeen() ? 'voice' : 'topic')
   const [voiceMode, setVoiceMode] = useState<VoiceMode>('stance')
   const [activeField, setActiveField] = useState<'topic' | 'claim'>('topic')
   const [essaySource, setEssaySource] = useState<EssaySource>('paste')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const topicInputRef = useRef<HTMLInputElement | null>(null)
   const opinionInputRef = useRef<HTMLInputElement | null>(null)
+
+  // Flash the matching on-screen key when the user types via real keyboard.
+  const [flashedKey, setFlashedKey] = useState<string | null>(null)
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const flashKey = useCallback((id: string): void => {
+    setFlashedKey(id)
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+    flashTimerRef.current = setTimeout(() => setFlashedKey(null), 130)
+  }, [])
+  useEffect(() => () => {
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+  }, [])
+  const handleInputKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    const key = event.key
+    if (key === 'Enter') flashKey('enter')
+    else if (key === 'Backspace') flashKey('backspace')
+    else if (key === ' ') flashKey('space')
+    else if (key.length === 1) flashKey(key.toLowerCase())
+  }, [flashKey])
 
   const topicCycle = useTypewriterCycle(INTRO_TOPICS, phase === 'topic')
   const finalTopic = INTRO_TOPICS[INTRO_TOPICS.length - 1]
@@ -303,6 +994,13 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
     return undefined
   }, [phase, topicCycle.done, claimCycle.done])
 
+  // Mark landing seen once user reaches 'done' or 'voice' for the first time.
+  useEffect(() => {
+    if (phase === 'done' || phase === 'voice') {
+      markLandingSeen()
+    }
+  }, [phase])
+
   useEffect(() => {
     if (phase !== 'voice') return
     if (activeField === 'topic') {
@@ -320,6 +1018,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
   }
 
   const replay = (): void => {
+    clearLandingSeen()
     setPhase('topic')
     setActiveField('topic')
   }
@@ -335,48 +1034,79 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
   const essayCanSubmit = essayText.trim().length > 0 && !loading && !isImportingPdf
   const essayPasteWordCount = essayText.trim().split(/\s+/).filter(Boolean).length
 
+  const PAPER_HEIGHT_STANCE = 220
+
   return (
-    <div className="stage-shell" style={{ minHeight: '100dvh', position: 'relative', overflow: 'hidden' }}>
-      {/* Top rail */}
-      <div className="top-rail">
+    <div className="stage-shell" style={{ position: 'relative' }}>
+      <div className="top-rail" style={{ flexShrink: 0 }}>
         <button type="button" className="top-rail-brand">hear! hear!</button>
         <div className="top-rail-links">
           <button type="button" className="active">search</button>
           <button type="button" onClick={onOpenAbout}>about</button>
-          <button type="button" onClick={onOpenAbout}>method</button>
+          <button type="button" onClick={onOpenMethod}>method</button>
         </div>
       </div>
-      <div className="top-rule" />
+      <div className="top-rule" style={{ flexShrink: 0 }} />
 
-      {/* INTRO MODE */}
+      {/* INTRO MODE — fills the available stage area, slip in the middle */}
       {!isVoice && (
         <div style={{
-          position: 'absolute',
-          inset: 0,
-          paddingTop: 64,
+          flex: 1,
+          minHeight: 0,
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center',
           alignItems: 'center',
           gap: 24,
+          padding: '0 48px',
         }}>
           <div className="tracker" style={{ color: 'var(--accent)', letterSpacing: '0.32em' }}>
             a reading companion · since 2026
           </div>
-          <IntroLine
-            label="Regarding"
-            value={topicShown}
-            showCaret={phase === 'topic'}
-            dimmed={phase === 'claim' || phase === 'done'}
-          />
-          <IntroLine
-            label="I believe"
-            value={claimShown}
-            showCaret={phase === 'claim'}
-            hideUntilActive={phase === 'topic'}
-          />
+          {/* Small draft slip with the cycling lines inside */}
           <div style={{
-            marginTop: 28,
+            background: '#fafaf7',
+            border: '1px solid #1a1a1a',
+            boxShadow: '0 8px 20px rgba(26,26,26,0.08)',
+            padding: '24px 30px 26px',
+            width: 760,
+            maxWidth: 'calc(100% - 64px)',
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 18,
+          }}>
+            <div style={{
+              position: 'absolute',
+              top: 8,
+              left: 14,
+              right: 14,
+              fontFamily: "'IM Fell DW Pica SC', serif",
+              fontSize: 9,
+              letterSpacing: '0.32em',
+              textTransform: 'uppercase',
+              color: '#9a9a92',
+              display: 'flex',
+              justifyContent: 'space-between',
+            }}>
+              <span>hear! hear! / draft</span>
+              <span>№ 001</span>
+            </div>
+            <IntroLine
+              label="Regarding"
+              value={topicShown}
+              showCaret={phase === 'topic'}
+              dimmed={phase === 'claim' || phase === 'done'}
+            />
+            <IntroLine
+              label="I believe"
+              value={claimShown}
+              showCaret={phase === 'claim'}
+              hideUntilActive={phase === 'topic'}
+            />
+          </div>
+          <div style={{
+            marginTop: 18,
             opacity: phase === 'done' ? 1 : 0,
             transform: phase === 'done' ? 'translateY(0)' : 'translateY(8px)',
             transition: 'opacity 0.6s ease, transform 0.6s ease',
@@ -404,72 +1134,76 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
         </div>
       )}
 
-      {/* VOICE MODE — toggle */}
-      <div style={{
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        top: 96,
-        display: 'flex',
-        justifyContent: 'center',
-        gap: 0,
-        fontFamily: "'IM Fell DW Pica SC', serif",
-        fontSize: 11,
-        letterSpacing: '0.28em',
-        textTransform: 'uppercase',
-        opacity: isVoice ? 1 : 0,
-        transform: isVoice ? 'translateY(0)' : 'translateY(-8px)',
-        transition: 'opacity 0.5s ease 0.3s, transform 0.5s ease 0.3s',
-        pointerEvents: isVoice ? 'auto' : 'none',
-        zIndex: 5,
-      }}>
-        <button type="button" onClick={() => setVoiceMode('stance')} style={{
-          padding: '8px 22px',
-          border: '1px solid #1a1a1a',
-          background: voiceMode === 'stance' ? '#1a1a1a' : 'transparent',
-          color: voiceMode === 'stance' ? '#fafaf7' : '#1a1a1a',
-          fontFamily: 'inherit',
-          fontSize: 'inherit',
-          letterSpacing: 'inherit',
-          textTransform: 'inherit',
-          cursor: 'pointer',
-        }}>topic & stance</button>
-        <button type="button" onClick={() => setVoiceMode('essay')} style={{
-          padding: '8px 22px',
-          border: '1px solid #1a1a1a',
-          borderLeft: 0,
-          background: voiceMode === 'essay' ? '#1a1a1a' : 'transparent',
-          color: voiceMode === 'essay' ? '#fafaf7' : '#1a1a1a',
-          fontFamily: 'inherit',
-          fontSize: 'inherit',
-          letterSpacing: 'inherit',
-          textTransform: 'inherit',
-          cursor: 'pointer',
-        }}>essay</button>
-      </div>
+      {/* VOICE MODE — flex column that scales to viewport */}
+      {isVoice && (
+        <div style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          padding: '14px 48px 12px',
+          gap: 8,
+          overflow: 'hidden',
+        }}>
+          {/* Mode toggle */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            gap: 0,
+            fontFamily: "'IM Fell DW Pica SC', serif",
+            fontSize: 11,
+            letterSpacing: '0.28em',
+            textTransform: 'uppercase',
+            transform: 'translateY(0)',
+            transition: 'opacity 0.5s ease 0.3s',
+            zIndex: 5,
+            flexShrink: 0,
+          }}>
+            <button type="button" onClick={() => setVoiceMode('stance')} style={{
+              padding: '8px 22px',
+              border: '1px solid #1a1a1a',
+              background: voiceMode === 'stance' ? '#1a1a1a' : 'transparent',
+              color: voiceMode === 'stance' ? '#fafaf7' : '#1a1a1a',
+              fontFamily: 'inherit',
+              fontSize: 'inherit',
+              letterSpacing: 'inherit',
+              textTransform: 'inherit',
+              cursor: 'pointer',
+            }}>topic & stance</button>
+            <button type="button" onClick={() => setVoiceMode('essay')} style={{
+              padding: '8px 22px',
+              border: '1px solid #1a1a1a',
+              borderLeft: 0,
+              background: voiceMode === 'essay' ? '#1a1a1a' : 'transparent',
+              color: voiceMode === 'essay' ? '#fafaf7' : '#1a1a1a',
+              fontFamily: 'inherit',
+              fontSize: 'inherit',
+              letterSpacing: 'inherit',
+              textTransform: 'inherit',
+              cursor: 'pointer',
+            }}>essay</button>
+          </div>
 
-      {/* Paper sheet */}
-      <div style={{
-        position: 'absolute',
-        left: '50%',
-        top: isVoice ? 168 : 0,
-        transform: `translateX(-50%) ${isVoice ? '' : 'translateY(-100%)'}`,
-        width: 760,
-        height: voiceMode === 'essay' ? 380 : 220,
-        background: '#fafaf7',
-        border: isVoice ? '1px solid rgba(26,26,26,0.6)' : 0,
-        borderBottom: 'none',
-        boxShadow: isVoice ? '0 -2px 0 rgba(26,26,26,0.04), 0 -8px 24px rgba(26,26,26,0.04)' : 'none',
-        opacity: isVoice ? 1 : 0,
-        transition: 'top 0.9s cubic-bezier(.2,.7,.2,1), opacity 0.6s ease, height 0.5s ease',
-        padding: '36px 36px 0',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 22,
-        pointerEvents: isVoice ? 'auto' : 'none',
-        overflow: 'hidden',
-        zIndex: 10,
-      }}>
+          {/* Paper sheet — sits BEHIND the platen rod (z-index 1), so the platen visually feeds the paper through */}
+          <div style={{
+            marginTop: 12,
+            width: 760,
+            height: voiceMode === 'essay' ? 380 : PAPER_HEIGHT_STANCE,
+            background: '#fafaf7',
+            border: '1px solid rgba(26,26,26,0.6)',
+            borderBottom: voiceMode === 'stance' ? '1px solid rgba(26,26,26,0.18)' : 'none',
+            boxShadow: '0 -2px 0 rgba(26,26,26,0.04), 0 -8px 24px rgba(26,26,26,0.04)',
+            transition: 'height 0.5s ease',
+            padding: '36px 36px 0',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 22,
+            overflow: 'hidden',
+            position: 'relative',
+            zIndex: 1,
+            flexShrink: 0,
+          }}>
         <div style={{
           position: 'absolute',
           top: 8,
@@ -497,6 +1231,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
               active={activeField === 'topic'}
               onChange={onTopicChange}
               onFocus={() => setActiveField('topic')}
+              onKeyDown={handleInputKeyDown}
               placeholder="a subject…"
               inputRef={(el) => { topicInputRef.current = el }}
             />
@@ -508,6 +1243,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
               active={activeField === 'claim'}
               onChange={onOpinionChange}
               onFocus={() => setActiveField('claim')}
+              onKeyDown={handleInputKeyDown}
               placeholder="an opinion…"
               inputRef={(el) => { opinionInputRef.current = el }}
             />
@@ -592,131 +1328,161 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
             />
 
             <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Special Elite', monospace", fontSize: 10, color: '#6a6a62' }}>
-              <span>{essaySource === 'paste' ? `${essayPasteWordCount} words` : ' '}</span>
-              <span>auto-extract claims · on</span>
+              <span>{essaySource === 'paste' ? `${essayPasteWordCount} words` : ' '}</span>
+              <span>{effectiveStanceMethod === 'nli' ? 'thesis pick · stage 1' : 'sub-editor reads the whole essay'}</span>
             </div>
           </div>
         )}
       </div>
 
-      {/* Typewriter — slides in only in stance mode */}
-      <div style={{
-        position: 'absolute',
-        left: '50%',
-        bottom: 255,
-        transform: `translateX(-50%) translateY(${isVoice && voiceMode === 'stance' ? 0 : 360}px)`,
-        transition: 'transform 0.9s cubic-bezier(.2,.7,.2,1), opacity 0.4s ease',
-        opacity: isVoice && voiceMode === 'stance' ? 1 : 0,
-        pointerEvents: 'none',
-        visibility: isVoice && voiceMode === 'stance' ? 'visible' : 'hidden',
-        zIndex: 1,
-      }}>
-        <RisingTypewriter />
-      </div>
+          {/* Typewriter — overlaps paper bottom in stance mode. Higher z-index than paper so the
+              platen rod renders OVER the paper edge, simulating the paper being fed through. */}
+          {voiceMode === 'stance' && (
+            <div style={{
+              marginTop: -22,
+              flexShrink: 0,
+              zIndex: 2,
+              position: 'relative',
+            }}>
+              <RisingTypewriter
+                disabled={loading}
+                flashedKey={flashedKey}
+                onType={(char) => {
+                  flashKey(char === ' ' ? 'space' : char)
+                  if (activeField === 'topic') {
+                    onTopicChange((prev) => prev + char)
+                  } else {
+                    onOpinionChange((prev) => prev + char)
+                  }
+                }}
+                onBackspace={() => {
+                  if (activeField === 'topic') {
+                    onTopicChange((prev) => prev.slice(0, -1))
+                  } else {
+                    onOpinionChange((prev) => prev.slice(0, -1))
+                  }
+                }}
+                onEnter={() => {
+                  const trimmedTopic = topic.trim()
+                  const trimmedOpinion = opinion.trim()
+                  if (activeField === 'topic') {
+                    if (trimmedTopic) {
+                      setActiveField('claim')
+                    }
+                    return
+                  }
+                  if (trimmedTopic && trimmedOpinion && !loading) {
+                    onSubmitStance()
+                  }
+                }}
+              />
+            </div>
+          )}
 
-      {/* Send to press button */}
-      <div style={{
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        bottom: 200,
-        display: 'flex',
-        justifyContent: 'center',
-        opacity: isVoice ? 1 : 0,
-        transition: 'opacity 0.5s ease 0.55s',
-        pointerEvents: isVoice ? 'auto' : 'none',
-      }}>
-        <button
-          type="button"
-          onClick={voiceMode === 'stance' ? onSubmitStance : onSubmitEssayDraft}
-          disabled={voiceMode === 'stance' ? !stanceCanSubmit : !essayCanSubmit}
-          style={{
-            background: '#1a1a1a',
-            color: '#fafaf7',
-            border: '1px solid #1a1a1a',
-            padding: '12px 28px',
-            fontFamily: "'IM Fell DW Pica SC', serif",
-            fontSize: 12,
-            letterSpacing: '0.32em',
-            textTransform: 'uppercase',
-            cursor: (voiceMode === 'stance' ? stanceCanSubmit : essayCanSubmit) ? 'pointer' : 'not-allowed',
-            opacity: (voiceMode === 'stance' ? stanceCanSubmit : essayCanSubmit) ? 1 : 0.5,
-          }}
-        >
-          {voiceMode === 'essay' ? 'extract claims & send to press →' : 'send to press →'}
-        </button>
-      </div>
+          {/* Filters row */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 10, flexShrink: 0 }}>
+            <FilterRow
+              yearStart={yearStart}
+              yearEnd={yearEnd}
+              minYear={minYear}
+              maxYear={maxYear}
+              onYearStartChange={onYearStartChange}
+              onYearEndChange={onYearEndChange}
+              lengthFilterUnit={lengthFilterUnit}
+              onLengthFilterUnitChange={onLengthFilterUnitChange}
+              lengthRangeStart={lengthRangeStart}
+              lengthRangeEnd={lengthRangeEnd}
+              lengthRangeMin={lengthRangeMin}
+              lengthRangeMax={lengthRangeMax}
+              onLengthRangeStartChange={onLengthRangeStartChange}
+              onLengthRangeEndChange={onLengthRangeEndChange}
+              wordsToAvoid={wordsToAvoid}
+              onWordsToAvoidChange={onWordsToAvoidChange}
+              isLexicalSearchMode={isLexicalSearchMode}
+            />
+          </div>
 
-      {/* Instrument settings — bottom right */}
-      <div style={{
-        position: 'absolute',
-        right: 48,
-        bottom: 90,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'flex-end',
-        gap: 8,
-        opacity: isVoice ? 1 : 0,
-        transition: 'opacity 0.5s ease 0.6s',
-        pointerEvents: isVoice ? 'auto' : 'none',
-      }}>
-        <div className="tracker" style={{ color: 'var(--accent)', letterSpacing: '0.32em', fontSize: 9 }}>The Instrument</div>
-        <div style={{ fontFamily: "'Special Elite', monospace", fontSize: 11, color: '#1a1a1a', textAlign: 'right', lineHeight: 1.6 }}>
-          reads · <strong>{retrievalModelLabel}</strong> &nbsp;·&nbsp; judges · <strong>{stanceLabel}</strong><br />
-          rerank · <strong>{rerankModeLabel}</strong> &nbsp;·&nbsp; chunks · <strong>{chunksLabel}</strong>
+          {/* Send to press button */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 10, flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={voiceMode === 'stance' ? onSubmitStance : onSubmitEssayDraft}
+              disabled={voiceMode === 'stance' ? !stanceCanSubmit : !essayCanSubmit}
+              style={{
+                background: '#1a1a1a',
+                color: '#fafaf7',
+                border: '1px solid #1a1a1a',
+                padding: '12px 28px',
+                fontFamily: "'IM Fell DW Pica SC', serif",
+                fontSize: 12,
+                letterSpacing: '0.32em',
+                textTransform: 'uppercase',
+                cursor: (voiceMode === 'stance' ? stanceCanSubmit : essayCanSubmit) ? 'pointer' : 'not-allowed',
+                opacity: (voiceMode === 'stance' ? stanceCanSubmit : essayCanSubmit) ? 1 : 0.5,
+              }}
+            >
+              {voiceMode === 'essay' && effectiveStanceMethod === 'nli'
+                ? 'extract a thesis & send to press →'
+                : 'send to press →'}
+            </button>
+          </div>
+
+          {/* Spacer pushes back/instrument to bottom */}
+          <div style={{ flex: 1, minHeight: 12 }} />
+
+          {/* Bottom row: instrument settings on the right (replay covers back-to-intro) */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'flex-end',
+            width: '100%',
+            flexShrink: 0,
+            gap: 24,
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 14,
+              flexShrink: 0,
+            }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                <div className="tracker" style={{ color: 'var(--accent)', letterSpacing: '0.32em', fontSize: 9 }}>The Instrument</div>
+                <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 13, color: '#1a1a1a', textAlign: 'right', lineHeight: 1.5 }}>
+                  reads with <PersonaName persona={effectiveRetrievalModel} /> &nbsp;·&nbsp; judges with <PersonaName persona={effectiveStanceMethod} />
+                  <br />
+                  <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 10, color: '#6a6a62' }}>
+                    chunks · <strong style={{ color: '#1a1a1a' }}>{chunksLabel}</strong>
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #1a1a1a',
+                  padding: '6px 12px',
+                  cursor: 'pointer',
+                  fontFamily: "'IM Fell DW Pica SC', serif",
+                  fontSize: 9,
+                  letterSpacing: '0.28em',
+                  textTransform: 'uppercase',
+                  color: '#1a1a1a',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                ⚙ settings
+              </button>
+            </div>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          style={{
-            background: 'transparent',
-            border: '1px solid #1a1a1a',
-            padding: '6px 12px',
-            cursor: 'pointer',
-            fontFamily: "'IM Fell DW Pica SC', serif",
-            fontSize: 9,
-            letterSpacing: '0.28em',
-            textTransform: 'uppercase',
-            color: '#1a1a1a',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          ⚙ instrument settings
-        </button>
-        <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 11, color: '#6a6a62', maxWidth: 200, textAlign: 'right', lineHeight: 1.4 }}>
-          most readers leave these alone.
-        </div>
-      </div>
+      )}
 
-      {/* Back to intro — bottom left */}
-      <div style={{
-        position: 'absolute',
-        left: 48,
-        bottom: 90,
-        opacity: isVoice ? 1 : 0,
-        transition: 'opacity 0.5s ease 0.4s',
-        pointerEvents: isVoice ? 'auto' : 'none',
-      }}>
-        <button type="button" onClick={() => setPhase('done')} style={{
-          background: 'transparent',
-          border: '1px solid #1a1a1a',
-          padding: '8px 18px',
-          fontFamily: "'IM Fell DW Pica SC', serif",
-          fontSize: 10,
-          letterSpacing: '0.28em',
-          textTransform: 'uppercase',
-          color: '#1a1a1a',
-          cursor: 'pointer',
-        }}>
-          ← back
-        </button>
-      </div>
-
-      {/* Footer */}
-      <div className="footer-rail" style={{ position: 'absolute', bottom: 0, left: 0, right: 0, margin: 0, padding: '12px 48px', borderTop: '1px solid #1a1a1a' }}>
-        <span>landing · the front page</span>
+      {/* Footer — just the replay button, centered, no static labels */}
+      <div style={{ flexShrink: 0, padding: '8px 48px 12px', display: 'flex', justifyContent: 'center' }}>
         <button type="button" onClick={replay} style={{
           background: 'transparent',
           border: '1px solid #1a1a1a',
@@ -727,8 +1493,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           textTransform: 'uppercase',
           color: '#1a1a1a',
           cursor: 'pointer',
-        }}>↻ replay</button>
-        <span>guardian opinion · indexed</span>
+        }}>↻ replay intro</button>
       </div>
     </div>
   )

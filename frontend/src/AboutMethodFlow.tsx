@@ -193,10 +193,13 @@ const handles: Array<{ id: HandleId; position: Position; type: 'source' | 'targe
   { id: 'bottom-out', position: Position.Bottom, type: 'source' },
 ]
 
+/* Vintage palette: edges read as ink lines on paper. Inactive paths are
+   dim grey but solid; active paths are oxblood with full strength so the
+   chosen route is unambiguous against the newsprint backdrop. */
 const edgeToneStyles: Record<EdgeTone, { color: string; opacity: number }> = {
-  neutral: { color: 'rgba(214, 221, 230, 0.72)', opacity: 0.4 },
-  active: { color: 'rgba(241, 220, 197, 0.92)', opacity: 0.46 },
-  support: { color: 'rgba(214, 221, 230, 0.72)', opacity: 0.4 },
+  neutral: { color: 'rgba(26, 26, 26, 0.55)', opacity: 1 },
+  active: { color: '#7a1d1d', opacity: 1 },
+  support: { color: 'rgba(26, 26, 26, 0.45)', opacity: 0.9 },
 }
 
 const markerByTone = (tone: EdgeTone) => ({

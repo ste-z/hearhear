@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RetrievalModel } from './types'
+import PersonaName from './PersonaName'
+import oldHewittPortrait from './assets/personas/old-hewitt.svg'
+import mrsCalderPortrait from './assets/personas/mrs-calder.svg'
+import youngParkPortrait from './assets/personas/young-park.svg'
+import juniorReevePortrait from './assets/personas/junior-reeve.svg'
+import editorHollisPortrait from './assets/personas/editor-hollis.svg'
 
 export type StanceMethod = 'nli' | 'llm'
 export type FrontendChunkingMode = 'none' | 'semantic'
@@ -50,29 +56,13 @@ export type SettingsTrayProps = {
   recencyWeight: number
   onWeightsChange: (next: { topicWeight: number; stanceWeight: number; recencyWeight: number }) => void
 
-  // filters folded back from original app
-  yearStart: number | null
-  yearEnd: number | null
-  minYear: number | null
-  maxYear: number | null
-  onYearStartChange: (value: number | null) => void
-  onYearEndChange: (value: number | null) => void
-
-  lengthFilterUnit: LengthFilterUnit
-  onLengthFilterUnitChange: (next: LengthFilterUnit) => void
-  lengthRangeStart: number | null
-  lengthRangeEnd: number | null
-  lengthRangeMin: number | null
-  lengthRangeMax: number | null
-  onLengthRangeStartChange: (value: number | null) => void
-  onLengthRangeEndChange: (value: number | null) => void
-
-  wordsToAvoid: string[]
-  onWordsToAvoidChange: (next: string[]) => void
-  isLexicalSearchMode: boolean
-
   onResetDefaults?: () => void
   onApply: () => void
+  // When the user has changed any setting since the last Apply, the tray
+  // shows an active "Apply" button — clicking it triggers the backend
+  // preload / unload pass for the new mode. Otherwise the bottom button
+  // is just a passive "Close" affordance.
+  settingsDirty?: boolean
 }
 
 const STEP_LABELS = [
@@ -81,18 +71,17 @@ const STEP_LABELS = [
   'III · Across the bench',
   'IV · The Sub-Editor',
   'V · Re-ranking',
-  'VI · The Filters',
 ] as const
 
-const COMPOSITOR_PERSONAS: Record<RetrievalModel, { name: string; years: string; desc: string }> = {
-  tfidf: { name: 'Old Hewitt', years: '40 yrs', desc: 'Sets type by the literal letter. Knows every word in the morgue.' },
-  svd: { name: 'Mrs. Calder', years: '22 yrs', desc: 'Catches kinship between words — themes more than letters.' },
-  minilm: { name: 'Young Park', years: '4 yrs', desc: 'Trained abroad. Reads context, not just keys.' },
+const COMPOSITOR_PERSONAS: Record<RetrievalModel, { name: string; years: string; desc: string; mode: string; portrait: string }> = {
+  tfidf: { name: 'Old Hewitt', years: '40 yrs', desc: 'Sets type by the literal letter. Inflexible and strict. Knows every word in the archive.', mode: 'TF·IDF', portrait: oldHewittPortrait },
+  svd: { name: 'Mrs. Calder', years: '22 yrs', desc: 'Catches kinship between words — themes more than letters. Knows the archive well.', mode: 'SVD', portrait: mrsCalderPortrait },
+  minilm: { name: 'Young Park', years: '4 yrs', desc: 'Trained abroad. Reads context, not just keys.', mode: 'MiniLM', portrait: youngParkPortrait },
 }
 
-const SUB_EDITOR_PERSONAS: Record<StanceMethod, { name: string; tool: string; desc: string }> = {
-  nli: { name: 'Junior Reeve', tool: 'a red pencil & checklist', desc: 'Marks each line ✓ agrees, ○ neutral, ✗ disagrees. Quick. Strict.' },
-  llm: { name: 'Editor Hollis', tool: 'a green-shade lamp', desc: 'Reads the whole brief by lamplight. Slower. Considered.' },
+const SUB_EDITOR_PERSONAS: Record<StanceMethod, { name: string; tool: string; desc: string; mode: string; portrait: string }> = {
+  nli: { name: 'Junior Reeve', tool: 'a red pencil & checklist', desc: 'Marks each line ✓ agrees, ○ neutral, ✗ disagrees. Quick. Strict.', mode: 'NLI (DeBERTa)', portrait: juniorReevePortrait },
+  llm: { name: 'Editor Hollis', tool: 'a green-shade lamp', desc: 'Reads the whole brief by lamplight. Slower. Considered.', mode: 'LLM (gpt-oss-20b)', portrait: editorHollisPortrait },
 }
 
 function StepPanel({
@@ -313,61 +302,86 @@ function BenchScene({
   )
 }
 
-function CompositorPortrait({ who }: { who: RetrievalModel }): JSX.Element {
-  const accent = who === 'tfidf' ? '#3a3a36' : who === 'svd' ? '#7a1d1d' : '#1a1a1a'
+/**
+ * Persona portrait — a framed line-drawing of the persona, with a typeset
+ * "mode" badge above (e.g. TF·IDF, SVD, MiniLM, NLI, LLM) so the reader
+ * sees both the face and the underlying method at a glance.
+ */
+function PersonaPortrait({ src, mode, alt }: { src: string; mode: string; alt: string }): JSX.Element {
   return (
-    <svg width="220" height="200" viewBox="0 0 220 200">
-      <g stroke="#1a1a1a" strokeWidth="1.2" fill="#fafaf7" strokeLinecap="round">
-        <rect x="30" y="20" width="160" height="160" rx="6" />
-        <circle cx="110" cy="78" r="22" />
-        <path d="M75 156 Q110 116 145 156 Z" />
-        <line x1="40" y1="40" x2="56" y2="40" />
-        <line x1="40" y1="50" x2="62" y2="50" />
-        <text x="110" y="180" fontSize="9" letterSpacing="2.4" textAnchor="middle" stroke="none" fill={accent} fontFamily="'IM Fell DW Pica SC', serif">
-          {who === 'tfidf' ? 'LEXICAL' : who === 'svd' ? 'SEMANTIC' : 'CONTEXTUAL'}
-        </text>
-      </g>
-    </svg>
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 8,
+      width: 240,
+    }}>
+      <div style={{
+        fontFamily: "'IM Fell DW Pica SC', serif",
+        fontSize: 10,
+        letterSpacing: '0.32em',
+        textTransform: 'uppercase',
+        color: 'var(--accent)',
+        borderTop: '1px solid #1a1a1a',
+        borderBottom: '1px solid #1a1a1a',
+        padding: '4px 12px',
+        background: '#fafaf7',
+      }}>
+        {mode}
+      </div>
+      <div style={{
+        width: 240,
+        height: 200,
+        border: '1px solid #1a1a1a',
+        background: '#fafaf7',
+        boxShadow: '2px 4px 0 rgba(26,26,26,0.06)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+        padding: 6,
+        boxSizing: 'border-box',
+      }}>
+        <img
+          src={src}
+          alt={alt}
+          style={{
+            maxWidth: '100%',
+            maxHeight: '100%',
+            objectFit: 'contain',
+            display: 'block',
+          }}
+        />
+      </div>
+    </div>
   )
+}
+
+function CompositorPortrait({ who }: { who: RetrievalModel }): JSX.Element {
+  const persona = COMPOSITOR_PERSONAS[who]
+  return <PersonaPortrait src={persona.portrait} mode={persona.mode} alt={persona.name} />
 }
 
 function SubEditorPortrait({ who }: { who: StanceMethod }): JSX.Element {
-  return (
-    <svg width="220" height="200" viewBox="0 0 220 200">
-      <g stroke="#1a1a1a" strokeWidth="1.2" fill="#fafaf7" strokeLinecap="round">
-        <rect x="30" y="20" width="160" height="160" rx="6" />
-        <circle cx="110" cy="80" r="22" />
-        <path d="M75 156 Q110 118 145 156 Z" />
-        {who === 'nli' ? (
-          <g>
-            <rect x="60" y="120" width="40" height="14" fill="#7a1d1d" />
-            <text x="80" y="131" fontSize="8" textAnchor="middle" stroke="none" fill="#fafaf7" fontFamily="'IM Fell DW Pica SC', serif">PENCIL</text>
-          </g>
-        ) : (
-          <g>
-            <ellipse cx="80" cy="126" rx="14" ry="6" fill="#fafaf7" />
-            <line x1="80" y1="120" x2="80" y2="106" />
-            <line x1="73" y1="115" x2="86" y2="115" />
-          </g>
-        )}
-      </g>
-    </svg>
-  )
+  const persona = SUB_EDITOR_PERSONAS[who]
+  return <PersonaPortrait src={persona.portrait} mode={persona.mode} alt={persona.name} />
 }
 
 function ModalNameCard({
-  name,
+  persona,
   detail,
   desc,
 }: {
-  name: string
+  persona: 'tfidf' | 'svd' | 'minilm' | 'nli' | 'llm'
   detail: string
   desc: string
 }): JSX.Element {
   return (
     <div style={{ borderTop: '1px solid #1a1a1a', borderBottom: '1px solid #1a1a1a', padding: '8px 14px', maxWidth: 360, marginTop: 8, width: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 16, fontStyle: 'italic' }}>{name}</span>
+        <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 16, fontStyle: 'italic' }}>
+          <PersonaName persona={persona} />
+        </span>
         <span style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)' }}>{detail}</span>
       </div>
       <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 12, color: '#3a3a36', marginTop: 2, lineHeight: 1.45 }}>{desc}</div>
@@ -422,8 +436,8 @@ function RerankPreview({
   const sorted = [...entries].sort((a, b) => b.value - a.value)
   const top = sorted[0]
   const leaning: Record<string, string> = {
-    relevance: 'a tightly on-topic stack — proofs that drift even slightly off the subject sink to the bottom.',
-    agreement: 'a partisan running order — proofs that side with your claim float; dissenters are buried.',
+    relevance: 'a tightly on-topic stack — articles that drift even slightly off the subject sink to the bottom.',
+    agreement: 'a partisan running order — articles that side with your claim float; dissenters are buried.',
     recency: 'a fresh-ink running order — yesterday’s columns lead, last decade’s sit at the back.',
   }
   return (
@@ -448,70 +462,6 @@ function RerankPreview({
         <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 15, color: '#3a3a36', lineHeight: 1.45 }}>
           With <strong style={{ color: '#7a1d1d' }}>{top.label}</strong> at {Math.round((top.value / total) * 100)}%, expect {leaning[top.id]}
         </div>
-      </div>
-    </div>
-  )
-}
-
-function FilterRangeRow({
-  label,
-  start,
-  end,
-  min,
-  max,
-  unit,
-  onStartChange,
-  onEndChange,
-}: {
-  label: string
-  start: number | null
-  end: number | null
-  min: number | null
-  max: number | null
-  unit: string
-  onStartChange: (value: number | null) => void
-  onEndChange: (value: number | null) => void
-}): JSX.Element {
-  const startVal = start ?? min ?? 0
-  const endVal = end ?? max ?? 0
-  const minVal = min ?? 0
-  const maxVal = max ?? 0
-  const disabled = min === null || max === null
-  return (
-    <div style={{ marginTop: 14, maxWidth: 520 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)' }}>{label}</span>
-        <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 12 }}>
-          {disabled ? '—' : `${startVal.toLocaleString()} – ${endVal.toLocaleString()} ${unit}`}
-        </span>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 8 }}>
-        <input
-          type="range"
-          className="tw-range"
-          min={minVal}
-          max={maxVal}
-          step={1}
-          value={startVal}
-          disabled={disabled}
-          onChange={(event) => {
-            const next = parseInt(event.target.value, 10)
-            onStartChange(Math.min(next, endVal))
-          }}
-        />
-        <input
-          type="range"
-          className="tw-range"
-          min={minVal}
-          max={maxVal}
-          step={1}
-          value={endVal}
-          disabled={disabled}
-          onChange={(event) => {
-            const next = parseInt(event.target.value, 10)
-            onEndChange(Math.max(next, startVal))
-          }}
-        />
       </div>
     </div>
   )
@@ -549,32 +499,14 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
     stanceWeight,
     recencyWeight,
     onWeightsChange,
-    yearStart,
-    yearEnd,
-    minYear,
-    maxYear,
-    onYearStartChange,
-    onYearEndChange,
-    lengthFilterUnit,
-    onLengthFilterUnitChange,
-    lengthRangeStart,
-    lengthRangeEnd,
-    lengthRangeMin,
-    lengthRangeMax,
-    onLengthRangeStartChange,
-    onLengthRangeEndChange,
-    wordsToAvoid,
-    onWordsToAvoidChange,
-    isLexicalSearchMode,
     onResetDefaults,
     onApply,
+    settingsDirty = false,
   } = props
 
   const [step, setStep] = useState(0)
-  const [avoidDraft, setAvoidDraft] = useState('')
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const stepRefs = [
-    useRef<HTMLDivElement | null>(null),
     useRef<HTMLDivElement | null>(null),
     useRef<HTMLDivElement | null>(null),
     useRef<HTMLDivElement | null>(null),
@@ -585,7 +517,6 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
   useEffect(() => {
     if (!open) {
       setStep(0)
-      setAvoidDraft('')
     }
   }, [open])
 
@@ -614,22 +545,6 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
   const subEditor = SUB_EDITOR_PERSONAS[effectiveStanceMethod]
   const useChunking = chunkingMode !== 'none'
   const canUseChunking = supportedChunkingModes.includes('semantic') && llmAgreementAvailable
-
-  const addAvoidWord = (): void => {
-    const word = avoidDraft.trim()
-    if (!word) return
-    const lower = word.toLocaleLowerCase()
-    if (wordsToAvoid.some(w => w.toLocaleLowerCase() === lower)) {
-      setAvoidDraft('')
-      return
-    }
-    onWordsToAvoidChange([...wordsToAvoid, word])
-    setAvoidDraft('')
-  }
-
-  const removeAvoidWord = (word: string): void => {
-    onWordsToAvoidChange(wordsToAvoid.filter(w => w !== word))
-  }
 
   return (
     <div className="modal-shell" onClick={onClose}>
@@ -691,14 +606,14 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
 
         {/* Scrollable journey */}
         <div ref={scrollRef} onScroll={handleScroll} className="tray-scroll" style={{ flex: 1, overflowX: 'hidden', position: 'relative' }}>
-          <StepPanel idx={0} title="Chunking" subtitle="How long articles enter the morgue" stepRef={stepRefs[0]}>
+          <StepPanel idx={0} title="Chunking" subtitle="How long articles enter the archive" stepRef={stepRefs[0]}>
             <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: 32, alignItems: 'center' }}>
               <div>
                 <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: '#3a3a36', maxWidth: 520 }}>
                   Before anyone reads, the press decides how each article is filed. Whole articles preserve argument; section-chunks let the press cite a single paragraph. Chunking requires the LLM sub-editor.
                 </p>
                 <ModalRoleSelector<FrontendChunkingMode>
-                  label="At the morgue"
+                  label="At the archive"
                   value={chunkingMode}
                   onChange={onChunkingModeChange}
                   options={[
@@ -735,15 +650,15 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
             </div>
           </StepPanel>
 
-          <StepPanel idx={1} title="The Compositor" subtitle="Who pulls candidate proofs from the case" stepRef={stepRefs[1]}>
+          <StepPanel idx={1} title="The Compositor" subtitle="Who pulls candidate articles from the case" stepRef={stepRefs[1]}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, alignItems: 'center' }}>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                 <CompositorPortrait who={effectiveRetrievalModel} />
-                <ModalNameCard name={compositor.name} detail={compositor.years} desc={compositor.desc} />
+                <ModalNameCard persona={effectiveRetrievalModel} detail={compositor.years} desc={compositor.desc} />
               </div>
               <div>
                 <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: '#3a3a36' }}>
-                  The compositor stands at the type-case and pulls candidates from the morgue. Each hand has a different feel for what counts as a match.
+                  The compositor stands at the type-case and pulls candidates from the archive. Each hand has a different feel for what counts as a match.
                 </p>
                 <ModalRoleSelector<RetrievalModel>
                   label="At the type case"
@@ -763,7 +678,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
             <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: 32, alignItems: 'center' }}>
               <div>
                 <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: '#3a3a36', maxWidth: 520 }}>
-                  As proofs travel from compositor to sub-editor, you decide how the cut is made. <em>Auto</em> sets a relevance threshold (0–1) and lets every proof above it cross. <em>Manual</em> takes a fixed count of the strongest proofs (1–{maxAutoRerankCandidates}) regardless of score.
+                  As articles travel from compositor to sub-editor, you decide how the cut is made. <em>Auto</em> sets a relevance threshold (0–1) and lets every article above it cross. <em>Manual</em> takes a fixed count of the strongest articles (1–{maxAutoRerankCandidates}) regardless of score.
                 </p>
                 <ModalRoleSelector<RerankSelectionMode>
                   label="Hand-off"
@@ -771,7 +686,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                   onChange={onRerankSelectionModeChange}
                   options={[
                     { id: 'automatic', label: 'AUTO', sub: 'relevance threshold · default' },
-                    { id: 'manual', label: 'MANUAL', sub: 'fixed count of proofs' },
+                    { id: 'manual', label: 'MANUAL', sub: 'fixed count of articles' },
                   ]}
                 />
                 {rerankSelectionMode === 'automatic' && (
@@ -783,19 +698,19 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                     value={autoRerankThreshold}
                     onChange={onAutoRerankThresholdChange}
                     fmt={(v) => v.toFixed(2)}
-                    hint="proofs below this score don’t cross to the lectern"
+                    hint="articles below this score don’t cross to the lectern"
                   />
                 )}
                 {rerankSelectionMode === 'manual' && (
                   <SliderField
-                    label="Number of proofs"
-                    unit="· proofs"
+                    label="Number of articles"
+                    unit="· articles"
                     min={1}
                     max={Math.max(20, maxAutoRerankCandidates)}
                     step={1}
                     value={rerankTopK}
                     onChange={onRerankTopKChange}
-                    hint="the top-N strongest proofs cross to the lectern"
+                    hint="the top-N strongest articles cross to the lectern"
                   />
                 )}
               </div>
@@ -803,18 +718,18 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                 <BenchScene mode={rerankSelectionMode} threshold={autoRerankThreshold} count={rerankTopK} />
                 <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)' }}>
                   {rerankSelectionMode === 'automatic'
-                    ? `proofs above ${autoRerankThreshold.toFixed(2)} cross — others drop into the spike`
-                    : `the strongest ${rerankTopK} proofs cross — the rest drop into the spike`}
+                    ? `articles above ${autoRerankThreshold.toFixed(2)} cross — others drop into the spike`
+                    : `the strongest ${rerankTopK} articles cross — the rest drop into the spike`}
                 </div>
               </div>
             </div>
           </StepPanel>
 
-          <StepPanel idx={3} title="The Sub-Editor" subtitle="Who marks each proof for stance" stepRef={stepRefs[3]}>
+          <StepPanel idx={3} title="The Sub-Editor" subtitle="Who marks each article for stance" stepRef={stepRefs[3]}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, alignItems: 'center' }}>
               <div>
                 <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: '#3a3a36' }}>
-                  At the lectern, the sub-editor decides where each proof lands relative to your claim — in agreement, qualified, or against.
+                  At the lectern, the sub-editor decides where each article lands relative to your claim — in agreement, qualified, or against.
                 </p>
                 <ModalRoleSelector<StanceMethod>
                   label="At the lectern"
@@ -827,13 +742,13 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                 />
                 {useChunking && (
                   <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)', marginTop: 8 }}>
-                    Chunking requires Editor Hollis (LLM). Junior Reeve (NLI) is locked out for chunked retrieval.
+                    Chunking requires <PersonaName persona="llm" />. <PersonaName persona="nli" /> is locked out for chunked retrieval.
                   </p>
                 )}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                 <SubEditorPortrait who={effectiveStanceMethod} />
-                <ModalNameCard name={subEditor.name} detail={subEditor.tool} desc={subEditor.desc} />
+                <ModalNameCard persona={effectiveStanceMethod} detail={subEditor.tool} desc={subEditor.desc} />
               </div>
             </div>
           </StepPanel>
@@ -842,13 +757,13 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
             <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: 32, alignItems: 'start' }}>
               <div>
                 <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: '#3a3a36', maxWidth: 520 }}>
-                  After every proof is marked, the editor at the back desk weights three qualities to set the final running order. Drag each weight to taste.
+                  After every article is marked, the editor at the back desk weights three qualities to set the final running order. Drag each weight to taste.
                 </p>
                 <WeightSliders weights={[
                   {
                     id: 'relevance',
                     label: 'Relevance',
-                    desc: 'how close the proof is to your topic',
+                    desc: 'how close the article is to your topic',
                     value: topicWeight,
                     onChange: (next) => onWeightsChange({ topicWeight: next, stanceWeight, recencyWeight }),
                   },
@@ -876,143 +791,27 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
             </div>
           </StepPanel>
 
-          <StepPanel idx={5} title="The Filters" subtitle="Year, length & avoided words — fold-back controls from the original press" stepRef={stepRefs[5]}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32 }}>
-              <div>
-                <FilterRangeRow
-                  label="Year published"
-                  start={yearStart}
-                  end={yearEnd}
-                  min={minYear}
-                  max={maxYear}
-                  unit=""
-                  onStartChange={onYearStartChange}
-                  onEndChange={onYearEndChange}
-                />
-                <div style={{ marginTop: 18 }}>
-                  <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)', marginBottom: 6 }}>Length unit</div>
-                  <div style={{ display: 'flex', borderTop: '1px solid #1a1a1a', borderBottom: '1px solid #1a1a1a' }}>
-                    {(['characters', 'words', 'reading_time'] as LengthFilterUnit[]).map((unit, i) => {
-                      const active = unit === lengthFilterUnit
-                      return (
-                        <button
-                          key={unit}
-                          type="button"
-                          onClick={() => onLengthFilterUnitChange(unit)}
-                          style={{
-                            flex: 1,
-                            background: active ? '#1a1a1a' : 'transparent',
-                            color: active ? '#fafaf7' : '#1a1a1a',
-                            border: 0,
-                            borderLeft: i === 0 ? 0 : '1px solid #1a1a1a',
-                            padding: '8px',
-                            cursor: 'pointer',
-                            fontFamily: "'IM Fell English', serif",
-                            fontSize: 13,
-                          }}
-                        >
-                          {unit === 'reading_time' ? 'reading time' : unit}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-                <FilterRangeRow
-                  label={lengthFilterUnit === 'reading_time' ? 'Reading minutes' : lengthFilterUnit === 'words' ? 'Words' : 'Characters'}
-                  start={lengthRangeStart}
-                  end={lengthRangeEnd}
-                  min={lengthRangeMin}
-                  max={lengthRangeMax}
-                  unit={lengthFilterUnit === 'reading_time' ? 'min' : lengthFilterUnit === 'words' ? 'words' : 'chars'}
-                  onStartChange={onLengthRangeStartChange}
-                  onEndChange={onLengthRangeEndChange}
-                />
-              </div>
-              <div>
-                <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)', marginBottom: 6 }}>Words to avoid (lexical only)</div>
-                {!isLexicalSearchMode && (
-                  <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>
-                    Available when the compositor is set to TF·IDF.
-                  </p>
-                )}
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
-                  <input
-                    value={avoidDraft}
-                    onChange={(event) => setAvoidDraft(event.target.value)}
-                    placeholder="word to suppress…"
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault()
-                        addAvoidWord()
-                      }
-                    }}
-                    disabled={!isLexicalSearchMode}
-                    style={{
-                      flex: 1,
-                      border: '1px solid #1a1a1a',
-                      background: '#fafaf7',
-                      padding: '6px 10px',
-                      fontFamily: "'Special Elite', monospace",
-                      fontSize: 12,
-                      color: '#1a1a1a',
-                      outline: 'none',
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={addAvoidWord}
-                    disabled={!isLexicalSearchMode}
-                    style={{
-                      background: 'transparent',
-                      border: '1px solid #1a1a1a',
-                      padding: '6px 12px',
-                      fontFamily: "'IM Fell DW Pica SC', serif",
-                      fontSize: 9,
-                      letterSpacing: '0.24em',
-                      textTransform: 'uppercase',
-                      cursor: isLexicalSearchMode ? 'pointer' : 'not-allowed',
-                      color: '#1a1a1a',
-                    }}
-                  >
-                    add
-                  </button>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-                  {wordsToAvoid.map(word => (
-                    <span key={word} style={{
-                      border: '1px solid #1a1a1a',
-                      padding: '3px 9px',
-                      fontFamily: "'IM Fell DW Pica SC', serif",
-                      fontSize: 9,
-                      letterSpacing: '0.16em',
-                      textTransform: 'uppercase',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                    }}>
-                      {word}
-                      <button
-                        type="button"
-                        onClick={() => removeAvoidWord(word)}
-                        style={{ background: 'transparent', border: 0, color: '#7a1d1d', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </StepPanel>
-
           {/* Final summary + apply */}
           <div style={{ padding: '32px 40px 48px', borderTop: '1px solid #1a1a1a' }}>
             <div className="tracker" style={{ color: 'var(--accent)', fontSize: 10 }}>The complete instrument</div>
-            <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 22, marginTop: 4, marginBottom: 12 }}>
-              <em>Chunking</em> {chunkingMode === 'none' ? 'off' : chunkingMode} · <em>{compositor.name}</em> sets · hand-off <em>{rerankSelectionMode === 'automatic' ? `auto @ ${autoRerankThreshold.toFixed(2)}` : `top ${rerankTopK}`}</em> · <em>{subEditor.name}</em> marks
-            </div>
-            <div style={{ fontFamily: "'Special Elite', monospace", fontSize: 12, color: '#3a3a36' }}>
-              weights · relevance {Math.round(topicWeight * 100)} / agreement {Math.round(stanceWeight * 100)} / recency {Math.round(recencyWeight * 100)}
+            <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 19, marginTop: 6, marginBottom: 12, lineHeight: 1.55, color: '#1a1a1a', maxWidth: 760 }}>
+              {(() => {
+                const unitNoun = useChunking ? 'top passages' : 'on-topic articles'
+                const handoffPhrase = rerankSelectionMode === 'automatic'
+                  ? <>handing off the ones that score at least <strong>{autoRerankThreshold.toFixed(2)}</strong> on relevance</>
+                  : <>handing off the strongest <strong>{rerankTopK}</strong></>
+                const chunkingClause = useChunking
+                  ? ' (each article cut on section breaks before being read)'
+                  : ''
+                return (
+                  <>
+                    Let <em><PersonaName persona={effectiveRetrievalModel} /></em> pull {unitNoun} from the archive{chunkingClause}, {handoffPhrase} to <em><PersonaName persona={effectiveStanceMethod} /></em> who marks stance agreement.
+                    <span style={{ display: 'block', marginTop: 8, fontFamily: "'Special Elite', monospace", fontSize: 13, color: 'var(--ink-mute)' }}>
+                      The editor then weights the running order — relevance <strong>{Math.round(topicWeight * 100)}</strong> · agreement <strong>{Math.round(stanceWeight * 100)}</strong> · recency <strong>{Math.round(recencyWeight * 100)}</strong>.
+                    </span>
+                  </>
+                )
+              })()}
             </div>
             <div style={{ marginTop: 22, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button
@@ -1037,18 +836,19 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                 type="button"
                 onClick={onApply}
                 style={{
-                  background: '#1a1a1a',
+                  background: settingsDirty ? '#7a1d1d' : '#1a1a1a',
                   color: '#fafaf7',
-                  border: '1px solid #1a1a1a',
+                  border: `1px solid ${settingsDirty ? '#7a1d1d' : '#1a1a1a'}`,
                   padding: '12px 26px',
                   fontFamily: "'IM Fell DW Pica SC', serif",
                   fontSize: 12,
                   letterSpacing: '0.28em',
                   textTransform: 'uppercase',
                   cursor: 'pointer',
+                  transition: 'background 160ms ease, border-color 160ms ease',
                 }}
               >
-                apply &amp; close →
+                {settingsDirty ? 'apply changes →' : 'close ✕'}
               </button>
             </div>
           </div>

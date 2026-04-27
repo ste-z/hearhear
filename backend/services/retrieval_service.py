@@ -962,7 +962,12 @@ def stance_search(
     chunk_candidate_top_k=DEFAULT_CHUNK_CANDIDATE_TOP_K,
     chunk_article_top_k=DEFAULT_CHUNK_ARTICLE_TOP_K,
     progress_callback=None,
+    on_topic_done=None,
 ):
+    """on_topic_done is invoked with the topic-relevance candidate list as
+    soon as that step finishes (before the slower stance-scoring/rerank).
+    Lets the API layer publish those candidates via SSE so the frontend can
+    paint stage 2 with scattered cards while reranking is still running."""
     from backend.stance_processing.stance_rerank import rerank_article_matches
 
     topic_text = str(topic or "").strip()
@@ -1010,6 +1015,13 @@ def stance_search(
             0.38,
             candidate_count=len(topic_matches),
         )
+    # Hand the topic-only candidates to the caller before the heavy
+    # rerank starts — lets the UI paint stage 2 immediately.
+    if on_topic_done is not None and topic_matches:
+        try:
+            on_topic_done(list(topic_matches))
+        except Exception:  # noqa: BLE001 — best-effort, never block the search
+            pass
     if not topic_matches:
         log_runtime_event(
             "stance_search.no_topic_matches",

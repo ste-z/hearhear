@@ -51,6 +51,26 @@ input, textarea { font-family: inherit; color: inherit; }
 @keyframes rf-slide   { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes rf-shimmer { from { transform: scaleX(0); transform-origin: left; } to { transform: scaleX(1); transform-origin: left; } }
 @keyframes rf-rise    { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes sort-into-row {
+  /* Each row reads its own --from-x / --from-y / --from-r (set inline) and
+     animates into its natural ledger position. */
+  0%   { transform: translate(var(--from-x, 0px), var(--from-y, 0px)) rotate(var(--from-r, 0deg)); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+@keyframes sort-card-shed {
+  /* After the card lands, fade out its card-chrome (border/padding) over
+     the last beat so the row settles into the flat ledger style. */
+  0%, 70% {
+    background: var(--paper);
+    border-color: var(--ink);
+    box-shadow: 2px 4px 0 rgba(26, 26, 26, 0.06);
+  }
+  100% {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: 0 0 0 rgba(0,0,0,0);
+  }
+}
 @keyframes tw-bob     { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(4px); } }
 @keyframes tw-paper-flutter { 0%, 100% { transform: rotate(-1deg) translateY(0); } 50% { transform: rotate(1deg) translateY(-2px); } }
 @keyframes hh-pulse   { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
@@ -59,11 +79,15 @@ input, textarea { font-family: inherit; color: inherit; }
 /* ---------- Stage shell ---------- */
 .stage-shell {
   width: 100%;
-  min-height: 100dvh;
+  height: 100dvh;
+  max-height: 100dvh;
   background: var(--paper);
   color: var(--ink);
   font-family: 'Old Standard TT', Georgia, serif;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .stage-shell .top-rail {
@@ -338,6 +362,12 @@ input[type="range"].tw-range::-moz-range-thumb {
 }
 .about-tab:first-child { border-left: 0; }
 .about-tab.active { background: var(--ink); color: var(--paper); }
+.about-page-panel-shell {
+  /* Lock the tab panel to a fixed minimum height so width doesn't jump
+     when the content (overview vs team) differs in size */
+  min-height: 360px;
+  width: 100%;
+}
 .about-page-stack { display: flex; flex-direction: column; gap: 16px; }
 .about-page-copy {
   font-family: 'IM Fell English', serif;
@@ -351,8 +381,12 @@ input[type="range"].tw-range::-moz-range-thumb {
   padding: 0;
   margin: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  /* Fixed 3-column grid so the panel width is stable across tabs */
+  grid-template-columns: repeat(3, 1fr);
   gap: 14px;
+}
+@media (max-width: 720px) {
+  .about-team-grid { grid-template-columns: repeat(2, 1fr); }
 }
 .about-team-card {
   border: 1px solid var(--rule-soft);
@@ -372,6 +406,22 @@ input[type="range"].tw-range::-moz-range-thumb {
   text-transform: uppercase;
   color: var(--ink-mute);
   margin: 0;
+}
+
+/* ---------- Persona name (curly underline) ----------
+   The hover/focus tooltip itself is rendered by PersonaName.tsx via a
+   document.body portal so it can never be clipped by overflow:hidden
+   ancestors. This rule only styles the inline trigger. */
+.persona-name {
+  display: inline-block;
+  text-decoration: underline wavy var(--accent);
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1.2px;
+  cursor: help;
+  outline: none;
+}
+.persona-name:focus-visible {
+  text-decoration-color: var(--ink);
 }
 
 /* ---------- Misc utility ---------- */
