@@ -800,6 +800,115 @@ const readApiJson = async <T,>(response: Response): Promise<T> => {
   return (payload ?? null) as T
 }
 
+type ApiStreamHandlers<T> = {
+  onContent?: (content: string) => void
+  onFinal?: (payload: T) => void
+}
+
+const parseApiStreamEvent = (block: string): { event: string; data: unknown } | null => {
+  const lines = block.split('\n')
+  let eventName = 'message'
+  const dataLines: string[] = []
+
+  for (const line of lines) {
+    if (line.startsWith('event:')) {
+      eventName = line.slice(6).trim() || 'message'
+    } else if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trimStart())
+    }
+  }
+
+  if (dataLines.length === 0) return null
+
+  const dataText = dataLines.join('\n')
+  try {
+    return { event: eventName, data: JSON.parse(dataText) }
+  } catch {
+    return { event: eventName, data: dataText }
+  }
+}
+
+const readApiStream = async <T,>(
+  response: Response,
+  handlers: ApiStreamHandlers<T> = {},
+): Promise<T> => {
+  if (!response.ok) {
+    return readApiJson<T>(response)
+  }
+
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!response.body || !contentType.includes('text/event-stream')) {
+    const payload = await readApiJson<T>(response)
+    handlers.onFinal?.(payload)
+    return payload
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let finalPayload: T | null = null
+
+  const handleBlock = (block: string): void => {
+    const parsed = parseApiStreamEvent(block)
+    if (!parsed) return
+
+    const payload = parsed.data
+    const errorMessage = (
+      payload &&
+      typeof payload === 'object' &&
+      'error' in payload &&
+      typeof (payload as ApiErrorPayload).error === 'string'
+    )
+      ? (payload as ApiErrorPayload).error
+      : null
+
+    if (parsed.event === 'error' || errorMessage) {
+      throw new Error(errorMessage || 'The streaming request failed.')
+    }
+
+    if (
+      (parsed.event === 'chunk' || parsed.event === 'message') &&
+      payload &&
+      typeof payload === 'object' &&
+      'content' in payload &&
+      typeof (payload as { content?: unknown }).content === 'string'
+    ) {
+      handlers.onContent?.((payload as { content: string }).content)
+      return
+    }
+
+    if (parsed.event === 'final') {
+      finalPayload = payload as T
+      handlers.onFinal?.(finalPayload)
+    }
+  }
+
+  while (true) {
+    const { value, done } = await reader.read()
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done }).replace(/\r\n/g, '\n')
+
+    let boundaryIndex = buffer.indexOf('\n\n')
+    while (boundaryIndex >= 0) {
+      const block = buffer.slice(0, boundaryIndex)
+      buffer = buffer.slice(boundaryIndex + 2)
+      handleBlock(block)
+      boundaryIndex = buffer.indexOf('\n\n')
+    }
+
+    if (done) break
+  }
+
+  if (buffer.trim()) {
+    handleBlock(buffer)
+  }
+
+  if (finalPayload === null) {
+    throw new Error('The server closed the stream before sending a final response.')
+  }
+
+  return finalPayload
+}
+
 type ResultsOverviewSource = NonNullable<ResultsOverview['sources']>[number]
 type ResultsOverviewEvidence = NonNullable<ResultsOverview['key_evidence']>[number]
 type ResultsOverviewArgument = NonNullable<ResultsOverview['supporting_arguments']>[number]
@@ -2376,6 +2485,7 @@ function App(): JSX.Element {
   )
   const [articles, setArticles] = useState<Article[]>([])
   const [resultsOverview, setResultsOverview] = useState<ResultsOverview | null>(null)
+  const [resultsOverviewDraft, setResultsOverviewDraft] = useState<string>('')
   const [resultsOverviewLoading, setResultsOverviewLoading] = useState<boolean>(false)
   const [resultsOverviewError, setResultsOverviewError] = useState<string | null>(null)
   const [resultsChatMessages, setResultsChatMessages] = useState<ResultsChatMessage[]>([])
@@ -4012,6 +4122,7 @@ function App(): JSX.Element {
   const resetResultsOverview = (): void => {
     resultsOverviewRequestIdRef.current += 1
     setResultsOverview(null)
+    setResultsOverviewDraft('')
     setResultsOverviewError(null)
     setResultsOverviewLoading(false)
     resetResultsChat()
@@ -4038,6 +4149,7 @@ function App(): JSX.Element {
 
     if (useLlm !== true) {
       setResultsOverview(null)
+      setResultsOverviewDraft('')
       setResultsOverviewError('AI overview is turned off in the backend config.')
       setResultsOverviewLoading(false)
       return
@@ -4045,6 +4157,7 @@ function App(): JSX.Element {
 
     if (!llmAgreementAvailable) {
       setResultsOverview(null)
+      setResultsOverviewDraft('')
       setResultsOverviewError('AI overview needs SPARK_API_KEY or API_KEY in your backend environment.')
       setResultsOverviewLoading(false)
       return
@@ -4053,6 +4166,7 @@ function App(): JSX.Element {
     const requestId = resultsOverviewRequestIdRef.current + 1
     resultsOverviewRequestIdRef.current = requestId
     setResultsOverview(null)
+    setResultsOverviewDraft('')
     setResultsOverviewError(null)
     setResultsOverviewLoading(true)
 
@@ -4066,15 +4180,22 @@ function App(): JSX.Element {
           query,
           mode,
           articles: nextArticles.slice(0, 10),
+          stream: true,
         }),
       })
 
-      const data = await readApiJson<ResultsOverview>(response)
+      const data = await readApiStream<ResultsOverview>(response, {
+        onContent: (content) => {
+          if (resultsOverviewRequestIdRef.current !== requestId) return
+          setResultsOverviewDraft(currentDraft => `${currentDraft}${content}`)
+        },
+      })
       if (resultsOverviewRequestIdRef.current !== requestId) return
       if (!data || typeof data.overview !== 'string' || data.overview.trim() === '') {
         throw new Error('Invalid response from the results overview API.')
       }
 
+      setResultsOverviewDraft('')
       setResultsOverview({
         overview: data.overview.trim(),
         key_points: Array.isArray(data.key_points)
@@ -4091,6 +4212,7 @@ function App(): JSX.Element {
       if (resultsOverviewRequestIdRef.current !== requestId) return
       console.error('Results overview failed:', fetchError)
       setResultsOverview(null)
+      setResultsOverviewDraft('')
       setResultsOverviewError(fetchError instanceof Error ? fetchError.message : 'Results overview failed.')
     } finally {
       if (resultsOverviewRequestIdRef.current === requestId) {
@@ -4136,14 +4258,21 @@ function App(): JSX.Element {
     }
 
     const userAttachments = resultsChatAttachments.length > 0 ? resultsChatAttachments : null
+    const messageTimestamp = Date.now()
+    const assistantMessageId = `assistant-${messageTimestamp}`
     const userMessage: ResultsChatMessage = {
-      id: `user-${Date.now()}`,
+      id: `user-${messageTimestamp}`,
       role: 'user',
       content: question,
       attachments: userAttachments,
     }
+    const assistantMessage: ResultsChatMessage = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+    }
     const nextMessages = [...resultsChatMessages, userMessage]
-    setResultsChatMessages(nextMessages)
+    setResultsChatMessages([...nextMessages, assistantMessage])
     setResultsChatInput('')
     if (userAttachments) {
       setResultsChatArticleIds([])
@@ -4167,24 +4296,33 @@ function App(): JSX.Element {
             role: message.role,
             content: message.content,
           })),
+          stream: true,
         }),
       })
 
-      const data = await readApiJson<ResultsChatResponse>(response)
+      const data = await readApiStream<ResultsChatResponse>(response, {
+        onContent: (content) => {
+          setResultsChatMessages(currentMessages => currentMessages.map(message => (
+            message.id === assistantMessageId
+              ? { ...message, content: `${message.content}${content}` }
+              : message
+          )))
+        },
+      })
       if (!data || typeof data.answer !== 'string' || data.answer.trim() === '') {
         throw new Error('Invalid response from the results chat API.')
       }
 
-      setResultsChatMessages([
-        ...nextMessages,
-        {
-          id: `assistant-${Date.now()}`,
-          role: 'assistant',
-          content: data.answer.trim(),
-          source_indices: normalizeResultsOverviewSourceIndices(data.source_indices),
-          sources: normalizeResultsOverviewSources(data.sources),
-        },
-      ])
+      setResultsChatMessages(currentMessages => currentMessages.map(message => (
+        message.id === assistantMessageId
+          ? {
+            ...message,
+            content: data.answer.trim(),
+            source_indices: normalizeResultsOverviewSourceIndices(data.source_indices),
+            sources: normalizeResultsOverviewSources(data.sources),
+          }
+          : message
+      )))
     } catch (fetchError) {
       console.error('Results chat failed:', fetchError)
       setResultsChatMessages(nextMessages)
@@ -5261,10 +5399,11 @@ function App(): JSX.Element {
   }
 
   const handleExplainRanking = async (article: Article, rank: number): Promise<void> => {
+    const explanationKey = getRankingExplanationKey(article)
     setRankingExplanationState(article, {
       loading: true,
       error: null,
-      explanation: null,
+      explanation: '',
     })
 
     const queryText = getRankingExplanationQueryText()
@@ -5298,10 +5437,30 @@ function App(): JSX.Element {
           chunking_mode: chunkingMode,
           query_svd_dimensions: querySvdDimensions,
           svd_dimension_labels: svdDimensionLabels,
+          stream: true,
         }),
       })
 
-      const data = await readApiJson<{ explanation?: string }>(response)
+      const data = await readApiStream<{ explanation?: string }>(response, {
+        onContent: (content) => {
+          setSvdRankingExplanations((prev) => {
+            const currentState = prev[explanationKey] ?? {
+              loading: true,
+              error: null,
+              explanation: '',
+            }
+            return {
+              ...prev,
+              [explanationKey]: {
+                ...currentState,
+                loading: true,
+                error: null,
+                explanation: `${currentState.explanation ?? ''}${content}`,
+              },
+            }
+          })
+        },
+      })
       if (!data || typeof data.explanation !== 'string' || data.explanation.trim() === '') {
         throw new Error('Invalid response from the ranking explanation API.')
       }
@@ -6093,7 +6252,13 @@ function App(): JSX.Element {
                     </div>
 
                     {resultsOverviewLoading && (
-                      <p className="results-overview-copy">Reading the result set for agreement patterns, shared claims, and differences.</p>
+                      <p className={`results-overview-copy ${resultsOverviewDraft ? 'streaming' : ''}`}>
+                        {resultsOverviewDraft ? (
+                          <ResultsOverviewCitedText text={resultsOverviewDraft} />
+                        ) : (
+                          'Reading the result set for agreement patterns, shared claims, and differences.'
+                        )}
+                      </p>
                     )}
 
                     {!resultsOverviewLoading && resultsOverview && (
@@ -6261,7 +6426,9 @@ function App(): JSX.Element {
                               )}
                               {getRankingExplanationState(article).explanation && (
                                 <div className="ranking-explanation-text">
-                                  <p>{getRankingExplanationState(article).explanation}</p>
+                                  <p className={getRankingExplanationState(article).loading ? 'streaming' : undefined}>
+                                    {getRankingExplanationState(article).explanation}
+                                  </p>
                                 </div>
                               )}
                             </div>
@@ -6950,7 +7117,11 @@ function App(): JSX.Element {
                         key={message.id}
                         className={`results-chat-message ${message.role}`}
                       >
-                        <p>{message.content}</p>
+                        <p className={message.role === 'assistant' && !message.content.trim() ? 'streaming' : undefined}>
+                          {message.role === 'assistant' && !message.content.trim()
+                            ? 'Thinking...'
+                            : message.content}
+                        </p>
                         {message.attachments && message.attachments.length > 0 && (
                           <div className="results-chat-message-attachments" aria-label="Attached articles">
                             {message.attachments.map((attachment) => (

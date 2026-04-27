@@ -1396,6 +1396,19 @@
   margin: 0;
 }
 
+.ranking-explanation-text p.streaming::after,
+.results-overview-copy.streaming::after,
+.results-chat-message p.streaming::after {
+  content: '';
+  display: inline-block;
+  width: 0.55em;
+  height: 1em;
+  margin-left: 2px;
+  border-right: 2px solid currentColor;
+  vertical-align: -0.12em;
+  animation: stream-caret-blink 0.9s steps(2, start) infinite;
+}
+
 .explain-ranking-button {
   border: 1px solid rgba(54, 87, 65, 0.28);
   background: #365741;
@@ -6994,6 +7007,18 @@ a.results-overview-source-chip:hover {
   50% {
     transform: translateY(-6px);
     opacity: 1;
+  }
+}
+
+@keyframes stream-caret-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+
+  46%,
+  100% {
+    opacity: 0;
   }
 }
 

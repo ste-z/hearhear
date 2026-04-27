@@ -226,6 +226,117 @@ def _llm_json_object(raw_content, response_label):
     return parsed
 
 
+def _sse_event(event, payload):
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+
+def _sse_response(generator):
+    return Response(
+        stream_with_context(generator()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _llm_stream_content_chunks(client, messages):
+    for chunk in client.chat(messages, stream=True):
+        if isinstance(chunk, dict):
+            content = chunk.get("content")
+        else:
+            content = str(chunk or "")
+        if content:
+            yield str(content)
+
+
+def _json_string_field_prefix(raw_content, field_name):
+    match = re.search(rf'"{re.escape(field_name)}"\s*:\s*"', raw_content)
+    if not match:
+        return ""
+
+    chars = []
+    index = match.end()
+    escaping = False
+    while index < len(raw_content):
+        char = raw_content[index]
+        if escaping:
+            if char == "u":
+                hex_value = raw_content[index + 1:index + 5]
+                if len(hex_value) < 4 or not re.fullmatch(r"[0-9a-fA-F]{4}", hex_value):
+                    break
+                chars.append(chr(int(hex_value, 16)))
+                index += 5
+                escaping = False
+                continue
+            chars.append({
+                '"': '"',
+                "\\": "\\",
+                "/": "/",
+                "b": "\b",
+                "f": "\f",
+                "n": "\n",
+                "r": "\r",
+                "t": "\t",
+            }.get(char, char))
+            escaping = False
+        elif char == "\\":
+            escaping = True
+        elif char == '"':
+            break
+        else:
+            chars.append(char)
+        index += 1
+
+    return "".join(chars)
+
+
+def _stream_text_completion(client, messages, final_key, error_message):
+    def generate():
+        content_parts = []
+        try:
+            for content in _llm_stream_content_chunks(client, messages):
+                content_parts.append(content)
+                yield _sse_event("chunk", {"content": content})
+
+            final_text = "".join(content_parts).strip()
+            if not final_text:
+                raise RuntimeError("Received an empty response from the LLM.")
+            yield _sse_event("final", {final_key: final_text})
+        except Exception:
+            logger.exception(error_message)
+            yield _sse_event("error", {"error": error_message})
+
+    return _sse_response(generate)
+
+
+def _stream_json_field_completion(
+    client,
+    messages,
+    field_name,
+    final_payload_builder,
+    error_message,
+):
+    def generate():
+        content_parts = []
+        visible_text = ""
+        try:
+            for content in _llm_stream_content_chunks(client, messages):
+                content_parts.append(content)
+                raw_content = "".join(content_parts)
+                next_visible_text = _json_string_field_prefix(raw_content, field_name)
+                if len(next_visible_text) > len(visible_text):
+                    delta = next_visible_text[len(visible_text):]
+                    visible_text = next_visible_text
+                    yield _sse_event("chunk", {"content": delta})
+
+            final_payload = final_payload_builder("".join(content_parts))
+            yield _sse_event("final", final_payload)
+        except Exception:
+            logger.exception(error_message)
+            yield _sse_event("error", {"error": error_message})
+
+    return _sse_response(generate)
+
+
 def _query_help_key(value):
     return re.sub(r"[\W_]+", " ", str(value or "").lower()).strip()
 
@@ -1388,6 +1499,14 @@ def register_chat_route(app, json_search):
             {"role": "user", "content": prompt},
         ]
 
+        if _coerce_bool(payload.get("stream"), False):
+            return _stream_text_completion(
+                client,
+                messages,
+                final_key="explanation",
+                error_message="LLM ranking explanation failed.",
+            )
+
         try:
             response = client.chat(messages)
             explanation = (response.get("content") or "").strip()
@@ -1473,6 +1592,7 @@ def register_chat_route(app, json_search):
             "Do not write a bullet per article, do not list titles, and do not make claims about articles not shown. "
             "Be careful about uncertainty: describe patterns in the retrieved results, not the whole news landscape. "
             "Return valid JSON only with keys: overview, key_points, supporting_arguments, opposing_arguments, key_evidence, caveat. "
+            "Return the keys in that exact order so the overview field appears first. "
             "overview must be 2-3 short sentences about the overall result set. "
             "key_points must be an array of 2-4 short strings covering shared themes, differences, or agreement patterns. "
             "supporting_arguments and opposing_arguments must each be arrays of 1-3 objects shaped "
@@ -1489,6 +1609,23 @@ def register_chat_route(app, json_search):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
+
+        if _coerce_bool(payload.get("stream"), False):
+            def build_streamed_overview(raw_content):
+                overview = _parse_results_overview_response(
+                    raw_content,
+                    max_source_index=_max_source_index(sources, len(usable_articles)),
+                )
+                overview["sources"] = sources
+                return overview
+
+            return _stream_json_field_completion(
+                client,
+                messages,
+                field_name="overview",
+                final_payload_builder=build_streamed_overview,
+                error_message="LLM results overview failed",
+            )
 
         try:
             response = client.chat(messages)
@@ -1588,6 +1725,7 @@ def register_chat_route(app, json_search):
             "When the answer depends on specific results, cite them with source_indices using the 1-based Result numbers. "
             "If the snippets do not contain enough information, say what is missing and answer only what can be inferred. "
             "Return valid JSON only with keys: answer, source_indices, follow_up_questions. "
+            "Return the keys in that exact order so the answer field appears first. "
             "answer must be concise but useful. source_indices must list every Result number that directly supports the answer. "
             "follow_up_questions must be an array of 0-3 short suggested questions."
         )
@@ -1603,6 +1741,28 @@ def register_chat_route(app, json_search):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
+
+        if _coerce_bool(payload.get("stream"), False):
+            def build_streamed_answer(raw_content):
+                answer = _parse_results_chat_response(
+                    raw_content,
+                    max_source_index=_max_source_index(sources, len(usable_articles)),
+                )
+                if is_selected_article_scope:
+                    answer["source_indices"] = _remap_result_indices(
+                        answer.get("source_indices"),
+                        usable_articles,
+                    )
+                answer["sources"] = sources
+                return answer
+
+            return _stream_json_field_completion(
+                client,
+                messages,
+                field_name="answer",
+                final_payload_builder=build_streamed_answer,
+                error_message="LLM results chat failed",
+            )
 
         try:
             response = client.chat(messages)
