@@ -3,6 +3,7 @@ from scipy import sparse
 
 from backend.db.models import GuardianArticle
 from backend.runtime.runtime_debug import log_runtime_event
+from backend.text_processing.indexing.dense_search import top_positive_dot_candidates
 from backend.text_processing.text_normalization import normalize_text_for_vectorization
 
 
@@ -230,22 +231,17 @@ def _build_rocchio_dense_query_vector(query, processor, irrelevant_article_ids):
 
 
 def _search_dense_by_query_vector(processor, query_vector, top_n):
-    scores = processor.normalized_doc_embeddings @ np.asarray(query_vector, dtype=np.float32)
-    candidate_doc_indices = np.flatnonzero(np.asarray(scores) > 0)
+    candidate_doc_indices, candidate_scores = top_positive_dot_candidates(
+        processor.normalized_doc_embeddings,
+        query_vector,
+        top_n=max(1, int(top_n)),
+    )
     if candidate_doc_indices.size == 0:
         return []
 
-    candidate_scores = np.asarray(scores[candidate_doc_indices], dtype=np.float32)
-    resolved_top_n = min(max(1, int(top_n)), int(candidate_doc_indices.size))
-    if candidate_scores.size > resolved_top_n:
-        top_positions = np.argpartition(candidate_scores, -resolved_top_n)[-resolved_top_n:]
-        sorted_positions = top_positions[np.argsort(candidate_scores[top_positions])[::-1]]
-    else:
-        sorted_positions = np.argsort(candidate_scores)[::-1]
-
     return [
-        (processor.doc_ids[int(candidate_doc_indices[pos])], float(candidate_scores[pos]))
-        for pos in sorted_positions
+        (processor.doc_ids[int(idx)], float(score))
+        for idx, score in zip(candidate_doc_indices, candidate_scores)
     ]
 
 

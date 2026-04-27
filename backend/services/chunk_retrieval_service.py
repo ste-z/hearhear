@@ -46,6 +46,10 @@ from backend.text_processing.indexing.corpus import (
     _normalized_years,
     _relative_db_path_for_meta,
 )
+from backend.text_processing.indexing.dense_search import (
+    DEFAULT_DENSE_DOT_BLOCK_SIZE,
+    top_positive_dot_candidates,
+)
 from backend.text_processing.svd_processor import (
     DEFAULT_SVD_INDEX_NAME,
     DEFAULT_SVD_N_COMPONENTS,
@@ -82,6 +86,7 @@ DEFAULT_CHUNK_AUTO_THRESHOLDS = {
     "minilm": 0.45,
 }
 DEFAULT_CHUNK_DENSE_STORAGE_DTYPE = np.float16
+DEFAULT_CHUNK_DENSE_DOT_BLOCK_SIZE = DEFAULT_DENSE_DOT_BLOCK_SIZE
 CHUNK_SCORE_WEIGHTS = {
     "max": 0.5,
     "top_k_mean": 0.4,
@@ -1288,6 +1293,7 @@ class ChunkRetrievalIndex:
             return []
 
         resolved_top_n = normalize_chunk_candidate_top_k(top_n)
+        candidates_already_filtered = False
         if self.retrieval_model in {"svd", "minilm"}:
             embeddings = self._dense_chunk_embeddings()
             if embeddings is None:
@@ -1297,12 +1303,45 @@ class ChunkRetrievalIndex:
             query_embedding = self.processor.project_query(query, normalize=True)
             if query_embedding is None:
                 return []
-            scores = np.asarray(
-                embeddings @ np.asarray(query_embedding, dtype=np.float32),
-                dtype=np.float32,
+
+            def keep_candidate_indices(indices):
+                return self._candidate_filter_mask(
+                    indices,
+                    year_start=year_start,
+                    year_end=year_end,
+                    character_start=character_start,
+                    character_end=character_end,
+                    word_start=word_start,
+                    word_end=word_end,
+                    reading_time_word_start=reading_time_word_start,
+                    reading_time_word_end=reading_time_word_end,
+                    exclude_article_ids=exclude_article_ids,
+                )
+
+            log_runtime_event(
+                "chunk_index.dense_dot_stream_start",
+                retrieval_model=self.retrieval_model,
+                chunking_mode=self.chunking_mode,
+                chunk_count=self.n_chunks,
+                block_size=DEFAULT_CHUNK_DENSE_DOT_BLOCK_SIZE,
+                top_n=resolved_top_n,
+                threshold=threshold,
             )
-            candidate_indices = np.flatnonzero(scores > 0)
-            candidate_scores = scores[candidate_indices]
+            candidate_indices, candidate_scores = top_positive_dot_candidates(
+                embeddings,
+                query_embedding,
+                top_n=resolved_top_n,
+                threshold=threshold,
+                block_size=DEFAULT_CHUNK_DENSE_DOT_BLOCK_SIZE,
+                candidate_filter=keep_candidate_indices,
+            )
+            log_runtime_event(
+                "chunk_index.dense_dot_stream_done",
+                retrieval_model=self.retrieval_model,
+                chunking_mode=self.chunking_mode,
+                selected_count=int(candidate_indices.size),
+            )
+            candidates_already_filtered = True
         else:
             query_vec = self.vectorizer.transform([resolved_query])
             if int(getattr(query_vec, "nnz", 0)) <= 0:
@@ -1317,24 +1356,25 @@ class ChunkRetrievalIndex:
             candidate_indices = candidate_indices[positive_mask]
             candidate_scores = candidate_scores[positive_mask]
 
-        filter_mask = self._candidate_filter_mask(
-            candidate_indices,
-            year_start=year_start,
-            year_end=year_end,
-            character_start=character_start,
-            character_end=character_end,
-            word_start=word_start,
-            word_end=word_end,
-            reading_time_word_start=reading_time_word_start,
-            reading_time_word_end=reading_time_word_end,
-            exclude_article_ids=exclude_article_ids,
-        )
-        candidate_indices = candidate_indices[filter_mask]
-        candidate_scores = candidate_scores[filter_mask]
+        if not candidates_already_filtered:
+            filter_mask = self._candidate_filter_mask(
+                candidate_indices,
+                year_start=year_start,
+                year_end=year_end,
+                character_start=character_start,
+                character_end=character_end,
+                word_start=word_start,
+                word_end=word_end,
+                reading_time_word_start=reading_time_word_start,
+                reading_time_word_end=reading_time_word_end,
+                exclude_article_ids=exclude_article_ids,
+            )
+            candidate_indices = candidate_indices[filter_mask]
+            candidate_scores = candidate_scores[filter_mask]
         if candidate_indices.size == 0:
             return []
 
-        if self.retrieval_model == "svd":
+        if self.retrieval_model in {"svd", "minilm"}:
             filtered_scores = np.asarray(candidate_scores, dtype=np.float32)
         else:
             # TF-IDF candidates can contain duplicate columns only in unusual sparse
@@ -1348,7 +1388,7 @@ class ChunkRetrievalIndex:
                 dtype=np.float32,
             )
 
-        if threshold is not None:
+        if threshold is not None and not candidates_already_filtered:
             threshold_mask = filtered_scores >= float(threshold)
             candidate_indices = candidate_indices[threshold_mask]
             filtered_scores = filtered_scores[threshold_mask]

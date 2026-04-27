@@ -42,6 +42,9 @@ from backend.text_processing.indexing.corpus import (
     _normalized_years,
     _relative_db_path_for_meta,
 )
+from backend.text_processing.indexing.dense_search import (
+    top_positive_dot_candidates,
+)
 from backend.text_processing.text_normalization import (
     TEXT_NORMALIZATION_VERSION,
     normalize_text_for_vectorization,
@@ -538,43 +541,30 @@ class TruncatedSvdIndex:
             log_runtime_event("svd_search.empty_query_projection")
             return []
 
-        scores = self.normalized_doc_embeddings @ np.asarray(
+        log_runtime_event("svd_search.topk_select_start", top_n=top_n)
+        candidate_doc_indices, candidate_scores = top_positive_dot_candidates(
+            self.normalized_doc_embeddings,
             query_embedding,
-            dtype=np.float32,
+            top_n=top_n,
         )
-        candidate_doc_indices = np.flatnonzero(np.asarray(scores) > 0)
         if candidate_doc_indices.size == 0:
             log_runtime_event("svd_search.no_candidates")
             return []
 
-        candidate_scores = np.asarray(scores[candidate_doc_indices], dtype=np.float32)
-        top_n = min(top_n, int(candidate_doc_indices.size))
-        log_runtime_event(
-            "svd_search.topk_select_start",
-            candidate_count=int(candidate_doc_indices.size),
-        )
-        if candidate_scores.size > top_n:
-            top_positions = np.argpartition(candidate_scores, -top_n)[-top_n:]
-            sorted_positions = top_positions[
-                np.argsort(candidate_scores[top_positions])[::-1]
-            ]
-        else:
-            sorted_positions = np.argsort(candidate_scores)[::-1]
         log_runtime_event(
             "svd_search.topk_select_done",
-            selected_count=int(len(sorted_positions)),
+            selected_count=int(candidate_doc_indices.size),
         )
 
         results = []
-        for pos in sorted_positions:
-            idx = int(candidate_doc_indices[pos])
-            score = float(candidate_scores[pos])
+        for idx, score in zip(candidate_doc_indices, candidate_scores):
+            idx = int(idx)
             doc_id = self.doc_ids[idx]
             if return_articles and self.articles is not None:
                 payload = self.articles.iloc[idx].to_dict()
             else:
                 payload = doc_id
-            results.append((payload, score))
+            results.append((payload, float(score)))
 
         log_runtime_event("svd_search.results_done", result_count=len(results))
         return results

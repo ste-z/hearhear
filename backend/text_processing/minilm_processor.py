@@ -21,6 +21,9 @@ from backend.text_processing.indexing.artifacts import (
     _write_npy_artifact,
 )
 from backend.text_processing.indexing.corpus import DEFAULT_DB_PATH, DEFAULT_INDEX_DIR
+from backend.text_processing.indexing.dense_search import (
+    top_positive_dot_candidates,
+)
 from backend.text_processing.indexing.normalization import (
     _normalize_articles_for_doc_ids,
     _normalize_doc_ids,
@@ -322,33 +325,22 @@ class MiniLmEmbeddingIndex:
             n_docs=self.n_docs,
             embedding_dim=self.embedding_dim,
         )
-        scores = np.asarray(
-            self.normalized_doc_embeddings @ np.asarray(query_embedding, dtype=DEFAULT_MINILM_STORAGE_DTYPE),
-            dtype=np.float32,
-        ).reshape(-1)
-        candidate_doc_indices = np.flatnonzero(scores > 0)
+        candidate_doc_indices, candidate_scores = top_positive_dot_candidates(
+            self.normalized_doc_embeddings,
+            query_embedding,
+            top_n=resolved_top_n,
+        )
         if candidate_doc_indices.size == 0:
             log_runtime_event("minilm_search.empty")
             return []
 
-        candidate_scores = scores[candidate_doc_indices]
-        selected_count = min(resolved_top_n, int(candidate_doc_indices.size))
-        if candidate_scores.size > selected_count:
-            top_positions = np.argpartition(candidate_scores, -selected_count)[-selected_count:]
-            sorted_positions = top_positions[np.argsort(candidate_scores[top_positions])[::-1]]
-        else:
-            sorted_positions = np.argsort(candidate_scores)[::-1]
-
         results = []
-        for pos in sorted_positions:
-            idx = int(candidate_doc_indices[int(pos)])
-            score = float(candidate_scores[int(pos)])
-            if score <= 0:
-                continue
+        for idx, score in zip(candidate_doc_indices, candidate_scores):
+            idx = int(idx)
             payload = self.doc_ids[idx]
             if return_articles and self.articles is not None:
                 payload = self.articles.iloc[idx].to_dict()
-            results.append((payload, score))
+            results.append((payload, float(score)))
 
         log_runtime_event(
             "minilm_search.done",
