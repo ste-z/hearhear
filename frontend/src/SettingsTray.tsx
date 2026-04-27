@@ -63,6 +63,7 @@ export type SettingsTrayProps = {
   // preload / unload pass for the new mode. Otherwise the bottom button
   // is just a passive "Close" affordance.
   settingsDirty?: boolean
+  isApplying?: boolean
 }
 
 const STEP_LABELS = [
@@ -502,6 +503,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
     onResetDefaults,
     onApply,
     settingsDirty = false,
+    isApplying = false,
   } = props
 
   const [step, setStep] = useState(0)
@@ -835,6 +837,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
               <button
                 type="button"
                 onClick={onApply}
+                disabled={isApplying}
                 style={{
                   background: settingsDirty ? '#7a1d1d' : '#1a1a1a',
                   color: '#fafaf7',
@@ -844,11 +847,12 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                   fontSize: 12,
                   letterSpacing: '0.28em',
                   textTransform: 'uppercase',
-                  cursor: 'pointer',
+                  cursor: isApplying ? 'wait' : 'pointer',
+                  opacity: isApplying ? 0.72 : 1,
                   transition: 'background 160ms ease, border-color 160ms ease',
                 }}
               >
-                {settingsDirty ? 'apply changes →' : 'close ✕'}
+                {isApplying ? 'applying…' : (settingsDirty ? 'apply changes →' : 'close ✕')}
               </button>
             </div>
           </div>
