@@ -2587,8 +2587,10 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
         })}
       </div>
 
-      {/* body — flex-1 so it fills available height; internal sections scroll on their own */}
-      <div className="tray-scroll" style={{ position: 'relative', padding: '24px 48px 0', flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      {/* body — flex-1 so it fills available height. Stage 1 needs outer scroll
+          (typo/rewrite or thesis-picker can be tall); stages 2 & 3 own their scroll
+          inside the panels (ledger, overview), so the outer pane stays fixed. */}
+      <div className="tray-scroll" style={{ position: 'relative', padding: '24px 48px 0', flex: 1, minHeight: 0, overflowY: isStage1 ? 'auto' : 'hidden' }}>
         {/* Stage 1: typo + rewrite (stance) OR thesis picker (essay/NLI) */}
         {isStage1 && inputMode === 'essay' && (
           <div>
