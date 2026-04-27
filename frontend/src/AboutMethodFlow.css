@@ -1,3 +1,242 @@
+/* ─── Vintage palette overrides ─────────────────────────────────────────
+   The original AboutMethodFlow uses dark-mode editorial styling. We
+   re-skin it to match the vintage paper/ink palette without touching node
+   positions, sizes, or arrow paths. */
+
+.about-system-shell {
+  --editorial-accent: var(--accent);
+  --editorial-accent-strong: var(--accent);
+  --editorial-text: var(--ink);
+  --editorial-muted: var(--ink-mute);
+  --editorial-border: var(--rule-soft);
+  --editorial-border-strong: var(--ink);
+}
+
+/* Body fonts: replace Open Sans / Kanit / Courier Prime with vintage families */
+.about-system-shell,
+.about-system-shell * {
+  font-family: 'Old Standard TT', Georgia, serif;
+}
+.about-system-shell h3,
+.about-system-shell h4,
+.about-system-shell .about-system-detail h4 {
+  font-family: 'IM Fell English', serif;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+.about-system-shell .about-system-eyebrow,
+.about-system-shell .about-system-detail-eyebrow,
+.about-system-shell .about-system-control-copy span,
+.about-system-shell .about-system-detail-card > span,
+.about-system-shell .about-flow-node-eyebrow,
+.about-system-shell .about-flow-legend-title,
+.about-system-shell .about-flow-section-node span {
+  font-family: 'IM Fell DW Pica SC', serif;
+  letter-spacing: 0.24em;
+}
+.about-system-shell .about-system-intro,
+.about-system-shell .about-system-control-copy p,
+.about-system-shell .about-system-selection-summary,
+.about-system-shell .about-system-detail-summary,
+.about-system-shell .about-system-detail-card li,
+.about-system-shell .about-flow-node-description,
+.about-system-shell .about-flow-legend-item span {
+  font-family: 'IM Fell English', serif;
+}
+
+/* Pill-style selectors → vintage rectangular stamps */
+.about-system-shell .about-system-selector-button {
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  color: var(--ink);
+  font-family: 'IM Fell DW Pica SC', serif;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 400;
+  box-shadow: 0 2px 0 rgba(26, 26, 26, 0.06);
+}
+.about-system-shell .about-system-selector-button:hover {
+  background: var(--paper-warm);
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.about-system-shell .about-system-selector-button.active {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+  box-shadow: none;
+}
+
+/* Control groups: paper-card style instead of dark glass */
+.about-system-shell .about-system-control-group {
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px solid var(--rule-soft);
+  border-radius: 0;
+}
+
+/* Detail cards & summaries */
+.about-system-shell .about-system-detail-card,
+.about-system-shell .about-system-detail-summary,
+.about-system-shell .about-system-selection-summary {
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--rule-soft);
+  border-radius: 0;
+  color: var(--ink);
+}
+.about-system-shell .about-system-selection-summary strong {
+  color: var(--ink);
+}
+
+/* Legend card */
+.about-system-shell .about-flow-legend-card {
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+}
+.about-system-shell .about-flow-legend-item {
+  background: var(--paper);
+  border: 1px solid var(--rule-soft);
+  border-radius: 0;
+  color: var(--ink);
+}
+.about-system-shell .about-flow-legend-item span:last-child {
+  color: var(--ink);
+}
+.about-system-shell .about-flow-legend-shape {
+  background: var(--paper);
+  border: 1px solid var(--ink);
+}
+
+/* Flow shell — replace dark gradient with newsprint paper */
+.about-system-shell .about-flow-shell {
+  background:
+    repeating-linear-gradient(0deg, rgba(26, 26, 26, 0.022) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at 20% 10%, rgba(255, 255, 255, 0.4), transparent 50%),
+    var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+}
+
+/* Section group nodes (background containers) */
+.about-system-shell .about-flow-section-node {
+  background: rgba(255, 255, 255, 0.35);
+  border: 1px solid var(--rule-soft);
+  border-radius: 0;
+}
+.about-system-shell .about-flow-section-node.tone-stage {
+  background: rgba(255, 248, 224, 0.45);
+  border: 1px solid var(--rule-soft);
+  border-radius: 0;
+}
+.about-system-shell .about-flow-section-node span {
+  background: transparent;
+  border-bottom: 1.5px solid var(--ink);
+  color: var(--ink);
+  font-weight: 400;
+  letter-spacing: 0.24em;
+  font-size: 0.78rem;
+  /* The accent oxblood is reserved for the eyebrow; the section title sits
+     on ink so it's readable against the paper-on-paper section panels. */
+}
+.about-system-shell .about-flow-section-node.tone-stage span {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+}
+
+/* Flow nodes — paper cards with ink border, opaque enough to read */
+.about-system-shell .about-flow-node {
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  color: var(--ink);
+  box-shadow: 2px 4px 0 rgba(26, 26, 26, 0.06);
+  opacity: 1;
+}
+.about-system-shell .about-flow-node::before {
+  background: var(--ink);
+  opacity: 0.28;
+}
+.about-system-shell .about-flow-node-eyebrow {
+  color: var(--accent);
+  font-weight: 400;
+}
+.about-system-shell .about-flow-node-description {
+  color: var(--ink-mute);
+}
+
+/* Highlight active/selected node */
+.about-system-shell .about-flow-node.is-active,
+.about-system-shell .about-flow-node[data-active='true'] {
+  background: var(--ink);
+  color: var(--paper);
+}
+.about-system-shell .about-flow-node.is-active .about-flow-node-eyebrow,
+.about-system-shell .about-flow-node[data-active='true'] .about-flow-node-eyebrow {
+  color: var(--paper);
+}
+.about-system-shell .about-flow-node.is-active .about-flow-node-description,
+.about-system-shell .about-flow-node[data-active='true'] .about-flow-node-description {
+  color: rgba(250, 250, 247, 0.85);
+}
+.about-system-shell .about-flow-node.is-active::before,
+.about-system-shell .about-flow-node[data-active='true']::before {
+  background: var(--paper);
+  opacity: 0.6;
+}
+
+/* React Flow handles & edges in vintage ink — bolder so they read against
+   newsprint paper instead of fading into the background grid. */
+.about-system-shell .react-flow__handle {
+  background: var(--ink);
+  border: 1px solid var(--ink);
+}
+.about-system-shell .react-flow__edge-path {
+  stroke: var(--ink);
+  stroke-width: 1.6;
+}
+.about-system-shell .react-flow__edge.selected .react-flow__edge-path,
+.about-system-shell .react-flow__edge:focus .react-flow__edge-path {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.about-system-shell .react-flow__arrowhead path,
+.about-system-shell .react-flow__edge marker path,
+.about-system-shell .react-flow__edge marker polyline,
+.about-system-shell .react-flow__edge marker polygon {
+  fill: var(--ink);
+  stroke: var(--ink);
+  stroke-width: 1.2;
+}
+.about-system-shell .react-flow__edge.selected marker path,
+.about-system-shell .react-flow__edge:focus marker path {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+.about-system-shell .react-flow__background path,
+.about-system-shell .react-flow__background pattern {
+  stroke: rgba(26, 26, 26, 0.18);
+}
+.about-system-shell .react-flow__minimap,
+.about-system-shell .react-flow__controls {
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 2px 4px 0 rgba(26, 26, 26, 0.06);
+}
+.about-system-shell .react-flow__controls-button {
+  background: var(--paper);
+  color: var(--ink);
+  border-bottom: 1px solid var(--rule-soft);
+}
+.about-system-shell .react-flow__controls-button svg {
+  fill: var(--ink);
+}
+
+/* Original layout below — keep unchanged */
+
 .about-system-shell {
   display: flex;
   flex-direction: column;

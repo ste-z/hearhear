@@ -627,6 +627,30 @@ def register_routes(app):
             },
         )
 
+    @app.route("/api/typo-check", methods=["POST"])
+    def typo_check():
+        """Fast spell-check endpoint. Returns just the typo suggestion for a
+        query without doing any retrieval — lets the frontend show "did you
+        mean ..." in the proofreading slip immediately, in parallel with the
+        slower full search request to /api/articles.
+        """
+        try:
+            payload = request.get_json(silent=True) or {}
+            query = str(payload.get("query") or "").strip()
+            retrieval_model = normalize_retrieval_model(
+                payload.get("retrieval_model") or DEFAULT_RETRIEVAL_MODEL
+            )
+            if not query:
+                return jsonify({"typo_suggestion": None})
+            suggestion = retrieval_query_typo_suggestion(
+                query,
+                retrieval_model=retrieval_model,
+            )
+            return jsonify({"typo_suggestion": suggestion})
+        except Exception as exc:
+            app.logger.exception("API request to /api/typo-check failed")
+            return _api_error_response(exc)
+
     @app.route("/api/articles", methods=["GET", "POST"])
     @app.route("/api/articles/search", methods=["POST"])
     def articles_search():
@@ -664,6 +688,19 @@ def register_routes(app):
             )
             empty_results_message = None
             if context["mode"] == "stance":
+                # Publish topic-relevance results to the SSE channel as soon
+                # as that step finishes — the frontend uses this to scatter
+                # cards in stage 2 while reranking is still running.
+                def _emit_topic_done(topic_matches):
+                    if not progress:
+                        return
+                    progress(
+                        "topic_results",
+                        "Topic candidates ready",
+                        0.4,
+                        topic_articles=list(topic_matches),
+                    )
+
                 search_payload = stance_search(
                     topic=context["topic"],
                     opinion=context["opinion"],
@@ -691,6 +728,7 @@ def register_routes(app):
                     chunk_article_top_k=context["chunk_article_top_k"],
                     topic_feedback_irrelevant_article_ids=context["topic_feedback_irrelevant_article_ids"],
                     progress_callback=progress,
+                    on_topic_done=_emit_topic_done,
                 )
             elif context["mode"] == "essay":
                 search_payload = essay_search(

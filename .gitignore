@@ -2,6 +2,9 @@ env/
 .DS_Store
 Docker/__pycache__
 
+# Claude Code local config & worktrees
+.claude/
+
 venv/
 
 *.pyc
