@@ -162,10 +162,13 @@ const aboutOverviewParagraphs = [
 ] as const
 
 const aboutTeamMembers = [
-  'Ashali Sharma',
-  'Jonathan Scardon',
-  'Steven Zhou',
-  'Nuo Cen',
+  { name: 'Ashali Sharma', role: 'Team Member' },
+  { name: 'Jonathan Scardon', role: 'Team Member' },
+  { name: 'Steven Zhou', role: 'Team Member' },
+  { name: 'Nuo Cen', role: 'Team Member' },
+  { name: 'Asli Cihangir', role: 'Advisor' },
+  { name: 'Peter Bidoshi', role: 'Technical Advisor' },
+  { name: 'Prof Cristian Danescu-Niculescu-Mizil', role: 'Prof Advisor' },
 ] as const
 
 type IntroTopic = (typeof introTopicSequence)[number]
@@ -5635,9 +5638,9 @@ function App(): JSX.Element {
                     {activeAboutSection === 'team' && (
                       <ul className="about-team-grid" aria-label="Team members">
                         {aboutTeamMembers.map((member) => (
-                          <li key={member} className="about-team-card">
-                            <p className="about-team-label">Team Member</p>
-                            <h3>{member}</h3>
+                          <li key={member.name} className="about-team-card">
+                            <p className="about-team-label">{member.role}</p>
+                            <h3>{member.name}</h3>
                           </li>
                         ))}
                       </ul>
