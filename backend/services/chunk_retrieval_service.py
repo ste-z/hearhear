@@ -94,6 +94,68 @@ _chunk_indexes = {}
 _chunk_index_lock = Lock()
 
 
+class ChunkRowMetadata:
+    __slots__ = (
+        "row_indices",
+        "chunk_ids",
+        "article_ids",
+        "chunk_indices",
+        "sources",
+        "years",
+        "character_counts",
+        "word_counts",
+        "sentence_start_indices",
+        "sentence_end_indices",
+    )
+
+    def __init__(
+        self,
+        row_indices,
+        chunk_ids,
+        article_ids,
+        chunk_indices,
+        sources,
+        years,
+        character_counts,
+        word_counts,
+        sentence_start_indices,
+        sentence_end_indices,
+    ):
+        self.row_indices = np.asarray(row_indices, dtype=np.int32)
+        self.chunk_ids = np.asarray(chunk_ids, dtype=object)
+        self.article_ids = np.asarray(article_ids, dtype=object)
+        self.chunk_indices = np.asarray(chunk_indices, dtype=np.int32)
+        self.sources = np.asarray(sources, dtype=object)
+        self.years = np.asarray(years, dtype=np.int32)
+        self.character_counts = np.asarray(character_counts, dtype=np.int32)
+        self.word_counts = np.asarray(word_counts, dtype=np.int32)
+        self.sentence_start_indices = np.asarray(sentence_start_indices, dtype=np.int32)
+        self.sentence_end_indices = np.asarray(sentence_end_indices, dtype=np.int32)
+
+    def __len__(self):
+        return int(self.row_indices.shape[0])
+
+    def __bool__(self):
+        return len(self) > 0
+
+    def row_dict(self, index):
+        idx = int(index)
+        sentence_start = int(self.sentence_start_indices[idx])
+        sentence_end = int(self.sentence_end_indices[idx])
+        return {
+            "row_index": int(self.row_indices[idx]),
+            "chunk_id": str(self.chunk_ids[idx]),
+            "article_id": str(self.article_ids[idx]),
+            "chunk_index": int(self.chunk_indices[idx]),
+            "source": self.sources[idx],
+            "year": int(self.years[idx]),
+            "character_count": int(self.character_counts[idx]),
+            "word_count": int(self.word_counts[idx]),
+            "sentence_start_index": None if sentence_start < 0 else sentence_start,
+            "sentence_end_index": None if sentence_end < 0 else sentence_end,
+        }
+
+
 def normalize_chunk_candidate_top_k(value, default=DEFAULT_CHUNK_CANDIDATE_TOP_K):
     try:
         resolved = int(value)
@@ -964,32 +1026,61 @@ def _chunk_row_metadata_from_store(store_path):
     if not path.exists():
         raise FileNotFoundError(f"Chunk row store not found: {path}")
 
-    rows = []
     with sqlite3.connect(path) as conn:
         conn.row_factory = sqlite3.Row
+        row_count = int(conn.execute("SELECT COUNT(*) FROM chunk_rows").fetchone()[0])
+        row_indices = np.empty(row_count, dtype=np.int32)
+        chunk_ids = np.empty(row_count, dtype=object)
+        article_ids = np.empty(row_count, dtype=object)
+        chunk_indices = np.empty(row_count, dtype=np.int32)
+        sources = np.empty(row_count, dtype=object)
+        years = np.empty(row_count, dtype=np.int32)
+        character_counts = np.empty(row_count, dtype=np.int32)
+        word_counts = np.empty(row_count, dtype=np.int32)
+        sentence_start_indices = np.empty(row_count, dtype=np.int32)
+        sentence_end_indices = np.empty(row_count, dtype=np.int32)
+
         cursor = conn.execute(
             "SELECT row_index, chunk_id, article_id, chunk_index, source, year, "
             "character_count, word_count, sentence_start_index, sentence_end_index "
             "FROM chunk_rows ORDER BY row_index"
         )
-        for row in cursor:
-            rows.append({
-                "row_index": int(row["row_index"]),
-                "chunk_id": row["chunk_id"],
-                "article_id": row["article_id"],
-                "chunk_index": int(row["chunk_index"] or 0),
-                "source": row["source"],
-                "year": int(row["year"] or 0),
-                "character_count": int(row["character_count"] or 0),
-                "word_count": int(row["word_count"] or 0),
-                "sentence_start_index": None
-                if int(row["sentence_start_index"]) < 0
-                else int(row["sentence_start_index"]),
-                "sentence_end_index": None
-                if int(row["sentence_end_index"]) < 0
-                else int(row["sentence_end_index"]),
-            })
-    return rows
+        filled_count = 0
+        for offset, row in enumerate(cursor):
+            row_indices[offset] = int(row["row_index"])
+            chunk_ids[offset] = row["chunk_id"]
+            article_ids[offset] = row["article_id"]
+            chunk_indices[offset] = int(row["chunk_index"] or 0)
+            sources[offset] = row["source"]
+            years[offset] = int(row["year"] or 0)
+            character_counts[offset] = int(row["character_count"] or 0)
+            word_counts[offset] = int(row["word_count"] or 0)
+            sentence_start_indices[offset] = int(row["sentence_start_index"])
+            sentence_end_indices[offset] = int(row["sentence_end_index"])
+            filled_count = offset + 1
+        if filled_count != row_count:
+            row_indices = row_indices[:filled_count]
+            chunk_ids = chunk_ids[:filled_count]
+            article_ids = article_ids[:filled_count]
+            chunk_indices = chunk_indices[:filled_count]
+            sources = sources[:filled_count]
+            years = years[:filled_count]
+            character_counts = character_counts[:filled_count]
+            word_counts = word_counts[:filled_count]
+            sentence_start_indices = sentence_start_indices[:filled_count]
+            sentence_end_indices = sentence_end_indices[:filled_count]
+    return ChunkRowMetadata(
+        row_indices=row_indices,
+        chunk_ids=chunk_ids,
+        article_ids=article_ids,
+        chunk_indices=chunk_indices,
+        sources=sources,
+        years=years,
+        character_counts=character_counts,
+        word_counts=word_counts,
+        sentence_start_indices=sentence_start_indices,
+        sentence_end_indices=sentence_end_indices,
+    )
 
 
 def _chunk_rows_by_indices_from_store(store_path, row_indices):
@@ -1026,7 +1117,10 @@ class ChunkRetrievalIndex:
         self.chunking_mode = normalize_chunk_index_mode(chunking_mode)
         self.processor = processor
         self.vectorizer = getattr(processor, "vectorizer", None)
-        self.chunk_rows = list(chunk_rows)
+        if isinstance(chunk_rows, ChunkRowMetadata):
+            self.chunk_rows = chunk_rows
+        else:
+            self.chunk_rows = list(chunk_rows)
         self.chunk_matrix = chunk_matrix
         self.chunk_row_store_path = (
             Path(chunk_row_store_path) if chunk_row_store_path is not None else None
@@ -1044,22 +1138,28 @@ class ChunkRetrievalIndex:
             and int(getattr(processor, "n_docs", self.n_chunks)) == self.n_chunks
             else None
         )
-        self.article_ids = np.asarray(
-            [row["article_id"] for row in self.chunk_rows],
-            dtype=object,
-        )
-        self.article_years = np.asarray(
-            [int(row.get("year") or 0) for row in self.chunk_rows],
-            dtype=np.int32,
-        )
-        self.article_character_counts = np.asarray(
-            [int(row.get("character_count") or 0) for row in self.chunk_rows],
-            dtype=np.int32,
-        )
-        self.article_word_counts = np.asarray(
-            [int(row.get("word_count") or 0) for row in self.chunk_rows],
-            dtype=np.int32,
-        )
+        if isinstance(self.chunk_rows, ChunkRowMetadata):
+            self.article_ids = self.chunk_rows.article_ids
+            self.article_years = self.chunk_rows.years
+            self.article_character_counts = self.chunk_rows.character_counts
+            self.article_word_counts = self.chunk_rows.word_counts
+        else:
+            self.article_ids = np.asarray(
+                [row["article_id"] for row in self.chunk_rows],
+                dtype=object,
+            )
+            self.article_years = np.asarray(
+                [int(row.get("year") or 0) for row in self.chunk_rows],
+                dtype=np.int32,
+            )
+            self.article_character_counts = np.asarray(
+                [int(row.get("character_count") or 0) for row in self.chunk_rows],
+                dtype=np.int32,
+            )
+            self.article_word_counts = np.asarray(
+                [int(row.get("word_count") or 0) for row in self.chunk_rows],
+                dtype=np.int32,
+            )
 
     def _stored_rows_for_indices(self, chunk_indices):
         if self.chunk_row_store_path is None:
@@ -1068,6 +1168,11 @@ class ChunkRetrievalIndex:
             self.chunk_row_store_path,
             chunk_indices,
         )
+
+    def _chunk_row_for_index(self, chunk_idx):
+        if isinstance(self.chunk_rows, ChunkRowMetadata):
+            return self.chunk_rows.row_dict(chunk_idx)
+        return dict(self.chunk_rows[chunk_idx])
 
     def _dense_chunk_embeddings(self):
         if self.retrieval_model == "minilm":
@@ -1237,7 +1342,7 @@ class ChunkRetrievalIndex:
 
         results = []
         for rank, (chunk_idx, pos) in enumerate(selected, start=1):
-            row = dict(self.chunk_rows[chunk_idx])
+            row = self._chunk_row_for_index(chunk_idx)
             row.update(stored_rows.get(chunk_idx, {}))
             row["score"] = float(filtered_scores[int(pos)])
             row["chunk_rank"] = int(rank)

@@ -1,6 +1,8 @@
 import argparse
 import json
 import os
+import sys
+import weakref
 from functools import lru_cache
 from pathlib import Path
 
@@ -11,7 +13,9 @@ from backend.runtime.runtime_debug import log_runtime_event
 from backend.text_processing.indexing.artifacts import (
     _artifact_exists,
     _artifact_within_size_limit,
+    _cleanup_temp_paths,
     _materialized_artifact_path,
+    _materialized_artifact_path_for_mmap,
     _write_dataframe_pickle_artifact,
     _write_json_artifact,
     _write_npy_artifact,
@@ -123,6 +127,16 @@ def unload_minilm_bundle():
     had_bundle = load_minilm_bundle.cache_info().currsize > 0
     load_minilm_bundle.cache_clear()
     if had_bundle:
+        torch = sys.modules.get("torch")
+        if torch is not None:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            if (
+                hasattr(torch.backends, "mps")
+                and torch.backends.mps.is_available()
+                and hasattr(torch, "mps")
+            ):
+                torch.mps.empty_cache()
         log_runtime_event("minilm_bundle.cache_unloaded")
     return had_bundle
 
@@ -154,7 +168,7 @@ def encode_minilm_texts(
         model_name=model_name,
     )
 
-    batches = []
+    embeddings = None
     total_batches = (len(cleaned_texts) + resolved_batch_size - 1) // resolved_batch_size
     for batch_index, start_index in enumerate(
         range(0, len(cleaned_texts), resolved_batch_size),
@@ -182,21 +196,29 @@ def encode_minilm_texts(
         with torch.inference_mode():
             model_output = model(**encoded)
             token_embeddings = model_output.last_hidden_state
-            attention_mask = encoded["attention_mask"].unsqueeze(-1).expand(token_embeddings.size()).float()
+            attention_mask = encoded["attention_mask"].unsqueeze(-1).to(token_embeddings.dtype)
             summed = torch.sum(token_embeddings * attention_mask, dim=1)
             counts = torch.clamp(attention_mask.sum(dim=1), min=1e-9)
             pooled = summed / counts
             if normalize:
                 pooled = torch.nn.functional.normalize(pooled, p=2, dim=1)
 
-        batches.append(np.asarray(pooled.cpu(), dtype=np.float32))
+        batch_embeddings = np.asarray(pooled.cpu(), dtype=np.float32)
+        if embeddings is None:
+            embeddings = np.empty(
+                (len(cleaned_texts), int(batch_embeddings.shape[1])),
+                dtype=np.float32,
+            )
+        embeddings[start_index:start_index + len(batch_texts)] = batch_embeddings
+        del encoded, model_output, token_embeddings, attention_mask, summed, counts, pooled, batch_embeddings
         log_runtime_event(
             "minilm_encode.batch_done",
             batch_index=batch_index,
             batch_total=total_batches,
         )
 
-    embeddings = np.vstack(batches)
+    if embeddings is None:
+        embeddings = np.zeros((0, 0), dtype=np.float32)
     log_runtime_event(
         "minilm_encode.done",
         text_count=len(cleaned_texts),
@@ -214,6 +236,7 @@ class MiniLmEmbeddingIndex:
         id_column="id",
         model_name=DEFAULT_MINILM_MODEL_NAME,
         max_length=DEFAULT_MINILM_MAX_LENGTH,
+        temp_artifact_paths=None,
     ):
         self.doc_ids = _normalize_doc_ids(doc_ids)
         self.doc_to_idx = {
@@ -237,6 +260,12 @@ class MiniLmEmbeddingIndex:
         self.model_name = str(model_name or DEFAULT_MINILM_MODEL_NAME)
         self.max_length = int(max_length or DEFAULT_MINILM_MAX_LENGTH)
         self.id_column = id_column
+        self._temp_artifact_paths = [Path(path) for path in list(temp_artifact_paths or [])]
+        self._temp_artifact_finalizer = weakref.finalize(
+            self,
+            _cleanup_temp_paths,
+            list(self._temp_artifact_paths),
+        )
 
         self.articles = None
         if articles is not None:
@@ -413,26 +442,40 @@ class MiniLmEmbeddingIndex:
         load_articles=True,
     ):
         paths = cls.artifact_paths(index_dir, index_name)
-        with _materialized_artifact_path(paths["embeddings"]) as embeddings_path:
-            embeddings = np.load(embeddings_path, allow_pickle=False)
-        with _materialized_artifact_path(paths["doc_ids"]) as doc_ids_path:
-            with open(doc_ids_path, "r", encoding="utf-8") as f:
-                doc_ids = json.load(f) or []
-        meta = _load_index_meta(paths["meta"])
+        temp_artifact_paths = []
+        try:
+            embeddings_path, temp_embeddings = _materialized_artifact_path_for_mmap(
+                paths["embeddings"]
+            )
+            if temp_embeddings is not None:
+                temp_artifact_paths.append(temp_embeddings)
+            embeddings = np.load(
+                embeddings_path,
+                mmap_mode="r",
+                allow_pickle=False,
+            )
+            with _materialized_artifact_path(paths["doc_ids"]) as doc_ids_path:
+                with open(doc_ids_path, "r", encoding="utf-8") as f:
+                    doc_ids = json.load(f) or []
+            meta = _load_index_meta(paths["meta"])
 
-        articles = None
-        if load_articles and _artifact_exists(paths["articles"]):
-            with _materialized_artifact_path(paths["articles"]) as articles_path:
-                articles = pd.read_pickle(articles_path)
+            articles = None
+            if load_articles and _artifact_exists(paths["articles"]):
+                with _materialized_artifact_path(paths["articles"]) as articles_path:
+                    articles = pd.read_pickle(articles_path)
 
-        instance = cls(
-            normalized_doc_embeddings=embeddings,
-            doc_ids=doc_ids,
-            articles=articles,
-            id_column=meta.get("id_column") or "id",
-            model_name=meta.get("model_name") or DEFAULT_MINILM_MODEL_NAME,
-            max_length=meta.get("max_length") or DEFAULT_MINILM_MAX_LENGTH,
-        )
+            instance = cls(
+                normalized_doc_embeddings=embeddings,
+                doc_ids=doc_ids,
+                articles=articles,
+                id_column=meta.get("id_column") or "id",
+                model_name=meta.get("model_name") or DEFAULT_MINILM_MODEL_NAME,
+                max_length=meta.get("max_length") or DEFAULT_MINILM_MAX_LENGTH,
+                temp_artifact_paths=temp_artifact_paths,
+            )
+        except Exception:
+            _cleanup_temp_paths(temp_artifact_paths)
+            raise
         return instance, meta
 
 

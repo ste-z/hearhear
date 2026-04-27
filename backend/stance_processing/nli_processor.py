@@ -78,6 +78,14 @@ def unload_nli_bundle():
     had_bundle = load_nli_bundle.cache_info().currsize > 0
     load_nli_bundle.cache_clear()
     if had_bundle:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        if (
+            hasattr(torch.backends, "mps")
+            and torch.backends.mps.is_available()
+            and hasattr(torch, "mps")
+        ):
+            torch.mps.empty_cache()
         log_runtime_event("nli_bundle.cache_unloaded", model_name=MODEL_NAME)
     return had_bundle
 
