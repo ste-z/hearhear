@@ -50,6 +50,7 @@ from backend.text_processing.svd_processor import (
     DEFAULT_SVD_INDEX_NAME,
     DEFAULT_SVD_N_COMPONENTS,
     TruncatedSvdIndex,
+    ensure_normalized_doc_embeddings_artifact,
     _load_index_meta,
     _resolved_svd_params,
     _resolved_vectorizer_params,
@@ -80,6 +81,7 @@ DEFAULT_CHUNK_AUTO_THRESHOLDS = {
     "svd": 0.35,
     "minilm": 0.45,
 }
+DEFAULT_CHUNK_DENSE_STORAGE_DTYPE = np.float16
 CHUNK_SCORE_WEIGHTS = {
     "max": 0.5,
     "top_k_mean": 0.4,
@@ -205,11 +207,13 @@ def normalize_chunk_index_mode(value, default=DEFAULT_CHUNK_RETRIEVAL_CHUNKING_M
     return default
 
 
-def _normalize_dense_rows(matrix):
+def _normalize_dense_rows(matrix, storage_dtype=DEFAULT_CHUNK_DENSE_STORAGE_DTYPE):
     array = np.asarray(matrix, dtype=np.float32)
     norms = np.linalg.norm(array, axis=1, keepdims=True)
     norms = np.where(norms > 0, norms, 1.0).astype(np.float32, copy=False)
-    return (array / norms).astype(np.float32, copy=False)
+    normalized = np.empty(array.shape, dtype=storage_dtype)
+    np.divide(array, norms, out=normalized, casting="unsafe")
+    return normalized
 
 
 def _normalize_dense_vector(vector):
@@ -640,6 +644,10 @@ def preprocess_chunk_svd_index(
             index_name=index_name,
             db_row_count=db_row_count,
         )
+        normalized_path = ensure_normalized_doc_embeddings_artifact(
+            index_dir=index_dir,
+            index_name=index_name,
+        )
         row_store_path = ensure_chunk_row_store(
             index_dir=index_dir,
             index_name=index_name,
@@ -652,6 +660,7 @@ def preprocess_chunk_svd_index(
             "index_dir": str(index_dir),
             "index_name": index_name,
             "row_store_path": str(row_store_path),
+            "normalized_doc_embeddings_path": str(normalized_path),
         }
 
     semantic_processor = None
@@ -1131,13 +1140,15 @@ class ChunkRetrievalIndex:
             if self.retrieval_model == "svd" and hasattr(processor, "components")
             else None
         )
-        self._normalized_dense_chunk_embeddings = (
-            np.asarray(processor.normalized_doc_embeddings)
-            if self.retrieval_model in {"svd", "minilm"}
+        self._normalized_dense_chunk_embeddings = None
+        if (
+            self.retrieval_model == "minilm"
             and hasattr(processor, "normalized_doc_embeddings")
             and int(getattr(processor, "n_docs", self.n_chunks)) == self.n_chunks
-            else None
-        )
+        ):
+            self._normalized_dense_chunk_embeddings = np.asarray(
+                processor.normalized_doc_embeddings
+            )
         if isinstance(self.chunk_rows, ChunkRowMetadata):
             self.article_ids = self.chunk_rows.article_ids
             self.article_years = self.chunk_rows.years
@@ -1180,19 +1191,37 @@ class ChunkRetrievalIndex:
         if self.svd_components is None:
             return None
         if self._normalized_dense_chunk_embeddings is None:
-            if self.chunk_matrix is None:
-                return None
-            log_runtime_event(
-                "chunk_index.svd_project_start",
-                chunk_count=self.n_chunks,
-            )
-            embeddings = self.chunk_matrix @ self.svd_components.T
-            self._normalized_dense_chunk_embeddings = _normalize_dense_rows(embeddings)
-            log_runtime_event(
-                "chunk_index.svd_project_done",
-                chunk_count=self.n_chunks,
-                n_components=int(self._normalized_dense_chunk_embeddings.shape[1]),
-            )
+            if int(getattr(self.processor, "n_docs", self.n_chunks)) == self.n_chunks:
+                processor_embeddings = getattr(
+                    self.processor,
+                    "normalized_doc_embeddings",
+                    None,
+                )
+            else:
+                processor_embeddings = None
+
+            if processor_embeddings is not None:
+                self._normalized_dense_chunk_embeddings = np.asarray(
+                    processor_embeddings,
+                    dtype=DEFAULT_CHUNK_DENSE_STORAGE_DTYPE,
+                )
+            else:
+                if self.chunk_matrix is None:
+                    return None
+                log_runtime_event(
+                    "chunk_index.svd_project_start",
+                    chunk_count=self.n_chunks,
+                )
+                embeddings = self.chunk_matrix @ self.svd_components.T
+                self._normalized_dense_chunk_embeddings = _normalize_dense_rows(
+                    embeddings
+                )
+                log_runtime_event(
+                    "chunk_index.svd_project_done",
+                    chunk_count=self.n_chunks,
+                    n_components=int(self._normalized_dense_chunk_embeddings.shape[1]),
+                    dtype=str(self._normalized_dense_chunk_embeddings.dtype),
+                )
         return self._normalized_dense_chunk_embeddings
 
     def _candidate_filter_mask(
@@ -1269,7 +1298,7 @@ class ChunkRetrievalIndex:
             if query_embedding is None:
                 return []
             scores = np.asarray(
-                embeddings @ np.asarray(query_embedding, dtype=embeddings.dtype),
+                embeddings @ np.asarray(query_embedding, dtype=np.float32),
                 dtype=np.float32,
             )
             candidate_indices = np.flatnonzero(scores > 0)

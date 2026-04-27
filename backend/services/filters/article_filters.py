@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from sqlalchemy import func
 
 from backend.db.models import GuardianArticle
@@ -30,6 +32,30 @@ def article_word_count_expression():
     return GuardianArticle.body_word_count
 
 
+@lru_cache(maxsize=1)
+def _available_article_bounds():
+    character_count = article_character_count_expression()
+    word_count = article_word_count_expression()
+    row = (
+        GuardianArticle.query.with_entities(
+            func.min(GuardianArticle.year),
+            func.max(GuardianArticle.year),
+            func.min(character_count),
+            func.max(character_count),
+            func.min(word_count),
+            func.max(word_count),
+        )
+        .first()
+    )
+    if row is None:
+        return (None, None, None, None, None, None)
+    return tuple(None if value is None else int(value) for value in row)
+
+
+def clear_available_article_range_cache():
+    _available_article_bounds.cache_clear()
+
+
 def _reading_minutes_from_word_count(word_count):
     resolved_count = coerce_length_count(word_count)
     if resolved_count is None or resolved_count <= 0:
@@ -54,47 +80,30 @@ def _reading_time_max_word_count(reading_minutes):
 
 
 def available_article_year_range():
-    min_year, max_year = (
-        GuardianArticle.query.with_entities(
-            func.min(GuardianArticle.year),
-            func.max(GuardianArticle.year),
-        )
-        .first()
-        or (None, None)
+    min_year, max_year, _min_characters, _max_characters, _min_words, _max_words = (
+        _available_article_bounds()
     )
     if min_year is None or max_year is None:
         return None, None
-    return int(min_year), int(max_year)
+    return min_year, max_year
 
 
 def available_article_character_range():
-    character_count = article_character_count_expression()
-    min_characters, max_characters = (
-        GuardianArticle.query.with_entities(
-            func.min(character_count),
-            func.max(character_count),
-        )
-        .first()
-        or (None, None)
+    _min_year, _max_year, min_characters, max_characters, _min_words, _max_words = (
+        _available_article_bounds()
     )
     if min_characters is None or max_characters is None:
         return None, None
-    return int(min_characters), int(max_characters)
+    return min_characters, max_characters
 
 
 def available_article_word_range():
-    word_count = article_word_count_expression()
-    min_words, max_words = (
-        GuardianArticle.query.with_entities(
-            func.min(word_count),
-            func.max(word_count),
-        )
-        .first()
-        or (None, None)
+    _min_year, _max_year, _min_characters, _max_characters, min_words, max_words = (
+        _available_article_bounds()
     )
     if min_words is None or max_words is None:
         return None, None
-    return int(min_words), int(max_words)
+    return min_words, max_words
 
 
 def available_article_reading_time_range():
@@ -460,6 +469,106 @@ def filter_ranked_articles_by_word_range(ranked_articles, word_start=None, word_
     return filtered
 
 
+def filter_ranked_articles_by_metadata_ranges(
+    ranked_articles,
+    year_start=None,
+    year_end=None,
+    character_start=None,
+    character_end=None,
+    word_start=None,
+    word_end=None,
+    reading_time_word_start=None,
+    reading_time_word_end=None,
+):
+    if all(
+        value is None
+        for value in (
+            year_start,
+            year_end,
+            character_start,
+            character_end,
+            word_start,
+            word_end,
+            reading_time_word_start,
+            reading_time_word_end,
+        )
+    ):
+        return list(ranked_articles)
+
+    has_year_filter = year_start is not None or year_end is not None
+    has_character_filter = character_start is not None or character_end is not None
+    has_word_filter = any(
+        value is not None
+        for value in (
+            word_start,
+            word_end,
+            reading_time_word_start,
+            reading_time_word_end,
+        )
+    )
+
+    doc_ids_to_lookup = [
+        article
+        for article, _score in ranked_articles
+        if isinstance(article, str) and article.strip()
+    ]
+    year_lookup = {}
+    character_lookup = {}
+    word_lookup = {}
+    if doc_ids_to_lookup:
+        rows = (
+            GuardianArticle.query.with_entities(
+                GuardianArticle.id,
+                GuardianArticle.year,
+                article_character_count_expression(),
+                article_word_count_expression(),
+            )
+            .filter(GuardianArticle.id.in_(doc_ids_to_lookup))
+            .all()
+        )
+        for article_id, article_year, character_count, word_count in rows:
+            year_lookup[article_id] = coerce_year(article_year)
+            character_lookup[article_id] = coerce_length_count(character_count)
+            word_lookup[article_id] = coerce_length_count(word_count)
+
+    filtered = []
+    for article, score in ranked_articles:
+        if has_year_filter:
+            article_year = _ranked_article_year(article, year_lookup)
+            if article_year is None:
+                continue
+            if year_start is not None and article_year < year_start:
+                continue
+            if year_end is not None and article_year > year_end:
+                continue
+
+        if has_character_filter:
+            character_count = _ranked_article_character_count(article, character_lookup)
+            if character_count is None:
+                continue
+            if character_start is not None and character_count < character_start:
+                continue
+            if character_end is not None and character_count > character_end:
+                continue
+
+        if has_word_filter:
+            word_count = _ranked_article_word_count(article, word_lookup)
+            if word_count is None:
+                continue
+            if word_start is not None and word_count < word_start:
+                continue
+            if word_end is not None and word_count > word_end:
+                continue
+            if reading_time_word_start is not None and word_count < reading_time_word_start:
+                continue
+            if reading_time_word_end is not None and word_count > reading_time_word_end:
+                continue
+
+        filtered.append((article, score))
+
+    return filtered
+
+
 def filter_ranked_articles_by_excluded_ids(ranked_articles, excluded_article_ids):
     excluded_ids = set(normalize_article_id_list(excluded_article_ids))
     if not excluded_ids:
@@ -470,4 +579,3 @@ def filter_ranked_articles_by_excluded_ids(ranked_articles, excluded_article_ids
         for article, score in ranked_articles
         if ranked_article_id(article) not in excluded_ids
     ]
-

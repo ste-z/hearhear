@@ -13,6 +13,7 @@ from backend.claims.claim_store import (
 from backend.imports.data_import import load_and_clean_guardian_years
 from backend.db.models import GuardianArticle, GuardianArticleClaim, db
 from backend.runtime.runtime_debug import log_runtime_event
+from backend.services.filters.article_filters import clear_available_article_range_cache
 from backend.text_processing.indexing.corpus import (
     _filter_articles_to_years,
     _normalized_years,
@@ -607,6 +608,8 @@ def initialize_offline_data_pipeline(
 
         if should_seed_claims:
             _seed_guardian_claims()
+
+        clear_available_article_range_cache()
 
         if warm_runtime_assets:
             _warm_runtime_assets()

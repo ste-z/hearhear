@@ -230,7 +230,7 @@ def _build_rocchio_dense_query_vector(query, processor, irrelevant_article_ids):
 
 
 def _search_dense_by_query_vector(processor, query_vector, top_n):
-    scores = processor.normalized_doc_embeddings @ query_vector
+    scores = processor.normalized_doc_embeddings @ np.asarray(query_vector, dtype=np.float32)
     candidate_doc_indices = np.flatnonzero(np.asarray(scores) > 0)
     if candidate_doc_indices.size == 0:
         return []

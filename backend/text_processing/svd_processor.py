@@ -55,6 +55,7 @@ DEFAULT_SVD_PARAMS = {
     "n_iter": 7,
     "random_state": 0,
 }
+DEFAULT_SVD_NORMALIZED_DTYPE = np.float16
 
 
 def _unlink_paths(paths):
@@ -77,11 +78,13 @@ def _load_index_meta(path):
         return {}
 
 
-def _row_normalize_dense(matrix):
+def _row_normalize_dense(matrix, storage_dtype=DEFAULT_SVD_NORMALIZED_DTYPE):
     array = np.asarray(matrix, dtype=np.float32)
     norms = np.linalg.norm(array, axis=1, keepdims=True)
     norms = np.where(norms > 0, norms, 1.0).astype(np.float32, copy=False)
-    return (array / norms).astype(np.float32, copy=False)
+    normalized = np.empty(array.shape, dtype=storage_dtype)
+    np.divide(array, norms, out=normalized, casting="unsafe")
+    return normalized
 
 
 def _normalize_dense_vector(vector):
@@ -90,6 +93,112 @@ def _normalize_dense_vector(vector):
     if norm <= 0.0:
         return None
     return (array / norm).astype(np.float32, copy=False)
+
+
+def _normalized_doc_embeddings_fresh(path, expected_shape=None):
+    if not _artifact_exists(path):
+        return False
+    if not _artifact_within_size_limit(path):
+        return False
+
+    temp_path = None
+    try:
+        materialized_path, temp_path = _materialized_artifact_path_for_mmap(path)
+        array = np.load(materialized_path, mmap_mode="r", allow_pickle=False)
+        if array.dtype != DEFAULT_SVD_NORMALIZED_DTYPE:
+            return False
+        if expected_shape is not None and tuple(array.shape) != tuple(expected_shape):
+            return False
+        return True
+    except Exception:
+        return False
+    finally:
+        if temp_path is not None and Path(temp_path).exists():
+            Path(temp_path).unlink()
+
+
+def _update_normalized_doc_embeddings_meta(paths, meta, artifact):
+    next_meta = dict(meta or {})
+    next_meta["normalized_doc_embeddings_dtype"] = str(
+        np.dtype(DEFAULT_SVD_NORMALIZED_DTYPE)
+    )
+    next_meta["normalized_doc_embeddings_files"] = [
+        path.name
+        for path in artifact["files"]
+    ]
+    _write_json_artifact(paths["meta"], next_meta)
+    return next_meta
+
+
+def ensure_normalized_doc_embeddings_artifact(
+    index_dir,
+    index_name,
+    meta=None,
+    force_rebuild=False,
+):
+    paths = TruncatedSvdIndex.artifact_paths(index_dir, index_name)
+    resolved_meta = dict(meta or _load_index_meta(paths["meta"]) or {})
+    expected_shape = None
+    try:
+        n_docs = int(resolved_meta.get("n_docs"))
+        n_components = int(resolved_meta.get("n_components"))
+        expected_shape = (n_docs, n_components)
+    except (TypeError, ValueError):
+        expected_shape = None
+
+    if (
+        not force_rebuild
+        and _normalized_doc_embeddings_fresh(
+            paths["normalized_doc_embeddings"],
+            expected_shape=expected_shape,
+        )
+    ):
+        artifact_files = _artifact_files(paths["normalized_doc_embeddings"])
+        artifact_file_names = [path.name for path in artifact_files]
+        if (
+            resolved_meta.get("normalized_doc_embeddings_dtype")
+            != str(np.dtype(DEFAULT_SVD_NORMALIZED_DTYPE))
+            or resolved_meta.get("normalized_doc_embeddings_files")
+            != artifact_file_names
+        ):
+            _update_normalized_doc_embeddings_meta(
+                paths,
+                resolved_meta,
+                {"files": artifact_files},
+            )
+        return paths["normalized_doc_embeddings"]
+
+    log_runtime_event(
+        "svd_index.normalized_embeddings_build_start",
+        index_name=index_name,
+        dtype=str(np.dtype(DEFAULT_SVD_NORMALIZED_DTYPE)),
+    )
+    doc_embeddings_path, temp_doc_embeddings = _materialized_artifact_path_for_mmap(
+        paths["doc_embeddings"]
+    )
+    try:
+        doc_embeddings = np.load(
+            doc_embeddings_path,
+            mmap_mode="r",
+            allow_pickle=False,
+        )
+        normalized = _row_normalize_dense(doc_embeddings)
+        artifact = _write_npy_artifact(
+            paths["normalized_doc_embeddings"],
+            normalized,
+        )
+        _update_normalized_doc_embeddings_meta(paths, resolved_meta, artifact)
+    finally:
+        if temp_doc_embeddings is not None and Path(temp_doc_embeddings).exists():
+            Path(temp_doc_embeddings).unlink()
+
+    log_runtime_event(
+        "svd_index.normalized_embeddings_build_done",
+        index_name=index_name,
+        shape=list(normalized.shape),
+        dtype=str(normalized.dtype),
+    )
+    return paths["normalized_doc_embeddings"]
 
 
 def _resolved_vectorizer_params(vectorizer_params=None):
@@ -144,6 +253,7 @@ class TruncatedSvdIndex:
         id_column="id",
         text_column="body_text",
         explained_variance=None,
+        normalized_doc_embeddings=None,
         temp_artifact_paths=None,
         svd_params=None,
         requested_n_components=None,
@@ -152,7 +262,7 @@ class TruncatedSvdIndex:
             raise ValueError("vectorizer cannot be None.")
 
         self.terms = _normalize_terms(terms)
-        self.term_to_idx = {term: idx for idx, term in enumerate(self.terms)}
+        self._term_to_idx = None
         self.n_terms = len(self.terms)
 
         self.doc_ids = _normalize_doc_ids(doc_ids)
@@ -207,6 +317,19 @@ class TruncatedSvdIndex:
             raise ValueError(
                 "explained_variance length must match embedding dimension count."
             )
+        if normalized_doc_embeddings is not None:
+            normalized = np.asarray(normalized_doc_embeddings)
+            if normalized.shape != self.doc_embeddings.shape:
+                raise ValueError(
+                    "normalized_doc_embeddings shape must match doc_embeddings shape."
+                )
+            self._normalized_doc_embeddings = (
+                normalized
+                if normalized.dtype == DEFAULT_SVD_NORMALIZED_DTYPE
+                else normalized.astype(DEFAULT_SVD_NORMALIZED_DTYPE, copy=False)
+            )
+        else:
+            self._normalized_doc_embeddings = None
 
         if hasattr(vectorizer, "get_feature_names_out"):
             vectorizer_terms = vectorizer.get_feature_names_out()
@@ -229,7 +352,7 @@ class TruncatedSvdIndex:
             list(self._temp_artifact_paths),
         )
 
-        self.normalized_doc_embeddings = _row_normalize_dense(self.doc_embeddings)
+        self._top_term_indices_cache = {}
 
         self.articles = None
         if articles is not None:
@@ -238,6 +361,32 @@ class TruncatedSvdIndex:
                 doc_ids=self.doc_ids,
                 id_column=id_column,
             )
+
+    @property
+    def term_to_idx(self):
+        if self._term_to_idx is None:
+            self._term_to_idx = {
+                term: idx
+                for idx, term in enumerate(self.terms)
+            }
+        return self._term_to_idx
+
+    @property
+    def normalized_doc_embeddings(self):
+        if self._normalized_doc_embeddings is None:
+            log_runtime_event(
+                "svd_index.normalize_doc_embeddings_start",
+                n_docs=self.n_docs,
+                n_components=self.n_components,
+            )
+            self._normalized_doc_embeddings = _row_normalize_dense(self.doc_embeddings)
+            log_runtime_event(
+                "svd_index.normalize_doc_embeddings_done",
+                n_docs=self.n_docs,
+                n_components=self.n_components,
+                dtype=str(self._normalized_doc_embeddings.dtype),
+            )
+        return self._normalized_doc_embeddings
 
     @classmethod
     def from_articles(
@@ -389,7 +538,10 @@ class TruncatedSvdIndex:
             log_runtime_event("svd_search.empty_query_projection")
             return []
 
-        scores = self.normalized_doc_embeddings @ query_embedding
+        scores = self.normalized_doc_embeddings @ np.asarray(
+            query_embedding,
+            dtype=np.float32,
+        )
         candidate_doc_indices = np.flatnonzero(np.asarray(scores) > 0)
         if candidate_doc_indices.size == 0:
             log_runtime_event("svd_search.no_candidates")
@@ -452,16 +604,47 @@ class TruncatedSvdIndex:
 
         top_n = max(1, int(top_n))
         weights = np.asarray(self.components[dim], dtype=np.float32)
-        if order == "positive":
-            selected = np.argsort(weights)[::-1][:top_n]
-        elif order == "negative":
-            selected = np.argsort(weights)[:top_n]
-        elif order == "absolute":
-            selected = np.argsort(np.abs(weights))[::-1][:top_n]
-        else:
-            raise ValueError("order must be 'positive', 'negative', or 'absolute'.")
+        selected = self._top_term_indices(
+            dim,
+            top_n=top_n,
+            order=order,
+            weights=weights,
+        )
 
         return [(self.terms[int(idx)], float(weights[int(idx)])) for idx in selected]
+
+    def _top_term_indices(self, dimension, top_n, order, weights):
+        if order not in {"positive", "negative", "absolute"}:
+            raise ValueError("order must be 'positive', 'negative', or 'absolute'.")
+
+        dim = int(dimension)
+        resolved_top_n = min(max(1, int(top_n)), int(weights.size))
+        cache_key = (dim, resolved_top_n, order)
+        cached = self._top_term_indices_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        if resolved_top_n >= weights.size:
+            if order == "positive":
+                selected = np.argsort(weights)[::-1]
+            elif order == "negative":
+                selected = np.argsort(weights)
+            else:
+                selected = np.argsort(np.abs(weights))[::-1]
+        elif order == "positive":
+            selected = np.argpartition(weights, -resolved_top_n)[-resolved_top_n:]
+            selected = selected[np.argsort(weights[selected])[::-1]]
+        elif order == "negative":
+            selected = np.argpartition(weights, resolved_top_n - 1)[:resolved_top_n]
+            selected = selected[np.argsort(weights[selected])]
+        else:
+            abs_weights = np.abs(weights)
+            selected = np.argpartition(abs_weights, -resolved_top_n)[-resolved_top_n:]
+            selected = selected[np.argsort(abs_weights[selected])[::-1]]
+
+        cached_selected = tuple(int(idx) for idx in selected)
+        self._top_term_indices_cache[cache_key] = cached_selected
+        return cached_selected
 
     def dimension_summary(self, dimension, top_n=10):
         return {
@@ -591,6 +774,8 @@ class TruncatedSvdIndex:
             "doc_ids": directory / f"{index_name}_doc_ids.json",
             "articles": directory / f"{index_name}_articles.pkl",
             "doc_embeddings": directory / f"{index_name}_doc_embeddings.npy",
+            "normalized_doc_embeddings": directory
+            / f"{index_name}_normalized_doc_embeddings.npy",
             "components": directory / f"{index_name}_components.npy",
             "singular_values": directory / f"{index_name}_singular_values.npy",
             "explained_variance_ratio": directory
@@ -607,6 +792,7 @@ class TruncatedSvdIndex:
             paths["terms"],
             paths["doc_ids"],
             paths["doc_embeddings"],
+            paths["normalized_doc_embeddings"],
             paths["components"],
             paths["singular_values"],
             paths["explained_variance_ratio"],
@@ -629,6 +815,8 @@ class TruncatedSvdIndex:
         ]
         if _artifact_exists(paths["articles"]):
             required.append(paths["articles"])
+        if _artifact_exists(paths["normalized_doc_embeddings"]):
+            required.append(paths["normalized_doc_embeddings"])
         if _artifact_exists(paths["explained_variance"]):
             required.append(paths["explained_variance"])
         return all(_artifact_within_size_limit(path) for path in required)
@@ -656,6 +844,13 @@ class TruncatedSvdIndex:
         doc_embeddings_artifact = _write_npy_artifact(
             paths["doc_embeddings"],
             np.asarray(self.doc_embeddings, dtype=np.float32),
+        )
+        normalized_doc_embeddings_artifact = _write_npy_artifact(
+            paths["normalized_doc_embeddings"],
+            np.asarray(
+                self.normalized_doc_embeddings,
+                dtype=DEFAULT_SVD_NORMALIZED_DTYPE,
+            ),
         )
         components_artifact = _write_npy_artifact(
             paths["components"],
@@ -708,6 +903,12 @@ class TruncatedSvdIndex:
             "doc_embeddings_files": [
                 path.name for path in doc_embeddings_artifact["files"]
             ],
+            "normalized_doc_embeddings_dtype": str(
+                np.dtype(DEFAULT_SVD_NORMALIZED_DTYPE)
+            ),
+            "normalized_doc_embeddings_files": [
+                path.name for path in normalized_doc_embeddings_artifact["files"]
+            ],
             "components_files": [path.name for path in components_artifact["files"]],
             "singular_values_files": [
                 path.name for path in singular_values_artifact["files"]
@@ -732,6 +933,9 @@ class TruncatedSvdIndex:
         returned_paths["terms_files"] = terms_artifact["files"]
         returned_paths["doc_ids_files"] = doc_ids_artifact["files"]
         returned_paths["doc_embeddings_files"] = doc_embeddings_artifact["files"]
+        returned_paths["normalized_doc_embeddings_files"] = (
+            normalized_doc_embeddings_artifact["files"]
+        )
         returned_paths["components_files"] = components_artifact["files"]
         returned_paths["singular_values_files"] = singular_values_artifact["files"]
         returned_paths["explained_variance_ratio_files"] = (
@@ -792,6 +996,25 @@ class TruncatedSvdIndex:
                 mmap_mode="r",
                 allow_pickle=False,
             )
+
+            normalized_doc_embeddings = None
+            if _normalized_doc_embeddings_fresh(
+                paths["normalized_doc_embeddings"],
+                expected_shape=doc_embeddings.shape,
+            ):
+                (
+                    normalized_doc_embeddings_path,
+                    temp_normalized_doc_embeddings,
+                ) = _materialized_artifact_path_for_mmap(
+                    paths["normalized_doc_embeddings"]
+                )
+                if temp_normalized_doc_embeddings is not None:
+                    temp_artifact_paths.append(temp_normalized_doc_embeddings)
+                normalized_doc_embeddings = np.load(
+                    normalized_doc_embeddings_path,
+                    mmap_mode="r",
+                    allow_pickle=False,
+                )
 
             components_path, temp_components = _materialized_artifact_path_for_mmap(
                 paths["components"]
@@ -854,6 +1077,7 @@ class TruncatedSvdIndex:
                 singular_values=singular_values,
                 explained_variance_ratio=explained_variance_ratio,
                 explained_variance=explained_variance,
+                normalized_doc_embeddings=normalized_doc_embeddings,
                 vectorizer=vectorizer,
                 terms=terms,
                 doc_ids=doc_ids,
@@ -874,6 +1098,14 @@ class TruncatedSvdIndex:
             n_docs=instance.n_docs,
             n_terms=instance.n_terms,
             n_components=instance.n_components,
+            has_normalized_doc_embeddings=(
+                instance._normalized_doc_embeddings is not None
+            ),
+            normalized_doc_embeddings_dtype=(
+                str(instance._normalized_doc_embeddings.dtype)
+                if instance._normalized_doc_embeddings is not None
+                else None
+            ),
         )
         return instance, meta
 
@@ -950,7 +1182,6 @@ def _is_existing_svd_index_fresh(
         required_paths.append(paths["articles"])
     if meta.get("explained_variance_files"):
         required_paths.append(paths["explained_variance"])
-
     if not all(_artifact_exists(path) for path in required_paths):
         return False
 
@@ -1006,12 +1237,17 @@ def preprocess_svd_index(
             index_name=index_name,
             db_row_count=db_row_count,
         )
+        normalized_path = ensure_normalized_doc_embeddings_artifact(
+            index_dir=index_dir,
+            index_name=index_name,
+        )
         return {
             "built": False,
             "reason": "up_to_date",
             "db_row_count": db_row_count,
             "index_dir": str(index_dir),
             "index_name": index_name,
+            "normalized_doc_embeddings_path": str(normalized_path),
         }
 
     source_kind = "sqlite"

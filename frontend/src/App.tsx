@@ -5038,23 +5038,44 @@ function App(): JSX.Element {
   const isTopicFeedbackIrrelevantArticle = (article: Article): boolean => (
     topicFeedbackIrrelevantIdSet.has(getArticleIdKey(article))
   )
-  const visibleArticles = articles.filter(article => !isLlmIrrelevantArticle(article))
-  const getVisibleArticleResultIndex = (article: Article): number => {
-    const index = visibleArticles.findIndex(visibleArticle => (
-      getArticleIdKey(visibleArticle) === getArticleIdKey(article)
-    ))
-    return index >= 0 ? index + 1 : 1
-  }
-  const topicFeedbackIrrelevantArticles = visibleArticles.filter(isTopicFeedbackIrrelevantArticle)
-  const activeVisibleArticles = visibleArticles.filter(article => !isTopicFeedbackIrrelevantArticle(article))
-  const selectedResultsChatArticles = resultsChatArticleIds
-    .map(articleId => visibleArticles.find(article => getArticleIdKey(article) === articleId))
-    .filter((article): article is Article => Boolean(article))
-  const resultsChatAttachments = selectedResultsChatArticles.map((article) => ({
-    articleId: getArticleIdKey(article),
-    resultIndex: getVisibleArticleResultIndex(article),
-    title: article.title || 'Untitled article',
-  }))
+  const visibleArticles = useMemo(
+    () => articles.filter(article => !isLlmIrrelevantArticle(article)),
+    [articles],
+  )
+  const visibleArticleById = useMemo(
+    () => new Map(visibleArticles.map(article => [getArticleIdKey(article), article])),
+    [visibleArticles],
+  )
+  const visibleArticleIndexById = useMemo(
+    () => new Map(visibleArticles.map((article, index) => [getArticleIdKey(article), index + 1])),
+    [visibleArticles],
+  )
+  const topicFeedbackIrrelevantArticles = useMemo(
+    () => visibleArticles.filter(article => topicFeedbackIrrelevantIdSet.has(getArticleIdKey(article))),
+    [topicFeedbackIrrelevantIdSet, visibleArticles],
+  )
+  const activeVisibleArticles = useMemo(
+    () => visibleArticles.filter(article => !topicFeedbackIrrelevantIdSet.has(getArticleIdKey(article))),
+    [topicFeedbackIrrelevantIdSet, visibleArticles],
+  )
+  const activeVisibleArticleRankById = useMemo(
+    () => new Map(activeVisibleArticles.map((article, index) => [getArticleIdKey(article), index + 1])),
+    [activeVisibleArticles],
+  )
+  const selectedResultsChatArticles = useMemo(
+    () => resultsChatArticleIds
+      .map(articleId => visibleArticleById.get(articleId))
+      .filter((article): article is Article => Boolean(article)),
+    [resultsChatArticleIds, visibleArticleById],
+  )
+  const resultsChatAttachments = useMemo(
+    () => selectedResultsChatArticles.map((article) => ({
+      articleId: getArticleIdKey(article),
+      resultIndex: visibleArticleIndexById.get(getArticleIdKey(article)) ?? 1,
+      title: article.title || 'Untitled article',
+    })),
+    [selectedResultsChatArticles, visibleArticleIndexById],
+  )
   const getResultsChatContextArticles = (): Article[] => {
     const contextArticles = selectedResultsChatArticles.length > 0
       ? selectedResultsChatArticles
@@ -5062,22 +5083,34 @@ function App(): JSX.Element {
 
     return contextArticles.map(article => ({
       ...article,
-      result_index: getVisibleArticleResultIndex(article),
+      result_index: visibleArticleIndexById.get(getArticleIdKey(article)) ?? 1,
     }))
   }
-  const queryTopRadarMaxMagnitude = getMaxSvdMagnitude([
-    querySvdDimensions,
-    ...activeVisibleArticles.map(article => article.svd_query_chart_dimensions),
-  ])
-  const sharedCorpusRadarMaxMagnitude = getMaxSvdMagnitude([
-    querySvdCorpusChartDimensions,
-    ...activeVisibleArticles.map(article => article.svd_chart_dimensions),
-  ])
-  const articleConceptBarMaxMagnitude = getMaxSvdMagnitude([
-    ...activeVisibleArticles.map(article => article.svd_dimensions),
-    ...activeVisibleArticles.map(article => article.svd_article_query_dimensions),
-  ])
-  const llmIrrelevantArticles = articles.filter(isLlmIrrelevantArticle)
+  const queryTopRadarMaxMagnitude = useMemo(
+    () => getMaxSvdMagnitude([
+      querySvdDimensions,
+      ...activeVisibleArticles.map(article => article.svd_query_chart_dimensions),
+    ]),
+    [activeVisibleArticles, querySvdDimensions],
+  )
+  const sharedCorpusRadarMaxMagnitude = useMemo(
+    () => getMaxSvdMagnitude([
+      querySvdCorpusChartDimensions,
+      ...activeVisibleArticles.map(article => article.svd_chart_dimensions),
+    ]),
+    [activeVisibleArticles, querySvdCorpusChartDimensions],
+  )
+  const articleConceptBarMaxMagnitude = useMemo(
+    () => getMaxSvdMagnitude([
+      ...activeVisibleArticles.map(article => article.svd_dimensions),
+      ...activeVisibleArticles.map(article => article.svd_article_query_dimensions),
+    ]),
+    [activeVisibleArticles],
+  )
+  const llmIrrelevantArticles = useMemo(
+    () => articles.filter(isLlmIrrelevantArticle),
+    [articles],
+  )
   const canExplainRanking = useLlm === true && llmAgreementAvailable
   const shouldShowEssayShortcut = useLlm && inputMode === 'essay' && !isSearchStageVisible
   const pendingTopicFeedbackCount = pendingTopicFeedbackArticleIds.length
@@ -6338,9 +6371,7 @@ function App(): JSX.Element {
                   const svdDimensionLabelState = getSvdDimensionLabelState(article)
                   const isMarkedNotRelevant = isTopicFeedbackIrrelevantArticle(article)
                   const visibleResultIndex = visibleArticleIndex + 1
-                  const activeArticleRank = activeVisibleArticles.findIndex(activeArticle => (
-                    getArticleIdKey(activeArticle) === getArticleIdKey(article)
-                  )) + 1
+                  const activeArticleRank = activeVisibleArticleRankById.get(getArticleIdKey(article)) ?? 0
                   const isArticleAttachedToResultsChat = resultsChatArticleIds.includes(getArticleIdKey(article))
 
                   if (isMarkedNotRelevant) {

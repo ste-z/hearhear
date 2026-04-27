@@ -728,6 +728,7 @@ def register_routes(app):
                 search_payload = {
                     "results": json_search(
                         context["essay_text"],
+                        top_n=context["rerank_top_k"],
                         retrieval_model=context["retrieval_model"],
                         year_start=context["year_start"],
                         year_end=context["year_end"],

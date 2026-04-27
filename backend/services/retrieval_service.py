@@ -21,6 +21,7 @@ from backend.services.filters.article_filters import (
     filter_query_by_article_ranges,
     filter_ranked_articles_by_character_range as _filter_ranked_articles_by_character_range,
     filter_ranked_articles_by_excluded_ids as _filter_ranked_articles_by_excluded_ids,
+    filter_ranked_articles_by_metadata_ranges as _filter_ranked_articles_by_metadata_ranges,
     filter_ranked_articles_by_word_range as _filter_ranked_articles_by_word_range,
     filter_ranked_articles_by_year_range as _filter_ranked_articles_by_year_range,
     normalize_article_character_range,
@@ -528,25 +529,16 @@ def retrieval_search(
                 search_limit=search_limit,
             )
             ranked_batch = processor_search(top_n=search_limit)
-            filtered_ranked = _filter_ranked_articles_by_year_range(
+            filtered_ranked = _filter_ranked_articles_by_metadata_ranges(
                 ranked_batch,
                 year_start=resolved_year_start,
                 year_end=resolved_year_end,
-            )
-            filtered_ranked = _filter_ranked_articles_by_character_range(
-                filtered_ranked,
                 character_start=resolved_character_start,
                 character_end=resolved_character_end,
-            )
-            filtered_ranked = _filter_ranked_articles_by_word_range(
-                filtered_ranked,
                 word_start=resolved_word_start,
                 word_end=resolved_word_end,
-            )
-            filtered_ranked = _filter_ranked_articles_by_word_range(
-                filtered_ranked,
-                word_start=reading_time_word_start,
-                word_end=reading_time_word_end,
+                reading_time_word_start=reading_time_word_start,
+                reading_time_word_end=reading_time_word_end,
             )
             filtered_ranked = _filter_ranked_articles_by_avoid_words(
                 filtered_ranked,
@@ -706,20 +698,72 @@ def similar_svd_articles(
         raise ValueError("That article is not available in the SVD index.") from exc
 
     scores = np.asarray(
-        processor.normalized_doc_embeddings @ source_vector,
+        processor.normalized_doc_embeddings @ np.asarray(source_vector, dtype=np.float32),
         dtype=np.float32,
     ).reshape(-1)
-    ranked_indices = np.argsort(scores)[::-1]
+    has_metadata_filters = any(
+        value is not None
+        for value in (
+            resolved_year_start,
+            resolved_year_end,
+            resolved_character_start,
+            resolved_character_end,
+            resolved_word_start,
+            resolved_word_end,
+            reading_time_word_start,
+            reading_time_word_end,
+        )
+    )
+    if not has_metadata_filters:
+        candidate_indices = np.flatnonzero(scores > 0)
+        candidate_indices = candidate_indices[candidate_indices != source_idx]
+        candidate_scores = scores[candidate_indices]
+        if candidate_indices.size == 0:
+            return {
+                "source_article_id": source_id,
+                "results": [],
+                "next_offset": resolved_offset,
+                "has_more": False,
+            }
 
-    ranked = []
-    for raw_idx in ranked_indices:
-        idx = int(raw_idx)
-        if idx == source_idx:
-            continue
-        score = float(scores[idx])
-        if score <= 0:
-            continue
-        ranked.append((processor.doc_ids[idx], score))
+        selected_count = min(
+            int(candidate_scores.size),
+            resolved_offset + resolved_limit + 1,
+        )
+        if candidate_scores.size > selected_count:
+            top_positions = np.argpartition(candidate_scores, -selected_count)[-selected_count:]
+            sorted_positions = top_positions[np.argsort(candidate_scores[top_positions])[::-1]]
+        else:
+            sorted_positions = np.argsort(candidate_scores)[::-1]
+        page_positions = sorted_positions[resolved_offset:resolved_offset + resolved_limit + 1]
+        has_more = len(page_positions) > resolved_limit
+        page_positions = page_positions[:resolved_limit]
+        page_ranked = [
+            (
+                processor.doc_ids[int(candidate_indices[int(pos)])],
+                float(candidate_scores[int(pos)]),
+            )
+            for pos in page_positions
+        ]
+        results = build_matches(
+            page_ranked,
+            retrieval_model="svd",
+            processor=processor,
+        )
+
+        return {
+            "source_article_id": source_id,
+            "results": results,
+            "next_offset": resolved_offset + len(results),
+            "has_more": has_more,
+        }
+
+    ranked_indices = np.argsort(scores)[::-1]
+    ranked = [
+        (processor.doc_ids[int(idx)], float(scores[int(idx)]))
+        for idx in ranked_indices
+        if int(idx) != source_idx and float(scores[int(idx)]) > 0
+    ]
 
     if resolved_year_start is not None or resolved_year_end is not None:
         ranked = _filter_ranked_articles_by_year_range(
