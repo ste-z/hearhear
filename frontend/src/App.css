@@ -165,8 +165,8 @@ input, textarea { font-family: inherit; color: inherit; }
 
 /* ---------- Landing compose typewriter ---------- */
 .landing-typewriter-slot {
-  width: min(760px, calc(100vw - 96px), max(0px, calc((100dvh - 520px) * 1.5)));
-  margin-top: -12px;
+  width: min(560px, calc(100vw - 160px), max(0px, calc((100dvh - 520px) * 1.05)));
+  margin-top: -18px;
   flex-shrink: 0;
   z-index: 2;
   position: relative;

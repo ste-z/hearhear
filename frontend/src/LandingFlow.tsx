@@ -1117,7 +1117,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           flexDirection: 'column',
           alignItems: 'center',
           padding: '14px 48px 12px',
-          gap: 8,
+          gap: 6,
           overflow: 'hidden',
         }}>
           {/* Mode toggle */}
@@ -1161,7 +1161,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
 
           {/* Paper sheet — sits BEHIND the platen rod (z-index 1), so the platen visually feeds the paper through */}
           <div style={{
-            marginTop: 12,
+            marginTop: 8,
             width: COMPOSE_SURFACE_WIDTH,
             maxWidth: '100%',
             height: voiceMode === 'essay' ? 380 : PAPER_HEIGHT_STANCE,
@@ -1349,7 +1349,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           )}
 
           {/* Filters row */}
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 10, flexShrink: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8, flexShrink: 0 }}>
             <FilterRow
               yearStart={yearStart}
               yearEnd={yearEnd}
@@ -1372,7 +1372,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           </div>
 
           {/* Send to press button */}
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 10, flexShrink: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8, flexShrink: 0 }}>
             <button
               type="button"
               onClick={voiceMode === 'stance' ? onSubmitStance : onSubmitEssayDraft}
@@ -1397,7 +1397,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           </div>
 
           {/* Spacer pushes back/instrument to bottom */}
-          <div style={{ flex: 1, minHeight: 12 }} />
+          <div style={{ flex: 1, minHeight: 0 }} />
 
           {/* Bottom row: instrument settings on the right (replay covers back-to-intro) */}
           <div style={{
@@ -1407,6 +1407,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
             width: '100%',
             flexShrink: 0,
             gap: 24,
+            minHeight: 44,
           }}>
             <div style={{
               display: 'flex',
