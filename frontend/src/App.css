@@ -159,6 +159,93 @@ input, textarea { font-family: inherit; color: inherit; }
   color: var(--ink-mute);
 }
 
+/* ---------- Landing compose typewriter ---------- */
+.landing-typewriter-slot {
+  width: min(760px, calc(100vw - 96px), max(0px, calc((100dvh - 520px) * 1.5)));
+  margin-top: -12px;
+  flex-shrink: 0;
+  z-index: 2;
+  position: relative;
+  container-type: inline-size;
+}
+
+.landing-typewriter {
+  width: 100%;
+  aspect-ratio: 1110 / 740;
+  position: relative;
+  overflow: visible;
+}
+
+.landing-typewriter-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.landing-typewriter-keys {
+  --tw-key-size: 26px;
+  --tw-key-gap: 5px;
+  --tw-key-font-size: 12px;
+  --tw-action-font-size: 13px;
+  --tw-pill-width: 40px;
+  --tw-row-indent: 14px;
+  --tw-space-width: 208px;
+  --tw-space-height: 15px;
+  position: absolute;
+  top: 33.5%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 72%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--tw-key-gap);
+}
+
+.landing-typewriter-brand {
+  font-family: 'IM Fell English', serif;
+  font-size: clamp(8px, 1.2cqw, 9px);
+  letter-spacing: 0.26em;
+  color: var(--ink);
+  margin-bottom: 1px;
+  text-shadow: 0 1px 0 rgba(250,250,247,0.9);
+}
+
+.landing-key-row {
+  display: flex;
+  gap: var(--tw-key-gap);
+  justify-content: center;
+}
+
+.landing-key-row-mid { padding-left: var(--tw-row-indent); }
+
+.landing-space-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+@supports (width: 1cqw) {
+  .landing-typewriter-keys {
+    --tw-key-size: clamp(18px, 3.42cqw, 26px);
+    --tw-key-gap: clamp(3px, 0.66cqw, 5px);
+    --tw-key-font-size: clamp(9px, 1.58cqw, 12px);
+    --tw-action-font-size: clamp(11px, 1.72cqw, 13px);
+    --tw-pill-width: clamp(32px, 5.26cqw, 40px);
+    --tw-row-indent: clamp(8px, 1.84cqw, 14px);
+    --tw-space-width: clamp(150px, 27.37cqw, 208px);
+    --tw-space-height: clamp(11px, 1.97cqw, 15px);
+  }
+}
+
+@media (max-height: 760px) {
+  .landing-typewriter-slot { display: none; }
+}
+
 /* ---------- Buttons ---------- */
 .btn-stamp {
   background: transparent;

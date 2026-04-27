@@ -7,6 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 import { PersonaName } from './PersonaName'
+import typewriterFrameUrl from './assets/typewriter-frame.svg'
 
 const INTRO_TOPICS = ['climate', 'immigration', 'minimum wage'] as const
 const INTRO_CLAIMS_BY_TOPIC: Record<typeof INTRO_TOPICS[number], readonly string[]> = {
@@ -152,23 +153,24 @@ type TypewriterProps = {
   flashedKey?: string | null
 }
 
-const TYPEWRITER_WIDTH = 800
-const TYPEWRITER_HEIGHT = 248
+const COMPOSE_SURFACE_WIDTH = 760
 
 function TypewriterKey({
   children,
   onPress,
-  width = 36,
+  width = 'var(--tw-key-size)',
+  height = 'var(--tw-key-size)',
   shape = 'circle',
-  fontSize = 14,
+  fontSize = 'var(--tw-key-font-size)',
   disabled,
   flashed = false,
 }: {
   children: React.ReactNode
   onPress: () => void
-  width?: number
+  width?: number | string
+  height?: number | string
   shape?: 'circle' | 'pill'
-  fontSize?: number
+  fontSize?: number | string
   disabled?: boolean
   flashed?: boolean
 }): JSX.Element {
@@ -201,8 +203,8 @@ function TypewriterKey({
       disabled={disabled}
       style={{
         width,
-        height: 36,
-        border: '1.4px solid #1a1a1a',
+        height,
+        border: '1.5px solid #1a1a1a',
         borderRadius: shape === 'pill' ? 18 : '50%',
         fontFamily: "'IM Fell English', serif",
         fontSize,
@@ -215,8 +217,8 @@ function TypewriterKey({
         alignItems: 'center',
         justifyContent: 'center',
         transform: isDown ? 'translateY(2px)' : 'translateY(0)',
-        boxShadow: isDown ? 'none' : '0 2px 0 rgba(26,26,26,0.08)',
-        background: isDown && !pressed ? '#ece4d0' : '#fafaf7',
+        boxShadow: isDown ? 'inset 0 1px 3px rgba(26,26,26,0.24)' : '0 2px 0 rgba(26,26,26,0.22)',
+        background: isDown ? '#ece4d0' : 'rgba(250,250,247,0.96)',
         transition: 'transform 80ms ease, box-shadow 80ms ease, background 120ms ease',
         userSelect: 'none',
       }}
@@ -234,55 +236,22 @@ function RisingTypewriter({ onType, onBackspace, onEnter, disabled, flashedKey }
   const isFlashed = (id: string): boolean => flashedKey !== null && flashedKey !== undefined && flashedKey === id
 
   return (
-    <div style={{ width: TYPEWRITER_WIDTH, height: TYPEWRITER_HEIGHT, position: 'relative' }}>
-      {/* Platen rod sticking out the top with knurled knobs at each end */}
-      <svg
-        width={TYPEWRITER_WIDTH}
-        height={22}
-        viewBox={`0 0 ${TYPEWRITER_WIDTH} 22`}
-        style={{ display: 'block', position: 'absolute', top: 0, left: 0 }}
-      >
-        <g stroke="#1a1a1a" strokeWidth="1.4" fill="#fafaf7" strokeLinecap="square">
-          <rect x="40" y="0" width="720" height="22" rx="11" />
-          <circle cx="40" cy="11" r="14" />
-          <circle cx="760" cy="11" r="14" />
-          <line x1="32" y1="11" x2="48" y2="11" />
-          <line x1="40" y1="3" x2="40" y2="19" />
-          <line x1="752" y1="11" x2="768" y2="11" />
-          <line x1="760" y1="3" x2="760" y2="19" />
-        </g>
-      </svg>
+    <div className="landing-typewriter">
+      <img
+        src={typewriterFrameUrl}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+        className="landing-typewriter-frame"
+      />
 
-      {/* Body shell — rounded rectangle housing the keyboard */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 18,
-          left: 60,
-          right: 60,
-          bottom: 0,
-          background: '#fafaf7',
-          border: '1.4px solid #1a1a1a',
-          borderRadius: '12px 12px 18px 18px',
-          padding: '12px 36px 14px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 6,
-        }}
-      >
-        <div style={{
-          fontFamily: "'IM Fell English', serif",
-          fontSize: 12,
-          letterSpacing: '0.32em',
-          color: '#1a1a1a',
-          marginBottom: 2,
-        }}>
-          ——— HEAR! HEAR! ———
+      <div className="landing-typewriter-keys">
+        <div className="landing-typewriter-brand">
+          HEAR! HEAR!
         </div>
 
         {/* Row 1: QWERTYUIOP + Enter */}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+        <div className="landing-key-row">
           {row1.map(k => (
             <TypewriterKey
               key={k}
@@ -293,13 +262,13 @@ function RisingTypewriter({ onType, onBackspace, onEnter, disabled, flashedKey }
               {k}
             </TypewriterKey>
           ))}
-          <TypewriterKey onPress={onEnter} width={50} shape="pill" disabled={disabled} fontSize={16} flashed={isFlashed('enter')}>
+          <TypewriterKey onPress={onEnter} width="var(--tw-pill-width)" shape="pill" disabled={disabled} fontSize="var(--tw-action-font-size)" flashed={isFlashed('enter')}>
             ↵
           </TypewriterKey>
         </div>
 
         {/* Row 2: ASDFGHJKL (slightly indented) */}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', paddingLeft: 18 }}>
+        <div className="landing-key-row landing-key-row-mid">
           {row2.map(k => (
             <TypewriterKey
               key={k}
@@ -313,8 +282,8 @@ function RisingTypewriter({ onType, onBackspace, onEnter, disabled, flashedKey }
         </div>
 
         {/* Row 3: Backspace + ZXCVBNM,.? */}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-          <TypewriterKey onPress={onBackspace} width={50} shape="pill" disabled={disabled} fontSize={16} flashed={isFlashed('backspace')}>
+        <div className="landing-key-row">
+          <TypewriterKey onPress={onBackspace} width="var(--tw-pill-width)" shape="pill" disabled={disabled} fontSize="var(--tw-action-font-size)" flashed={isFlashed('backspace')}>
             ⌫
           </TypewriterKey>
           {row3.map(k => (
@@ -341,7 +310,7 @@ function RisingTypewriter({ onType, onBackspace, onEnter, disabled, flashedKey }
         </div>
 
         {/* Spacebar */}
-        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 4 }}>
+        <div className="landing-space-row">
           <button
             type="button"
             onMouseDown={(event) => { event.preventDefault() }}
@@ -349,17 +318,18 @@ function RisingTypewriter({ onType, onBackspace, onEnter, disabled, flashedKey }
             onClick={() => { if (!disabled) onType(' ') }}
             disabled={disabled}
             style={{
-              width: 280,
-              height: 22,
-              border: '1.4px solid #1a1a1a',
-              background: isFlashed('space') ? '#ece4d0' : '#fafaf7',
+              width: 'var(--tw-space-width)',
+              height: 'var(--tw-space-height)',
+              border: '1.5px solid #1a1a1a',
+              background: isFlashed('space') ? '#ece4d0' : 'rgba(250,250,247,0.96)',
               borderRadius: 14,
               cursor: disabled ? 'not-allowed' : 'pointer',
               padding: 0,
               opacity: disabled ? 0.55 : 1,
               userSelect: 'none',
               transform: isFlashed('space') ? 'translateY(2px)' : 'translateY(0)',
-              transition: 'transform 80ms ease, background 120ms ease',
+              boxShadow: isFlashed('space') ? 'inset 0 1px 3px rgba(26,26,26,0.24)' : '0 2px 0 rgba(26,26,26,0.22)',
+              transition: 'transform 80ms ease, box-shadow 80ms ease, background 120ms ease',
             }}
             aria-label="space"
           />
@@ -404,8 +374,9 @@ function IntroLine({
       fontFamily: "'IM Fell English', serif",
       opacity: hideUntilActive ? 0.18 : (dimmed ? 0.55 : 1),
       transition: 'opacity 0.4s ease',
+      width: '100%',
     }}>
-      <span style={{ fontSize: 22, fontStyle: 'italic', color: '#3a3a36', minWidth: 140, textAlign: 'right' }}>
+      <span style={{ fontSize: 22, fontStyle: 'italic', color: '#3a3a36', flex: '0 0 140px', minWidth: 0, textAlign: 'right' }}>
         {label}
       </span>
       {editable ? (
@@ -424,7 +395,9 @@ function IntroLine({
             border: 0,
             borderBottom: active ? '1.5px solid #1a1a1a' : '1px solid #cfcfc7',
             padding: '4px 0 6px',
-            minWidth: 520,
+            flex: 1,
+            minWidth: 0,
+            width: '100%',
             color: '#1a1a1a',
             outline: 'none',
           }}
@@ -436,7 +409,8 @@ function IntroLine({
           letterSpacing: '-0.005em',
           borderBottom: '1px solid #1a1a1a',
           paddingBottom: 6,
-          minWidth: 520,
+          flex: 1,
+          minWidth: 0,
           display: 'inline-block',
         }}>
           {value || ' '}
@@ -1069,8 +1043,8 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
             border: '1px solid #1a1a1a',
             boxShadow: '0 8px 20px rgba(26,26,26,0.08)',
             padding: '24px 30px 26px',
-            width: 760,
-            maxWidth: 'calc(100% - 64px)',
+            width: COMPOSE_SURFACE_WIDTH,
+            maxWidth: '100%',
             position: 'relative',
             display: 'flex',
             flexDirection: 'column',
@@ -1188,7 +1162,8 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           {/* Paper sheet — sits BEHIND the platen rod (z-index 1), so the platen visually feeds the paper through */}
           <div style={{
             marginTop: 12,
-            width: 760,
+            width: COMPOSE_SURFACE_WIDTH,
+            maxWidth: '100%',
             height: voiceMode === 'essay' ? 380 : PAPER_HEIGHT_STANCE,
             background: '#fafaf7',
             border: '1px solid rgba(26,26,26,0.6)',
@@ -1335,15 +1310,9 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
         )}
       </div>
 
-          {/* Typewriter — overlaps paper bottom in stance mode. Higher z-index than paper so the
-              platen rod renders OVER the paper edge, simulating the paper being fed through. */}
+          {/* Typewriter — held close to the slip without covering its contents. */}
           {voiceMode === 'stance' && (
-            <div style={{
-              marginTop: -22,
-              flexShrink: 0,
-              zIndex: 2,
-              position: 'relative',
-            }}>
+            <div className="landing-typewriter-slot">
               <RisingTypewriter
                 disabled={loading}
                 flashedKey={flashedKey}
