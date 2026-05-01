@@ -224,6 +224,7 @@ def rerank_article_matches_by_statement(
     stance_method=DEFAULT_STANCE_METHOD,
     use_chunking=False,
     chunking_mode=DEFAULT_CHUNKING_MODE,
+    llm_label_irrelevant=True,
     progress_callback=None,
 ):
     resolved_top_n = _resolve_top_n(top_n)
@@ -247,6 +248,7 @@ def rerank_article_matches_by_statement(
         stance_method=resolved_stance_method,
         use_chunking=bool(resolved_use_chunking),
         chunking_mode=resolved_chunking_mode,
+        llm_label_irrelevant=bool(llm_label_irrelevant),
     )
     topic_weight, stance_weight, recency_weight = _resolve_weight_triplet(
         topic_weight,
@@ -390,7 +392,7 @@ def rerank_article_matches_by_statement(
                 stance_score = stance_row["stance_score"]
                 stance_score_normalized = stance_row["agreement_score"]
                 stance_label = None
-                llm_irrelevant = bool(stance_row.get("llm_irrelevant"))
+                llm_irrelevant = bool(stance_row.get("llm_irrelevant")) if llm_label_irrelevant else None
                 llm_relevant_paragraphs = stance_row.get("llm_relevant_paragraphs")
                 llm_chunk_count = stance_row.get("llm_chunk_count")
                 llm_related_chunk_count = stance_row.get("llm_related_chunk_count")
@@ -484,6 +486,7 @@ def rerank_article_matches(
     stance_method=DEFAULT_STANCE_METHOD,
     use_chunking=False,
     chunking_mode=DEFAULT_CHUNKING_MODE,
+    llm_label_irrelevant=True,
     progress_callback=None,
 ):
     return rerank_article_matches_by_statement(
@@ -497,5 +500,6 @@ def rerank_article_matches(
         stance_method=stance_method,
         use_chunking=use_chunking,
         chunking_mode=chunking_mode,
+        llm_label_irrelevant=llm_label_irrelevant,
         progress_callback=progress_callback,
     )

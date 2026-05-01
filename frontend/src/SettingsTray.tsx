@@ -49,6 +49,8 @@ export type SettingsTrayProps = {
   supportedStanceMethods: StanceMethod[]
   llmAgreementAvailable: boolean
   onStanceMethodChange: (next: StanceMethod) => void
+  llmLabelIrrelevant: boolean
+  onLlmLabelIrrelevantChange: (next: boolean) => void
 
   // weights (re-ranking)
   topicWeight: number
@@ -161,6 +163,63 @@ function ModalRoleSelector<T extends string>({
           )
         })}
       </div>
+    </div>
+  )
+}
+
+function SmallSwitch({
+  label,
+  hint,
+  checked,
+  disabled = false,
+  onChange,
+}: {
+  label: string
+  hint?: string
+  checked: boolean
+  disabled?: boolean
+  onChange: (next: boolean) => void
+}): JSX.Element {
+  return (
+    <div style={{ marginTop: 16, maxWidth: 520, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18 }}>
+      <div>
+        <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: disabled ? '#9a9a92' : 'var(--ink-mute)' }}>{label}</div>
+        {hint && (
+          <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)', marginTop: 3, lineHeight: 1.35 }}>{hint}</div>
+        )}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-label={label}
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => !disabled && onChange(!checked)}
+        style={{
+          width: 64,
+          height: 28,
+          flexShrink: 0,
+          border: '1px solid #1a1a1a',
+          background: checked ? '#1a1a1a' : 'transparent',
+          color: checked ? '#fafaf7' : '#1a1a1a',
+          padding: 3,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          opacity: disabled ? 0.45 : 1,
+          display: 'flex',
+          justifyContent: checked ? 'flex-end' : 'flex-start',
+          alignItems: 'center',
+        }}
+      >
+        <span
+          aria-hidden
+          style={{
+            width: 20,
+            height: 20,
+            background: checked ? '#fafaf7' : '#1a1a1a',
+            display: 'block',
+          }}
+        />
+      </button>
     </div>
   )
 }
@@ -496,6 +555,8 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
     supportedStanceMethods,
     llmAgreementAvailable,
     onStanceMethodChange,
+    llmLabelIrrelevant,
+    onLlmLabelIrrelevantChange,
     topicWeight,
     stanceWeight,
     recencyWeight,
@@ -747,6 +808,13 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                     Chunking requires <PersonaName persona="llm" />. <PersonaName persona="nli" /> is locked out for chunked retrieval.
                   </p>
                 )}
+                <SmallSwitch
+                  label="LLM irrelevant labels"
+                  checked={llmLabelIrrelevant}
+                  disabled={effectiveStanceMethod !== 'llm' || !llmAgreementAvailable}
+                  onChange={onLlmLabelIrrelevantChange}
+                  hint="When the LLM sub-editor is active, let it mark completely unrelated articles as not relevant and keep them out of the main ledger."
+                />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                 <SubEditorPortrait who={effectiveStanceMethod} />

@@ -64,7 +64,9 @@ def essay_search(
     chunking_mode="none",
     chunk_candidate_top_k=DEFAULT_CHUNK_CANDIDATE_TOP_K,
     chunk_article_top_k=DEFAULT_CHUNK_ARTICLE_TOP_K,
+    llm_label_irrelevant=True,
     progress_callback=None,
+    on_topic_done=None,
 ):
     resolved_essay = str(essay_text or "").strip()
     resolved_thesis = str(selected_thesis_sentence or "").strip()
@@ -111,6 +113,13 @@ def essay_search(
             0.38,
             candidate_count=len(topic_matches),
         )
+    # Hand the topic-only candidates to the caller before the heavier
+    # agreement/rerank step, matching the stance-search stage 2 behavior.
+    if on_topic_done is not None and topic_matches:
+        try:
+            on_topic_done(list(topic_matches))
+        except Exception:  # noqa: BLE001 - best-effort, never block the search
+            pass
     if not topic_matches:
         log_runtime_event(
             "essay_search.no_topic_matches",
@@ -185,6 +194,7 @@ def essay_search(
         stance_method=resolved_stance_method,
         use_chunking=resolved_use_chunking,
         chunking_mode=resolved_chunking_mode,
+        llm_label_irrelevant=llm_label_irrelevant,
         progress_callback=progress_callback,
     )
     for match in reranked:

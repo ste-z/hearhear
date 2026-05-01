@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import type {
   Article,
   EssayClaimCandidate,
@@ -38,6 +39,7 @@ export type ResultsFlowProps = {
   emptyResultsMessage: string | null
 
   articles: Article[]
+  llmLabelIrrelevant: boolean
   stage: 'stage1' | 'stage2' | 'stage3'
   dismissedIds: Set<string>
   onDismiss: (article: Article) => void
@@ -151,6 +153,10 @@ function getStanceCategory(article: Article): 'supports' | 'complicates' | 'neut
   if (label.includes('support') || label.includes('entail')) return 'supports'
   if (label.includes('contradict') || label.includes('against') || label.includes('oppos')) return 'complicates'
   return 'neutral'
+}
+
+function isLlmIrrelevantArticle(article: Article): boolean {
+  return article.stance_method === 'llm' && article.llm_irrelevant === true
 }
 
 function clampPct(value: number | null | undefined): number {
@@ -407,6 +413,68 @@ function ExpandableChart({
   children: React.ReactNode
 }): JSX.Element {
   const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) return undefined
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [open])
+
+  const expandedChart = open && typeof document !== 'undefined'
+    ? createPortal(
+        <div
+          onClick={() => setOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 140,
+            background: 'rgba(26,26,26,0.78)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'stretch',
+            padding: 0,
+          }}
+        >
+          <div onClick={(event) => event.stopPropagation()} style={{
+            background: '#fafaf7',
+            border: 'none',
+            padding: '28px 48px 40px',
+            width: '100vw',
+            height: '100vh',
+            overflowY: 'auto',
+            boxShadow: '0 24px 60px rgba(0,0,0,0.4)',
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexShrink: 0 }}>
+              <div className="tracker" style={{ color: 'var(--accent)', fontSize: 12, letterSpacing: '0.34em' }}>{title}</div>
+              <button type="button" onClick={() => setOpen(false)} style={{
+                background: 'transparent',
+                border: '1px solid #1a1a1a',
+                padding: '8px 16px',
+                fontFamily: "'IM Fell DW Pica SC', serif",
+                fontSize: 11,
+                letterSpacing: '0.28em',
+                textTransform: 'uppercase',
+                color: '#1a1a1a',
+                cursor: 'pointer',
+              }}>close x</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              {children}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null
+
   return (
     <div style={{ position: 'relative' }}>
       <button
@@ -439,52 +507,7 @@ function ExpandableChart({
         </svg>
       </button>
       {children}
-      {open && (
-        <div
-          onClick={() => setOpen(false)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 100,
-            background: 'rgba(26,26,26,0.78)',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'stretch',
-            padding: 0,
-          }}
-        >
-          <div onClick={(event) => event.stopPropagation()} style={{
-            background: '#fafaf7',
-            border: 'none',
-            padding: '28px 48px 40px',
-            width: '100vw',
-            height: '100vh',
-            overflowY: 'auto',
-            boxShadow: '0 24px 60px rgba(0,0,0,0.4)',
-            position: 'relative',
-            display: 'flex',
-            flexDirection: 'column',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexShrink: 0 }}>
-              <div className="tracker" style={{ color: 'var(--accent)', fontSize: 12, letterSpacing: '0.34em' }}>{title}</div>
-              <button type="button" onClick={() => setOpen(false)} style={{
-                background: 'transparent',
-                border: '1px solid #1a1a1a',
-                padding: '8px 16px',
-                fontFamily: "'IM Fell DW Pica SC', serif",
-                fontSize: 11,
-                letterSpacing: '0.28em',
-                textTransform: 'uppercase',
-                color: '#1a1a1a',
-                cursor: 'pointer',
-              }}>close ✕</button>
-            </div>
-            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-              {children}
-            </div>
-          </div>
-        </div>
-      )}
+      {expandedChart}
     </div>
   )
 }
@@ -1088,12 +1111,355 @@ function VintageSvdConceptBars({
   )
 }
 
+type CitationRenderContext = {
+  sourceMap: Map<number, ResultsOverviewSource>
+  onOpenSource?: (resultIndex: number) => void
+  seenCitations: Set<number>
+}
+
+function normalizeSourceIndices(values: readonly number[] | null | undefined): number[] {
+  const normalized: number[] = []
+  const seen = new Set<number>()
+  for (const value of values ?? []) {
+    const index = Number(value)
+    if (!Number.isInteger(index) || index <= 0 || seen.has(index)) continue
+    seen.add(index)
+    normalized.push(index)
+  }
+  return normalized
+}
+
+function parseCitationNumbers(raw: string): number[] {
+  return normalizeSourceIndices(raw.split(',').map(part => Number(part.trim())))
+}
+
+function buildSourceMap(sources: ResultsOverviewSource[] | null | undefined): Map<number, ResultsOverviewSource> {
+  return new Map((sources ?? []).map(source => [source.result_index, source]))
+}
+
+function truncateReferenceTitle(title: string): string {
+  return `${title.slice(0, 24)}${title.length > 24 ? '...' : ''}`
+}
+
+function CitationMark({
+  index,
+  source,
+  onOpenSource,
+  showTitle = false,
+}: {
+  index: number
+  source?: ResultsOverviewSource
+  onOpenSource?: (resultIndex: number) => void
+  showTitle?: boolean
+}): JSX.Element {
+  const label = `[${index}]`
+  const text = showTitle && source?.title ? `${label} ${truncateReferenceTitle(source.title)}` : label
+  const title = source?.title ? `${label} ${source.title}` : onOpenSource ? `Open source ${label}` : `Source ${label}`
+  const style = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    maxWidth: '100%',
+    border: '1px solid currentColor',
+    borderRadius: 0,
+    background: 'transparent',
+    color: 'inherit',
+    padding: showTitle ? '2px 6px' : '1px 5px',
+    margin: 0,
+    fontFamily: "'IM Fell DW Pica SC', serif",
+    fontSize: showTitle ? 8 : 9,
+    letterSpacing: showTitle ? '0.18em' : '0.12em',
+    lineHeight: 1.25,
+    textTransform: 'uppercase',
+    verticalAlign: 'baseline',
+    textAlign: 'left' as const,
+    cursor: onOpenSource ? 'pointer' : 'default',
+  }
+
+  if (onOpenSource) {
+    return (
+      <button
+        type="button"
+        title={title}
+        aria-label={title}
+        onClick={() => onOpenSource(index)}
+        style={style}
+      >
+        {text}
+      </button>
+    )
+  }
+  return (
+    <span title={title} style={style}>
+      {text}
+    </span>
+  )
+}
+
+function SourceCitationList({
+  indices,
+  sourceMap,
+  onOpenSource,
+  showTitle = false,
+}: {
+  indices: readonly number[] | null | undefined
+  sourceMap: Map<number, ResultsOverviewSource>
+  onOpenSource?: (resultIndex: number) => void
+  showTitle?: boolean
+}): JSX.Element | null {
+  const normalized = normalizeSourceIndices(indices)
+  if (normalized.length === 0) return null
+  return (
+    <div style={{
+      marginTop: 6,
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 5,
+      color: 'inherit',
+    }}>
+      {normalized.map(index => (
+        <CitationMark
+          key={index}
+          index={index}
+          source={sourceMap.get(index)}
+          onOpenSource={onOpenSource}
+          showTitle={showTitle}
+        />
+      ))}
+    </div>
+  )
+}
+
+function renderTextWithCitations(text: string, context: CitationRenderContext, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = []
+  const citationPattern = /\[(\d+(?:\s*,\s*\d+)*)\]/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = citationPattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index))
+    }
+
+    const indices = parseCitationNumbers(match[1])
+    if (indices.length === 0) {
+      nodes.push(match[0])
+    } else {
+      indices.forEach(index => context.seenCitations.add(index))
+      nodes.push(
+        <span
+          key={`${keyPrefix}-cite-${match.index}`}
+          style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4, margin: '0 2px', verticalAlign: 'baseline' }}
+        >
+          {indices.map(index => (
+            <CitationMark
+              key={index}
+              index={index}
+              source={context.sourceMap.get(index)}
+              onOpenSource={context.onOpenSource}
+            />
+          ))}
+        </span>,
+      )
+    }
+    lastIndex = match.index + match[0].length
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex))
+  }
+  return nodes
+}
+
+function isSafeMarkdownUrl(url: string): boolean {
+  return url.startsWith('https://') || url.startsWith('http://') || url.startsWith('mailto:')
+}
+
+function renderInlineMarkdown(text: string, context: CitationRenderContext, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = []
+  const tokenPattern = /(\[[^\]\n]+\]\((?:https?:\/\/|mailto:)[^)]+\)|`[^`\n]+`|\*\*[^*\n]+?\*\*|__[^_\n]+?__|\*[^*\n]+?\*|_[^_\n]+?_)/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = tokenPattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(...renderTextWithCitations(text.slice(lastIndex, match.index), context, `${keyPrefix}-t${lastIndex}`))
+    }
+
+    const token = match[0]
+    const key = `${keyPrefix}-md-${match.index}`
+    const linkMatch = token.match(/^\[([^\]\n]+)\]\(([^)]+)\)$/)
+    if (linkMatch) {
+      const [, label, url] = linkMatch
+      if (isSafeMarkdownUrl(url)) {
+        nodes.push(
+          <a key={key} href={url} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>
+            {renderInlineMarkdown(label, context, `${key}-label`)}
+          </a>,
+        )
+      } else {
+        nodes.push(...renderTextWithCitations(label, context, `${key}-unsafe-link`))
+      }
+    } else if (token.startsWith('`') && token.endsWith('`')) {
+      nodes.push(
+        <code key={key} style={{
+          fontFamily: "'Special Elite', monospace",
+          fontSize: '0.9em',
+          border: '1px solid currentColor',
+          padding: '0 3px',
+        }}>
+          {token.slice(1, -1)}
+        </code>,
+      )
+    } else if ((token.startsWith('**') && token.endsWith('**')) || (token.startsWith('__') && token.endsWith('__'))) {
+      nodes.push(
+        <strong key={key}>
+          {renderInlineMarkdown(token.slice(2, -2), context, `${key}-strong`)}
+        </strong>,
+      )
+    } else if ((token.startsWith('*') && token.endsWith('*')) || (token.startsWith('_') && token.endsWith('_'))) {
+      nodes.push(
+        <em key={key}>
+          {renderInlineMarkdown(token.slice(1, -1), context, `${key}-em`)}
+        </em>,
+      )
+    } else {
+      nodes.push(...renderTextWithCitations(token, context, key))
+    }
+
+    lastIndex = match.index + token.length
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(...renderTextWithCitations(text.slice(lastIndex), context, `${keyPrefix}-t${lastIndex}`))
+  }
+  return nodes
+}
+
+function MarkdownText({
+  text,
+  sources = [],
+  fallbackSourceIndices = [],
+  onOpenSource,
+}: {
+  text: string
+  sources?: ResultsOverviewSource[] | null
+  fallbackSourceIndices?: readonly number[] | null
+  onOpenSource?: (resultIndex: number) => void
+}): JSX.Element {
+  const context: CitationRenderContext = {
+    sourceMap: buildSourceMap(sources),
+    onOpenSource,
+    seenCitations: new Set<number>(),
+  }
+  const blocks: ReactNode[] = []
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  let index = 0
+
+  const readParagraph = (): string => {
+    const paragraphLines: string[] = []
+    while (index < lines.length) {
+      const line = lines[index]
+      if (line.trim() === '') break
+      if (/^#{1,3}\s+/.test(line) || /^\s*(?:[-*]|\d+\.)\s+/.test(line)) break
+      paragraphLines.push(line.trim())
+      index += 1
+    }
+    return paragraphLines.join(' ')
+  }
+
+  while (index < lines.length) {
+    const line = lines[index]
+    if (line.trim() === '') {
+      index += 1
+      continue
+    }
+
+    const heading = line.match(/^(#{1,3})\s+(.+)$/)
+    if (heading) {
+      const level = heading[1].length
+      blocks.push(
+        <div
+          key={`heading-${index}`}
+          style={{
+            fontFamily: "'IM Fell DW Pica SC', serif",
+            fontSize: level === 1 ? '1.04em' : level === 2 ? '0.98em' : '0.92em',
+            letterSpacing: '0.18em',
+            textTransform: 'uppercase',
+            lineHeight: 1.35,
+          }}
+        >
+          {renderInlineMarkdown(heading[2], context, `heading-${index}`)}
+        </div>,
+      )
+      index += 1
+      continue
+    }
+
+    const unordered = line.match(/^\s*[-*]\s+(.+)$/)
+    const ordered = line.match(/^\s*\d+\.\s+(.+)$/)
+    if (unordered || ordered) {
+      const orderedList = Boolean(ordered)
+      const items: string[] = []
+      while (index < lines.length) {
+        const nextLine = lines[index]
+        const itemMatch = orderedList
+          ? nextLine.match(/^\s*\d+\.\s+(.+)$/)
+          : nextLine.match(/^\s*[-*]\s+(.+)$/)
+        if (!itemMatch) break
+        items.push(itemMatch[1].trim())
+        index += 1
+      }
+      const ListTag = orderedList ? 'ol' : 'ul'
+      blocks.push(
+        <ListTag key={`list-${index}`} style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 3 }}>
+          {items.map((item, itemIndex) => (
+            <li key={itemIndex}>
+              {renderInlineMarkdown(item, context, `list-${index}-${itemIndex}`)}
+            </li>
+          ))}
+        </ListTag>,
+      )
+      continue
+    }
+
+    const paragraph = readParagraph()
+    if (paragraph) {
+      blocks.push(
+        <p key={`paragraph-${index}`} style={{ margin: 0 }}>
+          {renderInlineMarkdown(paragraph, context, `paragraph-${index}`)}
+        </p>,
+      )
+    } else {
+      index += 1
+    }
+  }
+
+  const unseenFallbackIndices = normalizeSourceIndices(fallbackSourceIndices)
+    .filter(sourceIndex => !context.seenCitations.has(sourceIndex))
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {blocks}
+      <SourceCitationList
+        indices={unseenFallbackIndices}
+        sourceMap={context.sourceMap}
+        onOpenSource={onOpenSource}
+        showTitle
+      />
+    </div>
+  )
+}
+
 function ChatBubble({
   message,
+  onOpenSource,
 }: {
   message: ResultsChatMessage
+  onOpenSource?: (resultIndex: number) => void
 }): JSX.Element {
   const isAssistant = message.role === 'assistant'
+  const fallbackSourceIndices = message.source_indices ?? message.sources?.map(source => source.result_index) ?? []
   return (
     <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', alignItems: isAssistant ? 'flex-start' : 'flex-end' }}>
       <div style={{
@@ -1115,7 +1481,7 @@ function ChatBubble({
         fontFamily: "'IM Fell English', serif",
         fontSize: 14,
         lineHeight: 1.5,
-        whiteSpace: 'pre-wrap',
+        whiteSpace: 'normal',
       }}>
         {message.attachments && message.attachments.length > 0 && (
           <div style={{
@@ -1141,7 +1507,14 @@ function ChatBubble({
             ))}
           </div>
         )}
-        {message.content}
+        {message.content !== '' && (
+          <MarkdownText
+            text={message.content}
+            sources={message.sources ?? []}
+            fallbackSourceIndices={fallbackSourceIndices}
+            onOpenSource={onOpenSource}
+          />
+        )}
         {/* Blinking caret while the assistant streams. The placeholder
             assistant message starts with an empty string and grows as SSE
             chunks arrive. */}
@@ -1154,29 +1527,6 @@ function ChatBubble({
             background: '#1a1a1a',
             animation: 'caret-blink 1s steps(1) infinite',
           }} />
-        )}
-        {message.sources && message.sources.length > 0 && (
-          <div style={{
-            marginTop: 8,
-            paddingTop: 8,
-            borderTop: '1px dotted rgba(26,26,26,0.4)',
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 6,
-          }}>
-            {message.sources.map(source => (
-              <span key={source.result_index} style={{
-                fontFamily: "'IM Fell DW Pica SC', serif",
-                fontSize: 8,
-                letterSpacing: '0.22em',
-                textTransform: 'uppercase',
-                border: '1px solid currentColor',
-                padding: '2px 6px',
-              }}>
-                [{source.result_index}] {source.title.slice(0, 24)}{source.title.length > 24 ? '…' : ''}
-              </span>
-            ))}
-          </div>
         )}
       </div>
     </div>
@@ -1209,11 +1559,6 @@ function BroadsheetOverlay({
   explainState?: { loading: boolean; explanation: string | null; error: string | null }
 }): JSX.Element {
   const stance = getStanceCategory(article)
-  const stanceLabel = stance === 'supports'
-    ? 'supports your stance'
-    : stance === 'complicates'
-      ? 'complicates your stance'
-      : 'neutral on your stance'
   const articleQuerySvd = (article.svd_query_chart_dimensions ?? []) as SvdLatentDimension[]
   const articleCorpusSvd = (article.svd_chart_dimensions ?? []) as SvdLatentDimension[]
   const articleOwnSvd = (article.svd_dimensions ?? []) as SvdLatentDimension[]
@@ -1263,10 +1608,7 @@ function BroadsheetOverlay({
         </div>
 
         <div style={{ marginTop: 20 }}>
-          <div className="tracker" style={{ color: 'var(--accent)' }}>
-            on your topic · {stanceLabel}
-          </div>
-          <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 30, lineHeight: 1.08, marginTop: 8 }}>{article.title}</div>
+          <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 30, lineHeight: 1.08 }}>{article.title}</div>
           <div style={{
             display: 'flex',
             justifyContent: 'space-between',
@@ -1888,6 +2230,7 @@ function ResultsChatOverlay({
   attachableArticles,
   attachedIds,
   onToggleAttachment,
+  onOpenSource,
 }: {
   total: number
   messages: ResultsChatMessage[]
@@ -1900,6 +2243,7 @@ function ResultsChatOverlay({
   attachableArticles: Array<{ id: string; rank: number; title: string }>
   attachedIds: string[]
   onToggleAttachment: (id: string) => void
+  onOpenSource?: (resultIndex: number) => void
 }): JSX.Element {
   const [pickerOpen, setPickerOpen] = useState(false)
   const presets = [
@@ -1961,7 +2305,7 @@ function ResultsChatOverlay({
             </div>
           )}
           {messages.map((message) => (
-            <ChatBubble key={message.id} message={message} />
+            <ChatBubble key={message.id} message={message} onOpenSource={onOpenSource} />
           ))}
           {loading && messages.length > 0 && messages[messages.length - 1].content === '' && (
             <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#6a6a62', display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -2254,8 +2598,6 @@ function OverviewItem({
   sources: ResultsOverviewSource[]
   onOpenSource: (resultIndex: number) => void
 }): JSX.Element {
-  const indices = item.source_indices ?? []
-  const sourceMap = new Map(sources.map(s => [s.result_index, s]))
   return (
     <div style={{
       display: 'grid',
@@ -2268,31 +2610,12 @@ function OverviewItem({
       <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 18, color: '#7a1d1d', fontStyle: 'italic' }}>"</span>
       <div>
         <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 14, lineHeight: 1.45, color: '#1a1a1a' }}>
-          {item.argument}
-        </div>
-        <div style={{
-          fontFamily: "'IM Fell DW Pica SC', serif",
-          fontSize: 9,
-          letterSpacing: '0.24em',
-          textTransform: 'uppercase',
-          color: '#6a6a62',
-          marginTop: 4,
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 6,
-        }}>
-          {indices.map(i => {
-            const source = sourceMap.get(i)
-            if (!source) return null
-            return (
-              <button
-                key={i}
-                type="button"
-                onClick={() => onOpenSource(i)}
-                style={{ border: '1px solid currentColor', padding: '2px 6px', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', fontSize: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', color: 'inherit' }}
-              >[{i}] {source.title.slice(0, 24)}{source.title.length > 24 ? '…' : ''}</button>
-            )
-          })}
+          <MarkdownText
+            text={item.argument}
+            sources={sources}
+            fallbackSourceIndices={item.source_indices ?? []}
+            onOpenSource={onOpenSource}
+          />
         </div>
       </div>
     </div>
@@ -2310,6 +2633,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
     error,
     emptyResultsMessage,
     articles,
+    llmLabelIrrelevant,
     dismissedIds,
     onDismiss,
     onApplyDismissals,
@@ -2388,8 +2712,15 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
   }, [stage, articles.length])
 
   const visibleArticles = useMemo(
-    () => articles.filter(a => !dismissedIds.has(getArticleId(a))),
-    [articles, dismissedIds],
+    () => articles.filter(a => !dismissedIds.has(getArticleId(a)) && !(llmLabelIrrelevant && isLlmIrrelevantArticle(a))),
+    [articles, dismissedIds, llmLabelIrrelevant],
+  )
+
+  const llmIrrelevantArticles = useMemo(
+    () => llmLabelIrrelevant
+      ? articles.filter(a => isLlmIrrelevantArticle(a) && !dismissedIds.has(getArticleId(a)))
+      : [],
+    [articles, dismissedIds, llmLabelIrrelevant],
   )
 
   /**
@@ -2477,6 +2808,10 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
     : null
 
   const openArticle = articles.find(a => getArticleId(a) === openId) ?? null
+  const openResultSource = (resultIndex: number): void => {
+    const article = visibleArticles[resultIndex - 1]
+    if (article) setOpenId(getArticleId(article))
+  }
 
   return (
     <div className="stage-shell" style={{ position: 'relative' }}>
@@ -2988,15 +3323,98 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
 
         {/* Stage 3: ledger (LEFT) + Editor Overview sticky (RIGHT) */}
         {isStage3 && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 460px', gap: 36, position: 'relative' }}>
-            {/* Editor Overview — first in JSX but ordered SECOND visually via flex order */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 460px', gap: 36, position: 'relative', height: '100%', minHeight: 0, alignItems: 'stretch' }}>
+            <div style={{ order: 2, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
+              {dismissedIds.size > 0 && (
+                <div style={{
+                  border: '2px solid #1a1a1a',
+                  background: '#1a1a1a',
+                  color: '#fafaf7',
+                  padding: '12px 14px',
+                  boxShadow: '0 10px 22px rgba(26,26,26,0.20)',
+                  transform: 'rotate(0.35deg)',
+                }}>
+                  <div className="tracker" style={{ color: 'rgba(250,250,247,0.72)', fontSize: 9, letterSpacing: '0.26em', marginBottom: 5 }}>not relevant marked</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'center' }}>
+                    <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 15, lineHeight: 1.35 }}>
+                      {dismissedIds.size} {dismissedIds.size === 1 ? 'article was' : 'articles were'} set aside.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onApplyDismissals}
+                      style={{
+                        flexShrink: 0,
+                        background: '#fafaf7',
+                        color: '#1a1a1a',
+                        border: '1px solid #fafaf7',
+                        padding: '8px 12px',
+                        fontFamily: "'IM Fell DW Pica SC', serif",
+                        fontSize: 10,
+                        letterSpacing: '0.24em',
+                        textTransform: 'uppercase',
+                        cursor: 'pointer',
+                        boxShadow: '2px 2px 0 rgba(250,250,247,0.26)',
+                      }}
+                    >pull next-best →</button>
+                  </div>
+                </div>
+              )}
+              {llmIrrelevantArticles.length > 0 && (
+                <details style={{
+                  borderTop: '1px solid #1a1a1a',
+                  borderBottom: '1px solid #1a1a1a',
+                  padding: '9px 0',
+                  color: '#6a6a62',
+                }}>
+                  <summary style={{
+                    cursor: 'pointer',
+                    listStyle: 'none',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    alignItems: 'baseline',
+                    fontFamily: "'IM Fell DW Pica SC', serif",
+                    fontSize: 9,
+                    letterSpacing: '0.22em',
+                    textTransform: 'uppercase',
+                    color: '#7a1d1d',
+                  }}>
+                    <span>AI marked not relevant</span>
+                    <span>{llmIrrelevantArticles.length}</span>
+                  </summary>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                    {llmIrrelevantArticles.slice(0, 8).map(article => (
+                      <div
+                        key={getArticleId(article)}
+                        style={{
+                          fontFamily: "'IM Fell English', serif",
+                          fontStyle: 'italic',
+                          fontSize: 12,
+                          lineHeight: 1.35,
+                          color: '#3a3a36',
+                          borderTop: '1px dotted rgba(26,26,26,0.22)',
+                          paddingTop: 6,
+                        }}
+                      >
+                        {article.title}
+                      </div>
+                    ))}
+                    {llmIrrelevantArticles.length > 8 && (
+                      <div style={{ fontFamily: "'Special Elite', monospace", fontSize: 10, color: '#6a6a62' }}>
+                        +{llmIrrelevantArticles.length - 8} more
+                      </div>
+                    )}
+                  </div>
+                </details>
+              )}
+            {/* Editor Overview */}
             <div className="tray-scroll" style={{
               display: 'flex',
               flexDirection: 'column',
               gap: 14,
-              maxHeight: 'calc(100dvh - 360px)',
+              flex: 1,
+              minHeight: 0,
               padding: '24px 22px 22px',
-              order: 2,
               background: '#fdf6c9',
               backgroundImage: 'radial-gradient(ellipse at 30% 18%, rgba(255,255,255,0.6), transparent 55%), radial-gradient(ellipse at 80% 90%, rgba(180,150,80,0.18), transparent 60%)',
               boxShadow: '0 6px 14px rgba(26,26,26,0.16), 0 1px 0 rgba(26,26,26,0.06) inset',
@@ -3005,15 +3423,19 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
             }}>
               {/* Tape strip at top */}
               <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%) rotate(-2deg)', width: 96, height: 22, background: 'rgba(214, 196, 130, 0.7)', boxShadow: '0 2px 4px rgba(26,26,26,0.18)' }} aria-hidden />
-              <div className="tracker" style={{ color: 'var(--accent)', fontSize: 10, letterSpacing: '0.32em' }}>editor overview</div>
+              <div className="tracker" style={{ color: 'var(--accent)', fontSize: 10, letterSpacing: '0.32em' }}>AI Assistant Editor Overview</div>
               {overviewLoading && !overview && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.26em', textTransform: 'uppercase', color: '#6a6a62' }}>
-                    <RFSpinner /> <span>{overviewDraft ? 'the editor is dictating…' : 'composing the brief…'}</span>
+                    <RFSpinner /> <span>{overviewDraft ? 'the AI assistant editor is dictating…' : 'composing the brief…'}</span>
                   </div>
                   {overviewDraft && (
-                    <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.5, color: '#1a1a1a', whiteSpace: 'pre-wrap' }}>
-                      {overviewDraft}
+                    <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.5, color: '#1a1a1a' }}>
+                      <MarkdownText
+                        text={overviewDraft}
+                        sources={overviewSources}
+                        onOpenSource={openResultSource}
+                      />
                       <span aria-hidden style={{
                         display: 'inline-block',
                         width: '0.55ch',
@@ -3033,7 +3455,11 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
               {overview && (
                 <>
                   <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.5, color: '#1a1a1a' }}>
-                    {overview.overview}
+                    <MarkdownText
+                      text={overview.overview}
+                      sources={overviewSources}
+                      onOpenSource={openResultSource}
+                    />
                   </div>
                   {(overview.supporting_arguments && overview.supporting_arguments.length > 0) && (
                     <div style={{ borderTop: '1px solid #1a1a1a', borderBottom: '1px solid #1a1a1a', padding: '10px 0' }}>
@@ -3044,10 +3470,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                             key={i}
                             item={item}
                             sources={overviewSources}
-                            onOpenSource={(idx) => {
-                              const a = visibleArticles[idx - 1]
-                              if (a) setOpenId(getArticleId(a))
-                            }}
+                            onOpenSource={openResultSource}
                           />
                         ))}
                       </div>
@@ -3062,10 +3485,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                             key={i}
                             item={item}
                             sources={overviewSources}
-                            onOpenSource={(idx) => {
-                              const a = visibleArticles[idx - 1]
-                              if (a) setOpenId(getArticleId(a))
-                            }}
+                            onOpenSource={openResultSource}
                           />
                         ))}
                       </div>
@@ -3073,7 +3493,11 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                   )}
                   {overview.caveat && (
                     <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#6a6a62' }}>
-                      {overview.caveat}
+                      <MarkdownText
+                        text={overview.caveat}
+                        sources={overviewSources}
+                        onOpenSource={openResultSource}
+                      />
                     </div>
                   )}
                 </>
@@ -3158,8 +3582,9 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
               )}
 
             </div>
+            </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', position: 'relative' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', position: 'relative', minHeight: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
                 <div className="tracker" style={{ fontSize: 10, letterSpacing: '0.32em' }}>the ledger · ranked 01—{String(visibleArticles.length).padStart(2, '0')}</div>
                 <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: '#6a6a62' }}>click for the broadsheet</div>
@@ -3180,10 +3605,12 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
               }}>
                 <span>rank</span><span>title · author</span><span>marks</span><span></span>
               </div>
-              <div className="tray-scroll" style={{ maxHeight: 'calc(100dvh - 360px)' }}>
+              <div className="tray-scroll" style={{ flex: 1, minHeight: 0, paddingBottom: 24 }}>
                 {visibleArticles.length === 0 && (
                   <div style={{ padding: 24, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: '#6a6a62' }}>
-                    {emptyResultsMessage || 'No articles cleared the bench.'}
+                    {llmIrrelevantArticles.length > 0
+                      ? 'The AI marked every candidate article as not relevant.'
+                      : (emptyResultsMessage || 'No articles cleared the bench.')}
                   </div>
                 )}
                 {visibleArticles.map((article, i) => (
@@ -3204,14 +3631,6 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                   and include the caption + table-header offsets. */}
               {sortPhase === 'sorting' && (
                 <SortFlight articles={visibleArticles} />
-              )}
-              {dismissedIds.size > 0 && (
-                <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: '#6a6a62' }}>
-                  <span>
-                    {dismissedIds.size} {dismissedIds.size === 1 ? 'article was' : 'articles were'} marked not relevant.
-                  </span>
-                  <button type="button" onClick={onApplyDismissals} className="btn-stamp" style={{ padding: '4px 10px', fontSize: 9 }}>pull next-best</button>
-                </div>
               )}
             </div>
           </div>
@@ -3300,6 +3719,10 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
           attachableArticles={visibleArticles.map((a, i) => ({ id: getArticleId(a), rank: i + 1, title: a.title }))}
           attachedIds={chatAttachedIds}
           onToggleAttachment={onToggleChatAttachment}
+          onOpenSource={(resultIndex) => {
+            openResultSource(resultIndex)
+            setChatOpen(false)
+          }}
         />
       )}
       {articleChatTarget && (

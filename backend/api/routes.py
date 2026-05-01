@@ -436,6 +436,15 @@ def _extract_request_context():
         or payload.get("ignore_typo_correction"),
         False,
     )
+    llm_label_irrelevant = _coerce_bool(
+        _first_payload_value(
+            payload,
+            "llm_label_irrelevant",
+            "llm_label_irrelevant_articles",
+            "label_irrelevant_articles",
+        ),
+        True,
+    )
     search_progress_id = normalize_progress_id(
         payload.get("search_progress_id")
         or payload.get("progress_id")
@@ -488,6 +497,7 @@ def _extract_request_context():
         "selected_thesis_id": selected_thesis_id,
         "topic_feedback_irrelevant_article_ids": topic_feedback_irrelevant_article_ids,
         "skip_typo_correction": skip_typo_correction,
+        "llm_label_irrelevant": llm_label_irrelevant,
         "search_progress_id": search_progress_id,
         "essay_text": essay_text,
     }
@@ -687,20 +697,20 @@ def register_routes(app):
                 rocchio_irrelevant_count=len(context["topic_feedback_irrelevant_article_ids"]),
             )
             empty_results_message = None
-            if context["mode"] == "stance":
-                # Publish topic-relevance results to the SSE channel as soon
-                # as that step finishes — the frontend uses this to scatter
-                # cards in stage 2 while reranking is still running.
-                def _emit_topic_done(topic_matches):
-                    if not progress:
-                        return
-                    progress(
-                        "topic_results",
-                        "Topic candidates ready",
-                        0.4,
-                        topic_articles=list(topic_matches),
-                    )
+            # Publish topic-relevance results to the SSE channel as soon as
+            # that step finishes. Stage 2 uses this to scatter cards while the
+            # slower agreement rerank is still running.
+            def _emit_topic_done(topic_matches):
+                if not progress:
+                    return
+                progress(
+                    "topic_results",
+                    "Topic candidates ready",
+                    0.4,
+                    topic_articles=list(topic_matches),
+                )
 
+            if context["mode"] == "stance":
                 search_payload = stance_search(
                     topic=context["topic"],
                     opinion=context["opinion"],
@@ -727,6 +737,7 @@ def register_routes(app):
                     chunk_candidate_top_k=context["chunk_candidate_top_k"],
                     chunk_article_top_k=context["chunk_article_top_k"],
                     topic_feedback_irrelevant_article_ids=context["topic_feedback_irrelevant_article_ids"],
+                    llm_label_irrelevant=context["llm_label_irrelevant"],
                     progress_callback=progress,
                     on_topic_done=_emit_topic_done,
                 )
@@ -758,7 +769,9 @@ def register_routes(app):
                     chunk_candidate_top_k=context["chunk_candidate_top_k"],
                     chunk_article_top_k=context["chunk_article_top_k"],
                     topic_feedback_irrelevant_article_ids=context["topic_feedback_irrelevant_article_ids"],
+                    llm_label_irrelevant=context["llm_label_irrelevant"],
                     progress_callback=progress,
+                    on_topic_done=_emit_topic_done,
                 )
             else:
                 if progress:

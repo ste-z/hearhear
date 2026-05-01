@@ -961,6 +961,7 @@ def stance_search(
     chunking_mode="none",
     chunk_candidate_top_k=DEFAULT_CHUNK_CANDIDATE_TOP_K,
     chunk_article_top_k=DEFAULT_CHUNK_ARTICLE_TOP_K,
+    llm_label_irrelevant=True,
     progress_callback=None,
     on_topic_done=None,
 ):
@@ -1069,6 +1070,7 @@ def stance_search(
         stance_method=stance_method,
         use_chunking=use_chunking,
         chunking_mode=chunking_mode,
+        llm_label_irrelevant=llm_label_irrelevant,
         progress_callback=progress_callback,
     )
     if progress_callback:
