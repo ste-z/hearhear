@@ -150,6 +150,88 @@ def _article_length_lookup_from_dataframe(articles):
     return lookup
 
 
+def _frame_needs_positive_count_metadata(articles, column_name):
+    if articles is None or articles.empty:
+        return False
+    if column_name not in articles.columns:
+        return True
+
+    counts = pd.to_numeric(articles[column_name], errors="coerce").fillna(0)
+    return bool((counts <= 0).any())
+
+
+def _enrich_article_length_metadata_from_raw(
+    articles,
+    project_root,
+    years=DEFAULT_YEARS,
+    min_body_text_chars=DEFAULT_MIN_BODY_TEXT_CHARS,
+):
+    if articles is None or articles.empty or "id" not in articles.columns:
+        return articles
+
+    needs_character_counts = _frame_needs_positive_count_metadata(
+        articles,
+        "body_character_count",
+    )
+    needs_word_counts = _frame_needs_positive_count_metadata(
+        articles,
+        "body_word_count",
+    )
+    if not needs_character_counts and not needs_word_counts:
+        return articles
+
+    data_folder = Path(project_root) / "data" / "raw" / "guardian_by_year"
+    try:
+        raw_articles = load_and_clean_guardian_years(
+            years=years,
+            folder=data_folder,
+            drop_duplicates=True,
+            min_body_text_chars=min_body_text_chars,
+        )
+    except Exception as exc:
+        print(
+            "Warning: failed to enrich bundled article length metadata from "
+            f"{data_folder}; word-count filters may be unavailable. Details: {exc}"
+        )
+        return articles
+
+    required_columns = {"id", "body_character_count", "body_word_count"}
+    if raw_articles.empty or not required_columns.issubset(raw_articles.columns):
+        print(
+            "Warning: raw Guardian article data did not include complete length "
+            "metadata; word-count filters may be unavailable."
+        )
+        return articles
+
+    raw_lengths = (
+        raw_articles[["id", "body_character_count", "body_word_count"]]
+        .drop_duplicates(subset=["id"])
+        .set_index("id")
+    )
+    enriched = articles.copy()
+    for column_name in ("body_character_count", "body_word_count"):
+        if column_name not in enriched.columns:
+            enriched[column_name] = pd.NA
+        raw_counts = enriched["id"].map(raw_lengths[column_name])
+        current_counts = pd.to_numeric(enriched[column_name], errors="coerce")
+        enriched[column_name] = current_counts.where(
+            current_counts.fillna(0) > 0,
+            raw_counts,
+        )
+
+    filled_word_count = int(
+        pd.to_numeric(enriched["body_word_count"], errors="coerce")
+        .fillna(0)
+        .gt(0)
+        .sum()
+    )
+    print(
+        "Enriched bundled article length metadata from raw Guardian CSVs "
+        f"for {filled_word_count} rows."
+    )
+    return enriched
+
+
 def _populate_missing_article_length_metadata(bundled_articles=None, batch_size=DEFAULT_BATCH_SIZE):
     bundled_lookup = _article_length_lookup_from_dataframe(bundled_articles)
     missing_query = GuardianArticle.query.filter(
@@ -463,6 +545,12 @@ def _seed_guardian_articles(
     else:
         bundled_articles = _filter_articles_to_years(bundled_articles, years=years)
     if not store_body_text and not bundled_articles.empty:
+        bundled_articles = _enrich_article_length_metadata_from_raw(
+            bundled_articles,
+            project_root=project_root,
+            years=years,
+            min_body_text_chars=min_body_text_chars,
+        )
         print("Seeding Guardian articles from bundled vector index metadata.")
         _persist_guardian_articles(
             bundled_articles,
@@ -564,7 +652,12 @@ def initialize_offline_data_pipeline(
         existing_count = GuardianArticle.query.count()
         should_seed = existing_count == 0
         if existing_count > 0 and _missing_article_length_metadata_exists():
-            bundled_articles = _load_bundled_guardian_articles(years=years)
+            bundled_articles = _enrich_article_length_metadata_from_raw(
+                _load_bundled_guardian_articles(years=years),
+                project_root=project_root,
+                years=years,
+                min_body_text_chars=min_body_text_chars,
+            )
             updated_length_rows = _populate_missing_article_length_metadata(
                 bundled_articles=bundled_articles,
             )
