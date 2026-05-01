@@ -104,7 +104,7 @@ function StepPanel({
   return (
     <section
       ref={stepRef}
-      style={{ minHeight: 540, padding: '36px 40px 28px', borderBottom: '1px solid rgba(26,26,26,0.2)' }}
+      style={{ minHeight: 540, padding: '36px 40px 28px', borderBottom: '1px solid rgba(var(--ink-rgb), 0.2)' }}
     >
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 18 }}>
         <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 26, fontStyle: 'italic', color: 'var(--accent)' }}>{numerals[idx]}</span>
@@ -132,7 +132,7 @@ function ModalRoleSelector<T extends string>({
   return (
     <div style={{ marginTop: 12, width: '100%', maxWidth: 520 }}>
       <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)', marginBottom: 6 }}>{label}</div>
-      <div style={{ display: 'flex', borderTop: '1px solid #1a1a1a', borderBottom: '1px solid #1a1a1a' }}>
+      <div style={{ display: 'flex', borderTop: '1px solid var(--ink)', borderBottom: '1px solid var(--ink)' }}>
         {options.map((o, i) => {
           const active = value === o.id
           return (
@@ -143,10 +143,10 @@ function ModalRoleSelector<T extends string>({
               disabled={o.disabled}
               style={{
                 flex: 1,
-                background: active ? '#1a1a1a' : 'transparent',
-                color: active ? '#fafaf7' : (o.disabled ? '#9a9a92' : '#1a1a1a'),
+                background: active ? 'var(--ink)' : 'transparent',
+                color: active ? 'var(--paper)' : (o.disabled ? 'var(--ink-faint)' : 'var(--ink)'),
                 border: 0,
-                borderLeft: i === 0 ? 0 : '1px solid #1a1a1a',
+                borderLeft: i === 0 ? 0 : '1px solid var(--ink)',
                 padding: '10px 8px',
                 cursor: o.disabled ? 'not-allowed' : 'pointer',
                 fontFamily: "'IM Fell English', serif",
@@ -183,7 +183,7 @@ function SmallSwitch({
   return (
     <div style={{ marginTop: 16, maxWidth: 520, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18 }}>
       <div>
-        <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: disabled ? '#9a9a92' : 'var(--ink-mute)' }}>{label}</div>
+        <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: disabled ? 'var(--ink-faint)' : 'var(--ink-mute)' }}>{label}</div>
         {hint && (
           <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)', marginTop: 3, lineHeight: 1.35 }}>{hint}</div>
         )}
@@ -199,9 +199,9 @@ function SmallSwitch({
           width: 64,
           height: 28,
           flexShrink: 0,
-          border: '1px solid #1a1a1a',
-          background: checked ? '#1a1a1a' : 'transparent',
-          color: checked ? '#fafaf7' : '#1a1a1a',
+          border: '1px solid var(--ink)',
+          background: checked ? 'var(--ink)' : 'transparent',
+          color: checked ? 'var(--paper)' : 'var(--ink)',
           padding: 3,
           cursor: disabled ? 'not-allowed' : 'pointer',
           opacity: disabled ? 0.45 : 1,
@@ -215,7 +215,7 @@ function SmallSwitch({
           style={{
             width: 20,
             height: 20,
-            background: checked ? '#fafaf7' : '#1a1a1a',
+            background: checked ? 'var(--paper)' : 'var(--ink)',
             display: 'block',
           }}
         />
@@ -250,7 +250,7 @@ function SliderField({
     <div style={{ marginTop: 18, maxWidth: 520 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)' }}>{label}</span>
-        <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 13, color: '#1a1a1a' }}>{display}</span>
+        <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 13, color: 'var(--ink)' }}>{display}</span>
       </div>
       <input
         type="range"
@@ -271,20 +271,20 @@ function SliderField({
 function ChunkingScene({ mode }: { mode: FrontendChunkingMode | 'fixed' }): JSX.Element {
   return (
     <svg width="380" height="260" viewBox="0 0 380 260">
-      <g stroke="#1a1a1a" strokeWidth="1.2" fill="#fafaf7" strokeLinecap="square">
+      <g stroke="var(--ink)" strokeWidth="1.2" fill="var(--paper)" strokeLinecap="square">
         <rect x="40" y="30" width="120" height="200" />
         {Array.from({ length: 16 }).map((_, i) => (
-          <line key={i} x1="48" y1={48 + i * 11} x2={48 + ((i * 37) % 90) + 14} y2={48 + i * 11} opacity="0.5" stroke="#1a1a1a" />
+          <line key={i} x1="48" y1={48 + i * 11} x2={48 + ((i * 37) % 90) + 14} y2={48 + i * 11} opacity="0.5" stroke="var(--ink)" />
         ))}
-        <line x1="170" y1="130" x2="200" y2="130" stroke="#1a1a1a" />
+        <line x1="170" y1="130" x2="200" y2="130" stroke="var(--ink)" />
         <polyline points="194,124 200,130 194,136" fill="none" />
         {mode === 'none' && (
           <g>
             <rect x="220" y="30" width="120" height="200" />
             {Array.from({ length: 16 }).map((_, i) => (
-              <line key={i} x1="228" y1={48 + i * 11} x2={228 + ((i * 37) % 90) + 14} y2={48 + i * 11} opacity="0.5" stroke="#1a1a1a" />
+              <line key={i} x1="228" y1={48 + i * 11} x2={228 + ((i * 37) % 90) + 14} y2={48 + i * 11} opacity="0.5" stroke="var(--ink)" />
             ))}
-            <text x="280" y="252" fontSize="10" fontFamily="'IM Fell English', serif" fontStyle="italic" textAnchor="middle" stroke="none" fill="#6a6a62">filed whole</text>
+            <text x="280" y="252" fontSize="10" fontFamily="'IM Fell English', serif" fontStyle="italic" textAnchor="middle" stroke="none" fill="var(--ink-mute)">filed whole</text>
           </g>
         )}
         {mode === 'semantic' && (
@@ -293,12 +293,12 @@ function ChunkingScene({ mode }: { mode: FrontendChunkingMode | 'fixed' }): JSX.
               <g key={i} transform={`translate(${220 + (i % 2) * 64} ${30 + Math.floor(i / 2) * 102})`}>
                 <rect width="56" height="86" />
                 {Array.from({ length: 6 }).map((_, j) => (
-                  <line key={j} x1="6" y1={12 + j * 12} x2={6 + ((j * 23) % 36) + 8} y2={12 + j * 12} opacity="0.5" stroke="#1a1a1a" />
+                  <line key={j} x1="6" y1={12 + j * 12} x2={6 + ((j * 23) % 36) + 8} y2={12 + j * 12} opacity="0.5" stroke="var(--ink)" />
                 ))}
-                <text x="28" y="80" fontSize="8" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="#7a1d1d" letterSpacing="2">§{i + 1}</text>
+                <text x="28" y="80" fontSize="8" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="var(--accent)" letterSpacing="2">§{i + 1}</text>
               </g>
             ))}
-            <text x="280" y="252" fontSize="10" fontFamily="'IM Fell English', serif" fontStyle="italic" textAnchor="middle" stroke="none" fill="#6a6a62">cut on section breaks</text>
+            <text x="280" y="252" fontSize="10" fontFamily="'IM Fell English', serif" fontStyle="italic" textAnchor="middle" stroke="none" fill="var(--ink-mute)">cut on section breaks</text>
           </g>
         )}
       </g>
@@ -326,36 +326,36 @@ function BenchScene({
     .map(p => p.i)
   return (
     <svg width="420" height="260" viewBox="0 0 420 260">
-      <g stroke="#1a1a1a" strokeWidth="1.2" fill="#fafaf7" strokeLinecap="square">
+      <g stroke="var(--ink)" strokeWidth="1.2" fill="var(--paper)" strokeLinecap="square">
         <line x1="20" y1="200" x2="400" y2="200" />
         <rect x="20" y="160" width="56" height="40" />
-        <text x="48" y="186" fontSize="9" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="#1a1a1a" letterSpacing="2">CASE</text>
+        <text x="48" y="186" fontSize="9" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="var(--ink)" letterSpacing="2">CASE</text>
         <rect x="344" y="160" width="56" height="40" />
-        <text x="372" y="186" fontSize="9" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="#1a1a1a" letterSpacing="2">DESK</text>
+        <text x="372" y="186" fontSize="9" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="var(--ink)" letterSpacing="2">DESK</text>
         <g>
-          <line x1={gateX} y1="40" x2={gateX} y2="180" stroke="#7a1d1d" strokeDasharray="4 4" />
-          <rect x={gateX - 30} y="20" width="60" height="22" fill="#fafaf7" stroke="#7a1d1d" />
-          <text x={gateX} y="35" fontSize="10" fontFamily="'Special Elite', monospace" textAnchor="middle" stroke="none" fill="#7a1d1d">
+          <line x1={gateX} y1="40" x2={gateX} y2="180" stroke="var(--accent)" strokeDasharray="4 4" />
+          <rect x={gateX - 30} y="20" width="60" height="22" fill="var(--paper)" stroke="var(--accent)" />
+          <text x={gateX} y="35" fontSize="10" fontFamily="'Special Elite', monospace" textAnchor="middle" stroke="none" fill="var(--accent)">
             {mode === 'automatic' ? `≥ ${threshold.toFixed(2)}` : `top ${count}`}
           </text>
           {mode === 'automatic' && (
-            <text x={gateX} y="55" fontSize="8" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="#7a1d1d" letterSpacing="1.4">
+            <text x={gateX} y="55" fontSize="8" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="var(--accent)" letterSpacing="1.4">
               MAX {count}
             </text>
           )}
-          <text x={gateX} y="196" fontSize="9" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="#7a1d1d" letterSpacing="2">GATE</text>
+          <text x={gateX} y="196" fontSize="9" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="var(--accent)" letterSpacing="2">GATE</text>
         </g>
         {proofs.map((conf, i) => {
           const cross = mode === 'automatic' ? (conf >= threshold && ranks.includes(i)) : ranks.includes(i)
           const x = 88 + i * 38
           return (
             <g key={i}>
-              <rect x={x} y={cross ? 110 : 220} width="22" height="28" fill="#fafaf7" />
-              <line x1={x + 4} y1={cross ? 118 : 228} x2={x + 18} y2={cross ? 118 : 228} opacity="0.5" stroke="#1a1a1a" />
-              <line x1={x + 4} y1={cross ? 124 : 234} x2={x + 16} y2={cross ? 124 : 234} opacity="0.5" stroke="#1a1a1a" />
-              <text x={x + 11} y={cross ? 156 : 252} fontSize="8" fontFamily="'Special Elite', monospace" textAnchor="middle" stroke="none" fill={cross ? '#1a1a1a' : '#9a9a92'}>{conf.toFixed(2)}</text>
+              <rect x={x} y={cross ? 110 : 220} width="22" height="28" fill="var(--paper)" />
+              <line x1={x + 4} y1={cross ? 118 : 228} x2={x + 18} y2={cross ? 118 : 228} opacity="0.5" stroke="var(--ink)" />
+              <line x1={x + 4} y1={cross ? 124 : 234} x2={x + 16} y2={cross ? 124 : 234} opacity="0.5" stroke="var(--ink)" />
+              <text x={x + 11} y={cross ? 156 : 252} fontSize="8" fontFamily="'Special Elite', monospace" textAnchor="middle" stroke="none" fill={cross ? 'var(--ink)' : 'var(--ink-faint)'}>{conf.toFixed(2)}</text>
               {cross && i < proofs.length - 1 && (
-                <line x1={x + 22} y1="124" x2={x + 38} y2="124" stroke="#1a1a1a" opacity="0.6" />
+                <line x1={x + 22} y1="124" x2={x + 38} y2="124" stroke="var(--ink)" opacity="0.6" />
               )}
             </g>
           )
@@ -385,19 +385,19 @@ function PersonaPortrait({ src, mode, alt }: { src: string; mode: string; alt: s
         letterSpacing: '0.32em',
         textTransform: 'uppercase',
         color: 'var(--accent)',
-        borderTop: '1px solid #1a1a1a',
-        borderBottom: '1px solid #1a1a1a',
+        borderTop: '1px solid var(--ink)',
+        borderBottom: '1px solid var(--ink)',
         padding: '4px 12px',
-        background: '#fafaf7',
+        background: 'var(--paper)',
       }}>
         {mode}
       </div>
       <div style={{
         width: 240,
         height: 200,
-        border: '1px solid #1a1a1a',
-        background: '#fafaf7',
-        boxShadow: '2px 4px 0 rgba(26,26,26,0.06)',
+        border: '1px solid var(--ink)',
+        background: 'var(--paper)',
+        boxShadow: '2px 4px 0 var(--shadow-soft)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -440,14 +440,14 @@ function ModalNameCard({
   desc: string
 }): JSX.Element {
   return (
-    <div style={{ borderTop: '1px solid #1a1a1a', borderBottom: '1px solid #1a1a1a', padding: '8px 14px', maxWidth: 360, marginTop: 8, width: '100%' }}>
+    <div style={{ borderTop: '1px solid var(--ink)', borderBottom: '1px solid var(--ink)', padding: '8px 14px', maxWidth: 360, marginTop: 8, width: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 16, fontStyle: 'italic' }}>
           <PersonaName persona={persona} />
         </span>
         <span style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)' }}>{detail}</span>
       </div>
-      <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 12, color: '#3a3a36', marginTop: 2, lineHeight: 1.45 }}>{desc}</div>
+      <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 12, color: 'var(--ink-soft)', marginTop: 2, lineHeight: 1.45 }}>{desc}</div>
     </div>
   )
 }
@@ -491,9 +491,9 @@ function RerankPreview({
   weights: { relevance: number; agreement: number; recency: number }
 }): JSX.Element {
   const entries = [
-    { id: 'relevance', label: 'relevance', value: weights.relevance, color: '#1a1a1a' },
-    { id: 'agreement', label: 'agreement', value: weights.agreement, color: '#7a1d1d' },
-    { id: 'recency', label: 'recency', value: weights.recency, color: '#3a3a36' },
+    { id: 'relevance', label: 'relevance', value: weights.relevance, color: 'var(--ink)' },
+    { id: 'agreement', label: 'agreement', value: weights.agreement, color: 'var(--accent)' },
+    { id: 'recency', label: 'recency', value: weights.recency, color: 'var(--ink-soft)' },
   ]
   const total = entries.reduce((a, e) => a + e.value, 0) || 1
   const sorted = [...entries].sort((a, b) => b.value - a.value)
@@ -506,9 +506,9 @@ function RerankPreview({
   return (
     <div style={{ paddingTop: 8 }}>
       <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)', marginBottom: 8 }}>The editor's recipe</div>
-      <div style={{ display: 'flex', height: 38, border: '1px solid #1a1a1a' }}>
+      <div style={{ display: 'flex', height: 38, border: '1px solid var(--ink)' }}>
         {entries.map(e => (
-          <div key={e.id} style={{ flexBasis: `${(e.value / total) * 100}%`, background: e.color, borderRight: '1px solid #fafaf7' }} />
+          <div key={e.id} style={{ flexBasis: `${(e.value / total) * 100}%`, background: e.color, borderRight: '1px solid var(--paper)' }} />
         ))}
       </div>
       <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -520,10 +520,10 @@ function RerankPreview({
           </div>
         ))}
       </div>
-      <div style={{ marginTop: 22, borderTop: '1px solid #1a1a1a', paddingTop: 12 }}>
+      <div style={{ marginTop: 22, borderTop: '1px solid var(--ink)', paddingTop: 12 }}>
         <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)', marginBottom: 6 }}>The editor's leaning</div>
-        <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 15, color: '#3a3a36', lineHeight: 1.45 }}>
-          With <strong style={{ color: '#7a1d1d' }}>{top.label}</strong> at {Math.round((top.value / total) * 100)}%, expect {leaning[top.id]}
+        <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 15, color: 'var(--ink-soft)', lineHeight: 1.45 }}>
+          With <strong style={{ color: 'var(--accent)' }}>{top.label}</strong> at {Math.round((top.value / total) * 100)}%, expect {leaning[top.id]}
         </div>
       </div>
     </div>
@@ -617,26 +617,26 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
     <div className="modal-shell" onClick={onClose}>
       <div className="modal-tray" onClick={(event) => event.stopPropagation()} style={{ position: 'absolute', inset: 32 }}>
         {/* Sticky banner + step rail */}
-        <div style={{ padding: '20px 40px 14px', borderBottom: '1px solid #1a1a1a', background: '#fafaf7' }}>
+        <div style={{ padding: '20px 40px 14px', borderBottom: '1px solid var(--ink)', background: 'var(--paper)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
             <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 26 }}>
-              hear! hear! <span style={{ fontStyle: 'italic', fontSize: 18, color: '#6a6a62' }}>· the press room</span>
+              hear! hear! <span style={{ fontStyle: 'italic', fontSize: 18, color: 'var(--ink-mute)' }}>· the press room</span>
             </div>
             <button type="button" onClick={onClose} style={{
               background: 'transparent',
-              border: '1px solid #1a1a1a',
+              border: '1px solid var(--ink)',
               padding: '6px 14px',
               fontFamily: "'IM Fell DW Pica SC', serif",
               fontSize: 10,
               letterSpacing: '0.28em',
               textTransform: 'uppercase',
               cursor: 'pointer',
-              color: '#1a1a1a',
+              color: 'var(--ink)',
             }}>
               close ✕
             </button>
           </div>
-          <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: `repeat(${STEP_LABELS.length}, 1fr)`, gap: 0, borderTop: '1px solid #1a1a1a' }}>
+          <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: `repeat(${STEP_LABELS.length}, 1fr)`, gap: 0, borderTop: '1px solid var(--ink)' }}>
             {STEP_LABELS.map((label, i) => {
               const active = step === i
               const passed = step > i
@@ -646,11 +646,11 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                   type="button"
                   onClick={() => goToStep(i)}
                   style={{
-                    background: active ? '#1a1a1a' : 'transparent',
-                    color: active ? '#fafaf7' : (passed ? '#1a1a1a' : '#6a6a62'),
+                    background: active ? 'var(--ink)' : 'transparent',
+                    color: active ? 'var(--paper)' : (passed ? 'var(--ink)' : 'var(--ink-mute)'),
                     border: 0,
-                    borderLeft: i === 0 ? 0 : '1px solid #1a1a1a',
-                    borderBottom: '1px solid #1a1a1a',
+                    borderLeft: i === 0 ? 0 : '1px solid var(--ink)',
+                    borderBottom: '1px solid var(--ink)',
                     padding: '10px 8px',
                     cursor: 'pointer',
                     fontFamily: "'IM Fell DW Pica SC', serif",
@@ -676,7 +676,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
           <StepPanel idx={0} title="Chunking" subtitle="How long articles enter the archive" stepRef={stepRefs[0]}>
             <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: 32, alignItems: 'center' }}>
               <div>
-                <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: '#3a3a36', maxWidth: 520 }}>
+                <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: 'var(--ink-soft)', maxWidth: 520 }}>
                   Before anyone reads, the press decides how each article is filed. Whole articles preserve argument; section-chunks let the press cite a single paragraph. Chunking requires the LLM sub-editor.
                 </p>
                 <ModalRoleSelector<FrontendChunkingMode>
@@ -724,7 +724,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                 <ModalNameCard persona={effectiveRetrievalModel} detail={compositor.years} desc={compositor.desc} />
               </div>
               <div>
-                <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: '#3a3a36' }}>
+                <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: 'var(--ink-soft)' }}>
                   The compositor stands at the type-case and pulls candidates from the archive. Each hand has a different feel for what counts as a match.
                 </p>
                 <ModalRoleSelector<RetrievalModel>
@@ -744,7 +744,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
           <StepPanel idx={2} title="Across the bench" subtitle="The hand-off — a relevance cut, or a fixed count?" stepRef={stepRefs[2]}>
             <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: 32, alignItems: 'center' }}>
               <div>
-                <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: '#3a3a36', maxWidth: 520 }}>
+                <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: 'var(--ink-soft)', maxWidth: 520 }}>
                   As articles travel from compositor to sub-editor, you decide how the cut is made. <em>Auto</em> sets a relevance threshold (0–1), then caps how many articles can cross. <em>Manual</em> takes a fixed count of the strongest articles (1–{benchArticleLimitMax}) regardless of score.
                 </p>
                 <ModalRoleSelector<RerankSelectionMode>
@@ -807,7 +807,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
           <StepPanel idx={3} title="The Sub-Editor" subtitle="Who marks each article for stance" stepRef={stepRefs[3]}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, alignItems: 'center' }}>
               <div>
-                <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: '#3a3a36' }}>
+                <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: 'var(--ink-soft)' }}>
                   At the lectern, the sub-editor decides where each article lands relative to your claim — in agreement, qualified, or against.
                 </p>
                 <ModalRoleSelector<StanceMethod>
@@ -842,7 +842,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
           <StepPanel idx={4} title="Re-ranking" subtitle="The editor's weighting — set the priorities for the final order" stepRef={stepRefs[4]}>
             <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: 32, alignItems: 'start' }}>
               <div>
-                <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: '#3a3a36', maxWidth: 520 }}>
+                <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: 'var(--ink-soft)', maxWidth: 520 }}>
                   After every article is marked, the editor at the back desk weights three qualities to set the final running order. Drag each weight to taste.
                 </p>
                 <WeightSliders weights={[
@@ -878,9 +878,9 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
           </StepPanel>
 
           {/* Final summary + apply */}
-          <div style={{ padding: '32px 40px 48px', borderTop: '1px solid #1a1a1a' }}>
+          <div style={{ padding: '32px 40px 48px', borderTop: '1px solid var(--ink)' }}>
             <div className="tracker" style={{ color: 'var(--accent)', fontSize: 10 }}>The complete instrument</div>
-            <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 19, marginTop: 6, marginBottom: 12, lineHeight: 1.55, color: '#1a1a1a', maxWidth: 760 }}>
+            <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 19, marginTop: 6, marginBottom: 12, lineHeight: 1.55, color: 'var(--ink)', maxWidth: 760 }}>
               {(() => {
                 const unitNoun = useChunking ? 'top passages' : 'on-topic articles'
                 const handoffPhrase = rerankSelectionMode === 'automatic'
@@ -923,9 +923,9 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                 onClick={onApply}
                 disabled={isApplying}
                 style={{
-                  background: settingsDirty ? '#7a1d1d' : '#1a1a1a',
-                  color: '#fafaf7',
-                  border: `1px solid ${settingsDirty ? '#7a1d1d' : '#1a1a1a'}`,
+                  background: settingsDirty ? 'var(--accent)' : 'var(--ink)',
+                  color: 'var(--paper)',
+                  border: `1px solid ${settingsDirty ? 'var(--accent)' : 'var(--ink)'}`,
                   padding: '12px 26px',
                   fontFamily: "'IM Fell DW Pica SC', serif",
                   fontSize: 12,

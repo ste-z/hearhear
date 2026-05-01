@@ -137,8 +137,8 @@ function PersonaTooltip({ info, anchor }: { info: PersonaInfo; anchor: DOMRect }
     borderWidth: 6,
     borderStyle: 'solid',
     borderColor: caretIsBottom
-      ? '#1a1a1a transparent transparent transparent'
-      : 'transparent transparent #1a1a1a transparent',
+      ? 'var(--ink) transparent transparent transparent'
+      : 'transparent transparent var(--ink) transparent',
   }
 
   return createPortal(
@@ -150,10 +150,10 @@ function PersonaTooltip({ info, anchor }: { info: PersonaInfo; anchor: DOMRect }
         left: pos?.left ?? -9999,
         top: pos?.top ?? -9999,
         width: TOOLTIP_WIDTH,
-        background: '#1a1a1a',
-        color: '#fafaf7',
+        background: 'var(--ink)',
+        color: 'var(--paper)',
         padding: '12px 14px',
-        boxShadow: '0 12px 28px rgba(26, 26, 26, 0.34)',
+        boxShadow: '0 12px 28px rgba(var(--ink-rgb), 0.34)',
         fontFamily: "'IM Fell DW Pica SC', serif",
         fontSize: 10,
         letterSpacing: '0.2em',
@@ -174,10 +174,10 @@ function PersonaTooltip({ info, anchor }: { info: PersonaInfo; anchor: DOMRect }
             width: 72,
             height: 72,
             objectFit: 'contain',
-            background: '#fafaf7',
+            background: 'var(--paper)',
             borderWidth: 1,
             borderStyle: 'solid',
-            borderColor: 'rgba(250,250,247,0.2)',
+            borderColor: 'rgba(var(--paper-rgb),0.2)',
             flexShrink: 0,
             padding: 2,
             boxSizing: 'border-box',
@@ -185,20 +185,20 @@ function PersonaTooltip({ info, anchor }: { info: PersonaInfo; anchor: DOMRect }
         />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontWeight: 700, letterSpacing: '0.24em', fontSize: 10 }}>{info.name}</div>
-          <div style={{ marginTop: 3, color: 'rgba(250,250,247,0.74)', fontSize: 9 }}>{info.method}</div>
+          <div style={{ marginTop: 3, color: 'rgba(var(--paper-rgb),0.74)', fontSize: 9 }}>{info.method}</div>
         </div>
       </div>
       <div
         style={{
           marginTop: 10,
           paddingTop: 10,
-          borderTop: '1px solid rgba(250,250,247,0.18)',
+          borderTop: '1px solid rgba(var(--paper-rgb),0.18)',
           fontFamily: "'IM Fell English', serif",
           fontStyle: 'italic',
           fontSize: 13,
           letterSpacing: 'normal',
           textTransform: 'none',
-          color: 'rgba(250,250,247,0.92)',
+          color: 'rgba(var(--paper-rgb),0.92)',
           lineHeight: 1.45,
         }}
       >

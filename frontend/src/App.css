@@ -3,7 +3,8 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Special+Elite&family=Old+Standard+TT:ital,wght@0,400;0,700;1,400&family=IM+Fell+English:ital@0;1&family=IM+Fell+DW+Pica+SC&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap');
 
-:root {
+:root,
+:root[data-theme='light'] {
   --paper: #fafaf7;
   --paper-warm: #ece4d0;
   --paper-edge: #d9cfb6;
@@ -17,6 +18,87 @@
   --accent: #7a1d1d;
   --accent-deep: #4a0c0c;
   --accent-light: #a23036;
+  --gold: #c58f22;
+
+  /* RGB triplets — used by rgba(var(--ink-rgb), X) inline styles so
+     shadow / wash alpha tints follow the active theme. */
+  --ink-rgb: 26, 26, 26;
+  --paper-rgb: 250, 250, 247;
+  --accent-rgb: 122, 29, 29;
+
+  /* Tonal helpers — derived from --ink in light mode, but flipped in dark
+     mode so shadows/halos read correctly on a dark page. */
+  --shadow-faint: rgba(26, 26, 26, 0.04);
+  --shadow-soft: rgba(26, 26, 26, 0.06);
+  --shadow-mid: rgba(26, 26, 26, 0.08);
+  --shadow-strong: rgba(26, 26, 26, 0.16);
+  --shadow-heavy: rgba(26, 26, 26, 0.24);
+  --shadow-block: rgba(26, 26, 26, 0.4);
+  --shadow-modal: rgba(26, 26, 26, 0.6);
+  --paper-tint: rgba(255, 255, 255, 0.4);
+  --paper-tint-soft: rgba(255, 255, 255, 0.06);
+  --paper-card-tint: rgba(255, 255, 255, 0.45);
+  --rule-dotted: rgba(26, 26, 26, 0.3);
+  --accent-wash: rgba(122, 29, 29, 0.06);
+  --accent-wash-strong: rgba(122, 29, 29, 0.10);
+  --paper-overlay: rgba(250, 250, 247, 0.34);
+  --runtime-veil-top: rgba(26, 26, 26, 0.42);
+  --runtime-veil-bot: rgba(26, 26, 26, 0.58);
+
+  /* Sticky / neutral / muted color slots used by visual primitives
+     (highlighter, neutral-stance bar). Flipped for dark mode. */
+  --sticky: #fdf6c9;
+  --sticky-ink: var(--ink);
+  --neutral: #cdcabd;
+  --neutral-ink: var(--ink);
+}
+
+:root[data-theme='dark'] {
+  /* "Warm library at night" — coffee-stained paper, cream ink, amber-rust
+     accent. Designed to keep the same visual hierarchy as light mode while
+     reading comfortably on a dark page. */
+  --paper: #15130f;
+  --paper-warm: #1f1c16;
+  --paper-edge: #2a2620;
+  --paper-deep: #3d3729;
+  --ink: #ede4d2;
+  --ink-soft: #c8bea8;
+  --ink-mute: #8e8676;
+  --ink-faint: #635c4f;
+  --rule: #ede4d2;
+  --rule-soft: rgba(237, 228, 210, 0.22);
+  --accent: #d97354;
+  --accent-deep: #b8553a;
+  --accent-light: #ea8b6e;
+  --gold: #d9a838;
+
+  --ink-rgb: 237, 228, 210;
+  --paper-rgb: 21, 19, 15;
+  --accent-rgb: 217, 115, 84;
+
+  --shadow-faint: rgba(0, 0, 0, 0.32);
+  --shadow-soft: rgba(0, 0, 0, 0.42);
+  --shadow-mid: rgba(0, 0, 0, 0.5);
+  --shadow-strong: rgba(0, 0, 0, 0.62);
+  --shadow-heavy: rgba(0, 0, 0, 0.72);
+  --shadow-block: rgba(0, 0, 0, 0.7);
+  --shadow-modal: rgba(0, 0, 0, 0.78);
+  --paper-tint: rgba(237, 228, 210, 0.05);
+  --paper-tint-soft: rgba(237, 228, 210, 0.04);
+  --paper-card-tint: rgba(237, 228, 210, 0.06);
+  --rule-dotted: rgba(237, 228, 210, 0.32);
+  --accent-wash: rgba(217, 115, 84, 0.10);
+  --accent-wash-strong: rgba(217, 115, 84, 0.16);
+  --paper-overlay: rgba(21, 19, 15, 0.5);
+  --runtime-veil-top: rgba(0, 0, 0, 0.5);
+  --runtime-veil-bot: rgba(0, 0, 0, 0.66);
+
+  --sticky: #54472a;
+  --sticky-ink: #f4e9c4;
+  --neutral: #4a463c;
+  --neutral-ink: var(--ink);
+
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -63,7 +145,7 @@ input, textarea { font-family: inherit; color: inherit; }
   0%, 70% {
     background: var(--paper);
     border-color: var(--ink);
-    box-shadow: 2px 4px 0 rgba(26, 26, 26, 0.06);
+    box-shadow: 2px 4px 0 var(--shadow-soft);
   }
   100% {
     background: transparent;
@@ -216,7 +298,7 @@ input, textarea { font-family: inherit; color: inherit; }
   letter-spacing: 0.26em;
   color: var(--ink);
   margin-bottom: 1px;
-  text-shadow: 0 1px 0 rgba(250,250,247,0.9);
+  text-shadow: 0 1px 0 var(--paper);
 }
 
 .landing-key-row {
@@ -296,7 +378,7 @@ input[type="range"].tw-range {
   -webkit-appearance: none;
   width: 100%;
   height: 4px;
-  background: rgba(26, 26, 26, 0.2);
+  background: var(--rule-soft);
   outline: none;
   margin: 6px 0;
 }
@@ -321,8 +403,15 @@ input[type="range"].tw-range::-moz-range-thumb {
 /* ---------- Backgrounds ---------- */
 .paper-bg {
   background:
-    repeating-linear-gradient(0deg, rgba(26,26,26,0.022) 0 1px, transparent 1px 3px),
-    radial-gradient(ellipse at 20% 10%, rgba(255,255,255,0.4), transparent 50%),
+    repeating-linear-gradient(0deg, var(--shadow-faint) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at 20% 10%, var(--paper-tint), transparent 50%),
+    var(--paper);
+}
+
+[data-theme='dark'] .paper-bg {
+  background:
+    repeating-linear-gradient(0deg, rgba(237, 228, 210, 0.025) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at 20% 10%, rgba(237, 228, 210, 0.04), transparent 50%),
     var(--paper);
 }
 
@@ -333,12 +422,19 @@ input[type="range"].tw-range::-moz-range-thumb {
     radial-gradient(ellipse at 80% 90%, rgba(140,120,80,0.22), transparent 60%);
 }
 
+[data-theme='dark'] .parchment-bg {
+  background: var(--paper-warm);
+  background-image:
+    radial-gradient(ellipse at 25% 18%, rgba(217, 173, 122, 0.10), transparent 55%),
+    radial-gradient(ellipse at 80% 90%, rgba(0, 0, 0, 0.32), transparent 60%);
+}
+
 /* ---------- Modal ---------- */
 .modal-shell {
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: rgba(26, 26, 26, 0.6);
+  background: var(--shadow-modal);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -350,7 +446,7 @@ input[type="range"].tw-range::-moz-range-thumb {
   inset: 32px;
   background: var(--paper);
   border: 1px solid var(--ink);
-  box-shadow: 0 24px 60px rgba(26, 26, 26, 0.4);
+  box-shadow: 0 24px 60px var(--shadow-block);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -360,8 +456,8 @@ input[type="range"].tw-range::-moz-range-thumb {
 .svd-radar-shell { position: relative; }
 .svd-radar-axis { stroke: var(--ink); stroke-opacity: 0.22; stroke-width: 0.6; }
 .svd-radar-ring { fill: none; stroke: var(--ink); stroke-opacity: 0.18; stroke-width: 0.5; stroke-dasharray: 2 3; }
-.svd-radar-area.article { fill: rgba(26, 26, 26, 0.20); stroke: var(--ink); stroke-width: 1.4; }
-.svd-radar-area.query { fill: rgba(122, 29, 29, 0.10); stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 3 2; }
+.svd-radar-area.article { fill: var(--rule-soft); stroke: var(--ink); stroke-width: 1.4; }
+.svd-radar-area.query { fill: var(--accent-wash-strong); stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 3 2; }
 .svd-radar-point.article.positive { fill: var(--ink); }
 .svd-radar-point.article.negative { fill: none; stroke: var(--accent); stroke-width: 1.2; }
 .svd-radar-point.query.positive { fill: var(--paper); stroke: var(--accent); stroke-width: 1.2; }
@@ -518,7 +614,7 @@ input[type="range"].tw-range::-moz-range-thumb {
 .about-team-card {
   border: 1px solid var(--rule-soft);
   padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--paper-tint);
 }
 .about-team-card h3,
 .about-team-card h4 {
@@ -566,7 +662,7 @@ input[type="range"].tw-range::-moz-range-thumb {
   font-size: 12px;
   line-height: 1;
   text-decoration: none;
-  box-shadow: 1px 2px 0 rgba(26, 26, 26, 0.06);
+  box-shadow: 1px 2px 0 var(--shadow-soft);
 }
 .about-team-linkedin {
   font-family: Georgia, serif;
@@ -610,8 +706,8 @@ input[type="range"].tw-range::-moz-range-thumb {
   position: fixed;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(26, 26, 26, 0.42), rgba(26, 26, 26, 0.58)),
-    rgba(250, 250, 247, 0.34);
+    linear-gradient(180deg, var(--runtime-veil-top), var(--runtime-veil-bot)),
+    var(--paper-overlay);
   backdrop-filter: blur(8px) saturate(1.05);
   z-index: 200;
   display: flex;
@@ -631,7 +727,7 @@ input[type="range"].tw-range::-moz-range-thumb {
   display: grid;
   justify-items: center;
   gap: 12px;
-  box-shadow: 0 22px 60px rgba(26, 26, 26, 0.26);
+  box-shadow: 0 22px 60px var(--shadow-heavy);
 }
 .runtime-overlay-spinner {
   display: inline-flex;
@@ -647,7 +743,7 @@ input[type="range"].tw-range::-moz-range-thumb {
   animation: runtime-loading-bounce 0.72s ease-in-out infinite;
 }
 .runtime-overlay-spinner span:nth-child(2) {
-  background: #c58f22;
+  background: var(--gold);
   animation-delay: 0.14s;
 }
 .runtime-overlay-spinner span:nth-child(3) {
@@ -672,7 +768,7 @@ input[type="range"].tw-range::-moz-range-thumb {
   margin: 12px 48px 0;
   padding: 10px 14px;
   border: 1px solid var(--accent);
-  background: rgba(122, 29, 29, 0.06);
+  background: var(--accent-wash);
   font-family: 'IM Fell English', serif;
   font-style: italic;
   color: var(--accent);
@@ -691,4 +787,62 @@ input[type="range"].tw-range::-moz-range-thumb {
   letter-spacing: 0.24em;
   text-transform: uppercase;
   cursor: pointer;
+}
+
+/* ---------- Theme toggle (sun / moon) ----------
+   A small icon button that lives in the top rail. Renders a sun glyph in
+   light mode and a crescent moon in dark mode; the SVG inside the button
+   is swapped by the React component. */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-left: 4px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--rule-soft);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+  font-family: inherit;
+  letter-spacing: 0;
+}
+.theme-toggle:hover {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.theme-toggle:focus-visible {
+  outline: 1px dashed var(--accent);
+  outline-offset: 2px;
+}
+.theme-toggle svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+/* In dark mode, paint the runtime-overlay backdrop a touch darker so the
+   blur reads against the warm dark background rather than washing out. */
+[data-theme='dark'] .runtime-overlay {
+  backdrop-filter: blur(10px) saturate(0.85);
+}
+[data-theme='dark'] .runtime-overlay-card {
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.7);
+}
+
+/* In dark mode, lift the modal tray and the runtime card up out of the
+   page background by switching to the warm paper tone — otherwise they
+   blend with the page and only the cream border separates them. */
+[data-theme='dark'] .modal-tray,
+[data-theme='dark'] .runtime-overlay-card {
+  background: var(--paper-warm);
+}
+
+/* And give the press-room sticky banner a matching warm tone so the rail
+   doesn't appear to float on a different sheet of paper than the tray. */
+[data-theme='dark'] .modal-tray > div:first-child {
+  background: var(--paper-warm) !important;
 }
