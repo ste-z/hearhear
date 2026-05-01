@@ -132,9 +132,9 @@ const searchModeLabels: Record<SearchMode, string> = {
 }
 
 const retrievalModeLabels: Record<RetrievalMode, string> = {
-  lexical: 'Lexical',
-  semantic: 'Semantic',
-  enhanced: 'Enhanced Semantic',
+  lexical: 'TF-IDF',
+  semantic: 'SVD',
+  enhanced: 'MiniLM',
 }
 
 const agreementModeLabels: Record<AgreementMode, string> = {
@@ -1413,6 +1413,10 @@ function AboutMethodFlow({ mode, onModeChange }: AboutMethodFlowProps): JSX.Elem
       </p>
 
       <div className="about-flow-shell">
+        <div className="about-flow-drag-hint" aria-hidden="true">
+          <span className="about-flow-drag-icon">DRAG</span>
+          <span>Drag to move the chart</span>
+        </div>
         <ReactFlow
           nodes={nodes}
           edges={edges}
