@@ -943,13 +943,29 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
   useEffect(() => () => {
     if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
   }, [])
+  const handleStanceEnter = useCallback((): void => {
+    const trimmedTopic = topic.trim()
+    const trimmedOpinion = opinion.trim()
+    if (!trimmedTopic) return
+    if (trimmedOpinion && !loading) {
+      onSubmitStance()
+      return
+    }
+    if (activeField === 'topic') {
+      setActiveField('claim')
+    }
+  }, [activeField, loading, onSubmitStance, opinion, topic])
   const handleInputKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>): void => {
     const key = event.key
-    if (key === 'Enter') flashKey('enter')
+    if (key === 'Enter') {
+      event.preventDefault()
+      flashKey('enter')
+      handleStanceEnter()
+    }
     else if (key === 'Backspace') flashKey('backspace')
     else if (key === ' ') flashKey('space')
     else if (key.length === 1) flashKey(key.toLowerCase())
-  }, [flashKey])
+  }, [flashKey, handleStanceEnter])
 
   const topicCycle = useTypewriterCycle(INTRO_TOPICS, phase === 'topic')
   const finalTopic = INTRO_TOPICS[INTRO_TOPICS.length - 1]
@@ -1007,8 +1023,6 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
   const stanceCanSubmit = topic.trim() !== '' && opinion.trim() !== '' && !loading
   const essayCanSubmit = essayText.trim().length > 0 && !loading && !isImportingPdf
   const essayPasteWordCount = essayText.trim().split(/\s+/).filter(Boolean).length
-
-  const PAPER_HEIGHT_STANCE = 220
 
   return (
     <div className="stage-shell" style={{ position: 'relative' }}>
@@ -1159,256 +1173,267 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
             }}>essay</button>
           </div>
 
-          {/* Paper sheet — sits BEHIND the platen rod (z-index 1), so the platen visually feeds the paper through */}
           <div style={{
-            marginTop: 8,
-            width: COMPOSE_SURFACE_WIDTH,
-            maxWidth: '100%',
-            height: voiceMode === 'essay' ? 380 : PAPER_HEIGHT_STANCE,
-            background: '#fafaf7',
-            border: '1px solid rgba(26,26,26,0.6)',
-            borderBottom: voiceMode === 'stance' ? '1px solid rgba(26,26,26,0.18)' : 'none',
-            boxShadow: '0 -2px 0 rgba(26,26,26,0.04), 0 -8px 24px rgba(26,26,26,0.04)',
-            transition: 'height 0.5s ease',
-            padding: '36px 36px 0',
+            flex: 1,
+            minHeight: 0,
+            width: '100%',
             display: 'flex',
             flexDirection: 'column',
-            gap: 22,
-            overflow: 'hidden',
-            position: 'relative',
-            zIndex: 1,
-            flexShrink: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            padding: '8px 0',
           }}>
-        <div style={{
-          position: 'absolute',
-          top: 8,
-          left: 14,
-          right: 14,
-          fontFamily: "'IM Fell DW Pica SC', serif",
-          fontSize: 9,
-          letterSpacing: '0.32em',
-          textTransform: 'uppercase',
-          color: '#9a9a92',
-          display: 'flex',
-          justifyContent: 'space-between',
-        }}>
-          <span>hear! hear! / draft</span>
-          <span>№ 001</span>
-        </div>
-
-        {voiceMode === 'stance' && (
-          <>
-            <IntroLine
-              label="Regarding"
-              value={topic}
-              showCaret={isVoice && activeField === 'topic'}
-              editable
-              active={activeField === 'topic'}
-              onChange={onTopicChange}
-              onFocus={() => setActiveField('topic')}
-              onKeyDown={handleInputKeyDown}
-              placeholder="a subject…"
-              inputRef={(el) => { topicInputRef.current = el }}
-            />
-            <IntroLine
-              label="I believe"
-              value={opinion}
-              showCaret={isVoice && activeField === 'claim'}
-              editable
-              active={activeField === 'claim'}
-              onChange={onOpinionChange}
-              onFocus={() => setActiveField('claim')}
-              onKeyDown={handleInputKeyDown}
-              placeholder="an opinion…"
-              inputRef={(el) => { opinionInputRef.current = el }}
-            />
-          </>
-        )}
-
-        {voiceMode === 'essay' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 22, fontStyle: 'italic', color: '#3a3a36' }}>An essay,</span>
-              <div style={{ display: 'flex', fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase' }}>
-                <button type="button" onClick={() => setEssaySource('paste')} style={{
-                  padding: '4px 12px',
-                  border: '1px solid #1a1a1a',
-                  background: essaySource === 'paste' ? '#1a1a1a' : 'transparent',
-                  color: essaySource === 'paste' ? '#fafaf7' : '#1a1a1a',
-                  fontFamily: 'inherit',
-                  fontSize: 'inherit',
-                  letterSpacing: 'inherit',
-                  textTransform: 'inherit',
-                  cursor: 'pointer',
-                }}>type / paste</button>
-                <button type="button" onClick={() => setEssaySource('envelope')} style={{
-                  padding: '4px 12px',
-                  border: '1px solid #1a1a1a',
-                  borderLeft: 0,
-                  background: essaySource === 'envelope' ? '#1a1a1a' : 'transparent',
-                  color: essaySource === 'envelope' ? '#fafaf7' : '#1a1a1a',
-                  fontFamily: 'inherit',
-                  fontSize: 'inherit',
-                  letterSpacing: 'inherit',
-                  textTransform: 'inherit',
-                  cursor: 'pointer',
-                }}>pdf envelope</button>
+            {/* Paper sheet — the stance slip matches the intro animation slip. */}
+            <div style={{
+              marginTop: 0,
+              width: COMPOSE_SURFACE_WIDTH,
+              maxWidth: '100%',
+              height: voiceMode === 'essay' ? 380 : 'auto',
+              background: '#fafaf7',
+              border: voiceMode === 'essay' ? '1px solid rgba(26,26,26,0.6)' : '1px solid #1a1a1a',
+              borderBottom: voiceMode === 'essay' ? 'none' : '1px solid #1a1a1a',
+              boxShadow: voiceMode === 'essay'
+                ? '0 -2px 0 rgba(26,26,26,0.04), 0 -8px 24px rgba(26,26,26,0.04)'
+                : '0 8px 20px rgba(26,26,26,0.08)',
+              transition: 'height 0.5s ease',
+              padding: voiceMode === 'essay' ? '36px 36px 0' : '24px 30px 26px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: voiceMode === 'essay' ? 22 : 18,
+              overflow: voiceMode === 'essay' ? 'hidden' : 'visible',
+              position: 'relative',
+              zIndex: 1,
+              flexShrink: 0,
+            }}>
+              <div style={{
+                position: 'absolute',
+                top: 8,
+                left: 14,
+                right: 14,
+                fontFamily: "'IM Fell DW Pica SC', serif",
+                fontSize: 9,
+                letterSpacing: '0.32em',
+                textTransform: 'uppercase',
+                color: '#9a9a92',
+                display: 'flex',
+                justifyContent: 'space-between',
+              }}>
+                <span>hear! hear! / draft</span>
+                <span>№ 001</span>
               </div>
+
+              {voiceMode === 'stance' && (
+                <>
+                  <IntroLine
+                    label="Regarding"
+                    value={topic}
+                    showCaret={isVoice && activeField === 'topic'}
+                    editable
+                    active={activeField === 'topic'}
+                    onChange={onTopicChange}
+                    onFocus={() => setActiveField('topic')}
+                    onKeyDown={handleInputKeyDown}
+                    placeholder="a subject…"
+                    inputRef={(el) => { topicInputRef.current = el }}
+                  />
+                  <IntroLine
+                    label="I believe"
+                    value={opinion}
+                    showCaret={isVoice && activeField === 'claim'}
+                    editable
+                    active={activeField === 'claim'}
+                    onChange={onOpinionChange}
+                    onFocus={() => setActiveField('claim')}
+                    onKeyDown={handleInputKeyDown}
+                    placeholder="an opinion…"
+                    inputRef={(el) => { opinionInputRef.current = el }}
+                  />
+                </>
+              )}
+
+              {voiceMode === 'essay' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 22, fontStyle: 'italic', color: '#3a3a36' }}>An essay,</span>
+                    <div style={{ display: 'flex', fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase' }}>
+                      <button type="button" onClick={() => setEssaySource('paste')} style={{
+                        padding: '4px 12px',
+                        border: '1px solid #1a1a1a',
+                        background: essaySource === 'paste' ? '#1a1a1a' : 'transparent',
+                        color: essaySource === 'paste' ? '#fafaf7' : '#1a1a1a',
+                        fontFamily: 'inherit',
+                        fontSize: 'inherit',
+                        letterSpacing: 'inherit',
+                        textTransform: 'inherit',
+                        cursor: 'pointer',
+                      }}>type / paste</button>
+                      <button type="button" onClick={() => setEssaySource('envelope')} style={{
+                        padding: '4px 12px',
+                        border: '1px solid #1a1a1a',
+                        borderLeft: 0,
+                        background: essaySource === 'envelope' ? '#1a1a1a' : 'transparent',
+                        color: essaySource === 'envelope' ? '#fafaf7' : '#1a1a1a',
+                        fontFamily: 'inherit',
+                        fontSize: 'inherit',
+                        letterSpacing: 'inherit',
+                        textTransform: 'inherit',
+                        cursor: 'pointer',
+                      }}>pdf envelope</button>
+                    </div>
+                  </div>
+
+                  {essaySource === 'paste' && (
+                    <div style={{ position: 'relative', border: '1px solid #cfcfc7', background: '#fafaf7' }}>
+                      <div aria-hidden style={{
+                        position: 'absolute',
+                        inset: 0,
+                        backgroundImage: 'repeating-linear-gradient(0deg, transparent 0, transparent 25px, rgba(26,26,26,0.08) 26px)',
+                        pointerEvents: 'none',
+                      }} />
+                      <textarea
+                        value={essayText}
+                        onChange={(event) => onEssayTextChange(event.target.value)}
+                        placeholder="The case for sea protection has been overstated as sentiment and underargued as policy…"
+                        style={{
+                          position: 'relative',
+                          width: '100%',
+                          height: 240,
+                          padding: '6px 14px',
+                          background: 'transparent',
+                          border: 0,
+                          outline: 'none',
+                          resize: 'none',
+                          fontFamily: "'Special Elite', monospace",
+                          fontSize: 14,
+                          lineHeight: '26px',
+                          color: '#1a1a1a',
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {essaySource === 'envelope' && (
+                    <WaxEnvelope
+                      onChooseFile={() => fileInputRef.current?.click()}
+                      isImporting={isImportingPdf}
+                      importedPdfName={importedPdfName}
+                    />
+                  )}
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="application/pdf"
+                    style={{ display: 'none' }}
+                    onChange={onImportPdf}
+                  />
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Special Elite', monospace", fontSize: 10, color: '#6a6a62' }}>
+                    <span>{essaySource === 'paste' ? `${essayPasteWordCount} words` : ' '}</span>
+                    <span>{effectiveStanceMethod === 'nli' ? 'thesis pick · stage 1' : 'sub-editor reads the whole essay'}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {essaySource === 'paste' && (
-              <div style={{ position: 'relative', border: '1px solid #cfcfc7', background: '#fafaf7' }}>
-                <div aria-hidden style={{
-                  position: 'absolute',
-                  inset: 0,
-                  backgroundImage: 'repeating-linear-gradient(0deg, transparent 0, transparent 25px, rgba(26,26,26,0.08) 26px)',
-                  pointerEvents: 'none',
-                }} />
-                <textarea
-                  value={essayText}
-                  onChange={(event) => onEssayTextChange(event.target.value)}
-                  placeholder="The case for sea protection has been overstated as sentiment and underargued as policy…"
-                  style={{
-                    position: 'relative',
-                    width: '100%',
-                    height: 240,
-                    padding: '6px 14px',
-                    background: 'transparent',
-                    border: 0,
-                    outline: 'none',
-                    resize: 'none',
-                    fontFamily: "'Special Elite', monospace",
-                    fontSize: 14,
-                    lineHeight: '26px',
-                    color: '#1a1a1a',
+            {/* Typewriter — held close to the slip without covering its contents. */}
+            {voiceMode === 'stance' && (
+              <div className="landing-typewriter-slot">
+                <RisingTypewriter
+                  disabled={loading}
+                  flashedKey={flashedKey}
+                  onType={(char) => {
+                    flashKey(char === ' ' ? 'space' : char)
+                    if (activeField === 'topic') {
+                      onTopicChange((prev) => prev + char)
+                    } else {
+                      onOpinionChange((prev) => prev + char)
+                    }
                   }}
+                  onBackspace={() => {
+                    if (activeField === 'topic') {
+                      onTopicChange((prev) => prev.slice(0, -1))
+                    } else {
+                      onOpinionChange((prev) => prev.slice(0, -1))
+                    }
+                  }}
+                  onEnter={handleStanceEnter}
                 />
               </div>
             )}
 
-            {essaySource === 'envelope' && (
-              <WaxEnvelope
-                onChooseFile={() => fileInputRef.current?.click()}
-                isImporting={isImportingPdf}
-                importedPdfName={importedPdfName}
-              />
-            )}
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/pdf"
-              style={{ display: 'none' }}
-              onChange={onImportPdf}
-            />
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Special Elite', monospace", fontSize: 10, color: '#6a6a62' }}>
-              <span>{essaySource === 'paste' ? `${essayPasteWordCount} words` : ' '}</span>
-              <span>{effectiveStanceMethod === 'nli' ? 'thesis pick · stage 1' : 'sub-editor reads the whole essay'}</span>
-            </div>
-          </div>
-        )}
-      </div>
-
-          {/* Typewriter — held close to the slip without covering its contents. */}
-          {voiceMode === 'stance' && (
-            <div className="landing-typewriter-slot">
-              <RisingTypewriter
-                disabled={loading}
-                flashedKey={flashedKey}
-                onType={(char) => {
-                  flashKey(char === ' ' ? 'space' : char)
-                  if (activeField === 'topic') {
-                    onTopicChange((prev) => prev + char)
-                  } else {
-                    onOpinionChange((prev) => prev + char)
-                  }
-                }}
-                onBackspace={() => {
-                  if (activeField === 'topic') {
-                    onTopicChange((prev) => prev.slice(0, -1))
-                  } else {
-                    onOpinionChange((prev) => prev.slice(0, -1))
-                  }
-                }}
-                onEnter={() => {
-                  const trimmedTopic = topic.trim()
-                  const trimmedOpinion = opinion.trim()
-                  if (activeField === 'topic') {
-                    if (trimmedTopic) {
-                      setActiveField('claim')
-                    }
-                    return
-                  }
-                  if (trimmedTopic && trimmedOpinion && !loading) {
-                    onSubmitStance()
-                  }
-                }}
+            {/* Filters row */}
+            <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+              <FilterRow
+                yearStart={yearStart}
+                yearEnd={yearEnd}
+                minYear={minYear}
+                maxYear={maxYear}
+                onYearStartChange={onYearStartChange}
+                onYearEndChange={onYearEndChange}
+                lengthFilterUnit={lengthFilterUnit}
+                onLengthFilterUnitChange={onLengthFilterUnitChange}
+                lengthRangeStart={lengthRangeStart}
+                lengthRangeEnd={lengthRangeEnd}
+                lengthRangeMin={lengthRangeMin}
+                lengthRangeMax={lengthRangeMax}
+                onLengthRangeStartChange={onLengthRangeStartChange}
+                onLengthRangeEndChange={onLengthRangeEndChange}
+                wordsToAvoid={wordsToAvoid}
+                onWordsToAvoidChange={onWordsToAvoidChange}
+                isLexicalSearchMode={isLexicalSearchMode}
               />
             </div>
-          )}
 
-          {/* Filters row */}
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8, flexShrink: 0 }}>
-            <FilterRow
-              yearStart={yearStart}
-              yearEnd={yearEnd}
-              minYear={minYear}
-              maxYear={maxYear}
-              onYearStartChange={onYearStartChange}
-              onYearEndChange={onYearEndChange}
-              lengthFilterUnit={lengthFilterUnit}
-              onLengthFilterUnitChange={onLengthFilterUnitChange}
-              lengthRangeStart={lengthRangeStart}
-              lengthRangeEnd={lengthRangeEnd}
-              lengthRangeMin={lengthRangeMin}
-              lengthRangeMax={lengthRangeMax}
-              onLengthRangeStartChange={onLengthRangeStartChange}
-              onLengthRangeEndChange={onLengthRangeEndChange}
-              wordsToAvoid={wordsToAvoid}
-              onWordsToAvoidChange={onWordsToAvoidChange}
-              isLexicalSearchMode={isLexicalSearchMode}
-            />
+            {/* Send to press button */}
+            <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={voiceMode === 'stance' ? onSubmitStance : onSubmitEssayDraft}
+                disabled={voiceMode === 'stance' ? !stanceCanSubmit : !essayCanSubmit}
+                style={{
+                  background: '#1a1a1a',
+                  color: '#fafaf7',
+                  border: '1px solid #1a1a1a',
+                  padding: '12px 28px',
+                  fontFamily: "'IM Fell DW Pica SC', serif",
+                  fontSize: 12,
+                  letterSpacing: '0.32em',
+                  textTransform: 'uppercase',
+                  cursor: (voiceMode === 'stance' ? stanceCanSubmit : essayCanSubmit) ? 'pointer' : 'not-allowed',
+                  opacity: (voiceMode === 'stance' ? stanceCanSubmit : essayCanSubmit) ? 1 : 0.5,
+                }}
+              >
+                {voiceMode === 'essay' && effectiveStanceMethod === 'nli'
+                  ? 'extract a thesis & send to press →'
+                  : 'send to press →'}
+              </button>
+            </div>
           </div>
 
-          {/* Send to press button */}
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8, flexShrink: 0 }}>
-            <button
-              type="button"
-              onClick={voiceMode === 'stance' ? onSubmitStance : onSubmitEssayDraft}
-              disabled={voiceMode === 'stance' ? !stanceCanSubmit : !essayCanSubmit}
-              style={{
-                background: '#1a1a1a',
-                color: '#fafaf7',
-                border: '1px solid #1a1a1a',
-                padding: '12px 28px',
-                fontFamily: "'IM Fell DW Pica SC', serif",
-                fontSize: 12,
-                letterSpacing: '0.32em',
-                textTransform: 'uppercase',
-                cursor: (voiceMode === 'stance' ? stanceCanSubmit : essayCanSubmit) ? 'pointer' : 'not-allowed',
-                opacity: (voiceMode === 'stance' ? stanceCanSubmit : essayCanSubmit) ? 1 : 0.5,
-              }}
-            >
-              {voiceMode === 'essay' && effectiveStanceMethod === 'nli'
-                ? 'extract a thesis & send to press →'
-                : 'send to press →'}
-            </button>
-          </div>
-
-          {/* Spacer pushes back/instrument to bottom */}
-          <div style={{ flex: 1, minHeight: 0 }} />
-
-          {/* Bottom row: instrument settings on the right (replay covers back-to-intro) */}
+          {/* Bottom row: replay intro on the left, instrument settings on the right */}
           <div style={{
             display: 'flex',
-            justifyContent: 'flex-end',
-            alignItems: 'flex-end',
+            justifyContent: 'space-between',
+            alignItems: 'center',
             width: '100%',
             flexShrink: 0,
             gap: 24,
             minHeight: 44,
           }}>
+            <button type="button" onClick={replay} style={{
+              background: 'transparent',
+              border: '1px solid #1a1a1a',
+              padding: '6px 14px',
+              fontFamily: "'IM Fell DW Pica SC', serif",
+              fontSize: 9,
+              letterSpacing: '0.28em',
+              textTransform: 'uppercase',
+              color: '#1a1a1a',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}>↻ replay intro</button>
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -1452,6 +1477,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
       )}
 
       {/* Footer — just the replay button, centered, no static labels */}
+      {!isVoice && (
       <div style={{ flexShrink: 0, padding: '8px 48px 12px', display: 'flex', justifyContent: 'center' }}>
         <button type="button" onClick={replay} style={{
           background: 'transparent',
@@ -1465,6 +1491,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           cursor: 'pointer',
         }}>↻ replay intro</button>
       </div>
+      )}
     </div>
   )
 }

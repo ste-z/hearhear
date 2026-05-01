@@ -466,7 +466,7 @@ function ExpandableChart({
                 cursor: 'pointer',
               }}>close x</button>
             </div>
-            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <div className="expanded-chart-content" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
               {children}
             </div>
           </div>
@@ -908,8 +908,8 @@ function VintageSvdRadar({
     : ''
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 200px', gap: 16, alignItems: 'start', border: '1px solid #1a1a1a', background: '#fafaf7', padding: '12px 14px', overflow: 'hidden' }}>
-      <svg width="100%" viewBox={`-60 -10 ${SVD_RADAR_SIZE + 120} ${SVD_RADAR_SIZE + 60}`} style={{ display: 'block', overflow: 'visible' }}>
+    <div className="svd-radar-panel" style={{ display: 'grid', gridTemplateColumns: '1fr 200px', gap: 16, alignItems: 'start', border: '1px solid #1a1a1a', background: '#fafaf7', padding: '12px 14px', overflow: 'hidden' }}>
+      <svg className="svd-radar-svg" width="100%" viewBox={`-60 -10 ${SVD_RADAR_SIZE + 120} ${SVD_RADAR_SIZE + 60}`} style={{ display: 'block', overflow: 'visible' }}>
         {Array.from({ length: SVD_RADAR_LEVELS }).map((_, l) => {
           const scale = (l + 1) / SVD_RADAR_LEVELS
           const poly = dims.map((_d, i) => {

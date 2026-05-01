@@ -316,6 +316,8 @@ function BenchScene({
   count: number
 }): JSX.Element {
   const proofs = [0.91, 0.78, 0.66, 0.54, 0.41, 0.22]
+  const clampedThreshold = Math.max(0, Math.min(1, threshold))
+  const gateX = mode === 'automatic' ? 82 + ((1 - clampedThreshold) * 222) : 210
   const visibleN = Math.max(0, Math.min(6, Math.round((Math.min(100, count) / 100) * 6)))
   const ranks = proofs
     .map((c, i) => ({ c, i }))
@@ -331,15 +333,20 @@ function BenchScene({
         <rect x="344" y="160" width="56" height="40" />
         <text x="372" y="186" fontSize="9" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="#1a1a1a" letterSpacing="2">DESK</text>
         <g>
-          <line x1="210" y1="40" x2="210" y2="180" stroke="#7a1d1d" strokeDasharray="4 4" />
-          <rect x="180" y="20" width="60" height="22" fill="#fafaf7" stroke="#7a1d1d" />
-          <text x="210" y="35" fontSize="10" fontFamily="'Special Elite', monospace" textAnchor="middle" stroke="none" fill="#7a1d1d">
+          <line x1={gateX} y1="40" x2={gateX} y2="180" stroke="#7a1d1d" strokeDasharray="4 4" />
+          <rect x={gateX - 30} y="20" width="60" height="22" fill="#fafaf7" stroke="#7a1d1d" />
+          <text x={gateX} y="35" fontSize="10" fontFamily="'Special Elite', monospace" textAnchor="middle" stroke="none" fill="#7a1d1d">
             {mode === 'automatic' ? `≥ ${threshold.toFixed(2)}` : `top ${count}`}
           </text>
-          <text x="210" y="196" fontSize="9" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="#7a1d1d" letterSpacing="2">GATE</text>
+          {mode === 'automatic' && (
+            <text x={gateX} y="55" fontSize="8" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="#7a1d1d" letterSpacing="1.4">
+              MAX {count}
+            </text>
+          )}
+          <text x={gateX} y="196" fontSize="9" fontFamily="'IM Fell DW Pica SC', serif" textAnchor="middle" stroke="none" fill="#7a1d1d" letterSpacing="2">GATE</text>
         </g>
         {proofs.map((conf, i) => {
-          const cross = mode === 'automatic' ? conf >= threshold : ranks.includes(i)
+          const cross = mode === 'automatic' ? (conf >= threshold && ranks.includes(i)) : ranks.includes(i)
           const x = 88 + i * 38
           return (
             <g key={i}>
@@ -353,10 +360,6 @@ function BenchScene({
             </g>
           )
         })}
-        <g transform="translate(170 230)">
-          <line x1="0" y1="0" x2="0" y2="-18" stroke="#7a1d1d" />
-          <text x="20" y="-2" fontSize="9" fontFamily="'IM Fell English', serif" fontStyle="italic" stroke="none" fill="#7a1d1d">spike</text>
-        </g>
       </g>
     </svg>
   )
@@ -608,6 +611,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
   const subEditor = SUB_EDITOR_PERSONAS[effectiveStanceMethod]
   const useChunking = chunkingMode !== 'none'
   const canUseChunking = supportedChunkingModes.includes('semantic') && llmAgreementAvailable
+  const benchArticleLimitMax = Math.max(1, Math.min(100, maxAutoRerankCandidates))
 
   return (
     <div className="modal-shell" onClick={onClose}>
@@ -741,7 +745,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
             <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: 32, alignItems: 'center' }}>
               <div>
                 <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: '#3a3a36', maxWidth: 520 }}>
-                  As articles travel from compositor to sub-editor, you decide how the cut is made. <em>Auto</em> sets a relevance threshold (0–1) and lets every article above it cross. <em>Manual</em> takes a fixed count of the strongest articles (1–{maxAutoRerankCandidates}) regardless of score.
+                  As articles travel from compositor to sub-editor, you decide how the cut is made. <em>Auto</em> sets a relevance threshold (0–1), then caps how many articles can cross. <em>Manual</em> takes a fixed count of the strongest articles (1–{benchArticleLimitMax}) regardless of score.
                 </p>
                 <ModalRoleSelector<RerankSelectionMode>
                   label="Hand-off"
@@ -753,23 +757,35 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                   ]}
                 />
                 {rerankSelectionMode === 'automatic' && (
-                  <SliderField
-                    label="Relevance threshold"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={autoRerankThreshold}
-                    onChange={onAutoRerankThresholdChange}
-                    fmt={(v) => v.toFixed(2)}
-                    hint="articles below this score don’t cross to the lectern"
-                  />
+                  <>
+                    <SliderField
+                      label="Relevance threshold"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={autoRerankThreshold}
+                      onChange={onAutoRerankThresholdChange}
+                      fmt={(v) => v.toFixed(2)}
+                      hint="articles below this score don’t cross to the lectern"
+                    />
+                    <SliderField
+                      label="Maximum articles"
+                      unit="articles"
+                      min={1}
+                      max={benchArticleLimitMax}
+                      step={1}
+                      value={rerankTopK}
+                      onChange={onRerankTopKChange}
+                      hint="after the threshold cut, at most this many articles cross to the sub-editor"
+                    />
+                  </>
                 )}
                 {rerankSelectionMode === 'manual' && (
                   <SliderField
                     label="Number of articles"
-                    unit="· articles"
+                    unit="articles"
                     min={1}
-                    max={Math.max(20, maxAutoRerankCandidates)}
+                    max={benchArticleLimitMax}
                     step={1}
                     value={rerankTopK}
                     onChange={onRerankTopKChange}
@@ -781,8 +797,8 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                 <BenchScene mode={rerankSelectionMode} threshold={autoRerankThreshold} count={rerankTopK} />
                 <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)' }}>
                   {rerankSelectionMode === 'automatic'
-                    ? `articles above ${autoRerankThreshold.toFixed(2)} cross — others drop into the spike`
-                    : `the strongest ${rerankTopK} articles cross — the rest drop into the spike`}
+                    ? `articles above ${autoRerankThreshold.toFixed(2)} cross, up to ${rerankTopK} — others stay below the bench`
+                    : `the strongest ${rerankTopK} articles cross — the rest stay below the bench`}
                 </div>
               </div>
             </div>
@@ -868,7 +884,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
               {(() => {
                 const unitNoun = useChunking ? 'top passages' : 'on-topic articles'
                 const handoffPhrase = rerankSelectionMode === 'automatic'
-                  ? <>handing off the ones that score at least <strong>{autoRerankThreshold.toFixed(2)}</strong> on relevance</>
+                  ? <>handing off up to <strong>{rerankTopK}</strong> that score at least <strong>{autoRerankThreshold.toFixed(2)}</strong> on relevance</>
                   : <>handing off the strongest <strong>{rerankTopK}</strong></>
                 const chunkingClause = useChunking
                   ? ' (each article cut on section breaks before being read)'
