@@ -77,15 +77,21 @@
   border-radius: 0;
 }
 
-/* Detail cards & summaries */
-.about-system-shell .about-system-detail-card,
-.about-system-shell .about-system-detail-summary,
-.about-system-shell .about-system-selection-summary {
+/* Detail cards */
+.about-system-shell .about-system-detail-card {
   background: var(--paper-tint);
   border: 1px solid var(--rule-soft);
   border-radius: 0;
   color: var(--ink);
 }
+
+.about-system-shell .about-system-selection-summary,
+.about-system-shell .about-system-detail-summary {
+  background: transparent;
+  border: 0;
+  color: var(--ink-mute);
+}
+
 .about-system-shell .about-system-selection-summary strong {
   color: var(--ink);
 }
@@ -779,10 +785,163 @@ a.about-system-detail-tag:hover {
   position: relative;
 }
 
-.about-system-shell .about-flow-drag-hint {
+.about-flow-expandable {
+  position: relative;
+}
+
+.about-system-shell .about-flow-expand-button {
   position: absolute;
   top: 14px;
   right: 14px;
+  z-index: 7;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--ink);
+  background: rgba(var(--paper-rgb), 0.94);
+  color: var(--ink);
+  cursor: pointer;
+  box-shadow: 2px 3px 0 var(--shadow-mid);
+}
+
+.about-system-shell .about-flow-expand-button:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.about-flow-expanded-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 0;
+  background: rgba(var(--ink-rgb), 0.78);
+}
+
+.about-flow-expanded-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  padding: 28px 48px 40px;
+  overflow: hidden;
+  background: var(--paper);
+  box-shadow: 0 24px 60px var(--shadow-block);
+}
+
+.about-flow-expanded-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.about-flow-expanded-title {
+  color: var(--accent);
+  font-family: 'IM Fell DW Pica SC', serif;
+  font-size: 12px;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+}
+
+.about-flow-expanded-header button {
+  padding: 8px 16px;
+  border: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: 'IM Fell DW Pica SC', serif;
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+}
+
+.about-flow-expanded-header button:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.about-flow-expanded-content {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.about-flow-expanded-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+  gap: 18px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.about-flow-expanded-chart {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.about-flow-expanded-content .about-flow-shell {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.about-flow-expanded-detail {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-mute) transparent;
+}
+
+.about-flow-expanded-detail::-webkit-scrollbar {
+  width: 8px;
+}
+
+.about-flow-expanded-detail::-webkit-scrollbar-thumb {
+  background: var(--ink-mute);
+  border-radius: 0;
+}
+
+.about-flow-expanded-detail .about-system-detail {
+  min-height: 100%;
+  padding: 18px;
+  overflow: visible;
+}
+
+.about-flow-expanded-detail .about-system-detail-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.about-flow-expanded-detail .about-system-detail-header {
+  align-items: flex-start;
+}
+
+.about-flow-expanded-detail .about-system-detail h4 {
+  font-size: 1.45rem;
+  line-height: 1.08;
+}
+
+.about-flow-expanded-detail .about-system-detail-card {
+  padding: 14px;
+}
+
+.about-system-shell .about-flow-drag-hint {
+  position: absolute;
+  top: 14px;
+  right: 58px;
   z-index: 5;
   display: inline-flex;
   align-items: center;
@@ -799,6 +958,10 @@ a.about-system-detail-tag:hover {
   box-shadow: 2px 3px 0 var(--shadow-mid);
 }
 
+.about-flow-expanded-content .about-flow-drag-hint {
+  right: 14px;
+}
+
 .about-system-shell .about-flow-drag-icon {
   display: inline-flex;
   align-items: center;
@@ -812,6 +975,78 @@ a.about-system-detail-tag:hover {
     var(--paper);
   font-size: 7px;
   letter-spacing: 0.12em;
+}
+
+.about-system-shell .about-flow-node,
+.about-system-shell .about-flow-node.kind-artifact,
+.about-system-shell .about-flow-node.kind-process,
+.about-system-shell .about-flow-node.kind-input,
+.about-system-shell .about-flow-node.kind-result,
+.about-system-shell .about-flow-node.kind-output {
+  background:
+    linear-gradient(180deg, rgba(var(--paper-rgb), 0.98), rgba(var(--paper-rgb), 0.9)),
+    var(--paper);
+  border-color: rgba(var(--ink-rgb), 0.78);
+  color: var(--ink);
+  opacity: 0.86;
+  box-shadow: 2px 4px 0 var(--shadow-soft);
+}
+
+.about-system-shell .about-flow-node::before {
+  background: var(--accent);
+  opacity: 0.42;
+}
+
+.about-system-shell .about-flow-node:hover {
+  transform: translateY(-4px);
+  border-color: var(--accent);
+  opacity: 1;
+  box-shadow:
+    3px 6px 0 var(--shadow-mid),
+    0 0 0 3px var(--accent-wash);
+}
+
+.about-system-shell .about-flow-node.related {
+  border-color: var(--ink);
+  opacity: 1;
+  box-shadow:
+    2px 4px 0 var(--shadow-mid),
+    inset 0 0 0 999px rgba(var(--accent-rgb), 0.025);
+}
+
+.about-system-shell .about-flow-node.active,
+.about-system-shell .about-flow-canvas .react-flow__node.selected .about-flow-node {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+  opacity: 1;
+  box-shadow:
+    3px 6px 0 var(--shadow-strong),
+    0 0 0 3px rgba(var(--accent-rgb), 0.18);
+}
+
+.about-system-shell .about-flow-node.active::before,
+.about-system-shell .about-flow-canvas .react-flow__node.selected .about-flow-node::before {
+  background: var(--paper);
+  opacity: 0.62;
+}
+
+.about-system-shell .about-flow-node.active .about-flow-node-eyebrow,
+.about-system-shell .about-flow-canvas .react-flow__node.selected .about-flow-node .about-flow-node-eyebrow {
+  color: var(--paper);
+}
+
+.about-system-shell .about-flow-node.active .about-flow-node-description,
+.about-system-shell .about-flow-canvas .react-flow__node.selected .about-flow-node .about-flow-node-description {
+  color: rgba(var(--paper-rgb), 0.84);
+}
+
+.about-system-shell .about-flow-node-eyebrow {
+  color: var(--accent);
+}
+
+.about-system-shell .about-flow-node-description {
+  color: var(--ink-mute);
 }
 
 .about-system-shell .about-flow-node strong {
@@ -853,9 +1088,54 @@ a.about-system-detail-tag:hover {
   color: var(--accent);
 }
 
-.about-system-shell .about-system-detail-summary,
+.about-system-shell .about-system-selection-summary,
+.about-system-shell .about-system-detail-summary {
+  color: var(--ink-mute);
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.about-system-shell .about-system-selection-summary {
+  margin-top: -4px;
+}
+
+.about-system-shell .about-system-detail-summary {
+  margin-top: -4px;
+  padding-bottom: 2px;
+}
+
+.about-system-shell .about-system-selection-summary strong {
+  color: var(--ink);
+  font-style: normal;
+  font-weight: 400;
+}
+
 .about-system-shell .about-system-detail-card li {
   color: var(--ink);
+}
+
+@media (max-width: 980px) {
+  .about-flow-expanded-panel {
+    padding: 22px;
+    overflow-y: auto;
+  }
+
+  .about-flow-expanded-main {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+
+  .about-flow-expanded-chart {
+    min-height: 70vh;
+  }
+
+  .about-flow-expanded-detail {
+    overflow: visible;
+  }
+
+  .about-flow-expanded-detail .about-system-detail {
+    min-height: 0;
+  }
 }
 
 @media (max-width: 1180px) {

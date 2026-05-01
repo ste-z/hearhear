@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Background,
   BackgroundVariant,
@@ -65,6 +66,7 @@ type HandleId =
   | 'bottom-out'
 
 type MethodNodeData = {
+  active: boolean
   description: string
   details: string[]
   inputs?: string[]
@@ -138,8 +140,8 @@ const retrievalModeLabels: Record<RetrievalMode, string> = {
 }
 
 const agreementModeLabels: Record<AgreementMode, string> = {
-  nli: 'NLI Agreement',
-  llm: 'LLM Agreement',
+  nli: 'NLI',
+  llm: 'LLM',
 }
 
 const nodeKindLabels: Record<NodeKind, string> = {
@@ -211,7 +213,7 @@ const markerByTone = (tone: EdgeTone) => ({
 
 function MethodNode({ data }: NodeProps<Node<MethodNodeData>>): JSX.Element {
   return (
-    <div className={`about-flow-node kind-${data.kind} ${data.related ? 'related' : ''}`}>
+    <div className={`about-flow-node kind-${data.kind} ${data.related ? 'related' : ''} ${data.active ? 'active' : ''}`}>
       {handles.map((handle) => (
         <Handle
           key={handle.id}
@@ -1190,6 +1192,7 @@ const layoutGraph = (
 
     return {
       data: {
+        active: false,
         description: node.description,
         details: node.details,
         inputs: node.inputs,
@@ -1264,6 +1267,7 @@ const decorateFlow = (
   const methodNodes: Array<Node<MethodNodeData>> = layoutNodes.map((node) => ({
     data: {
       ...node.data,
+      active: node.id === activeNodeId,
       kind: node.data.kind,
       related: relatedNodeIds.has(node.id),
     },
@@ -1329,6 +1333,156 @@ const renderControlGroup = <T extends string>(
   </section>
 )
 
+function ExpandableMethodFlow({
+  title,
+  children,
+  detailPane,
+}: {
+  title: string
+  children: ReactNode
+  detailPane?: ReactNode
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) return undefined
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [open])
+
+  const expandedFlow = open && typeof document !== 'undefined'
+    ? createPortal(
+        <div className="about-flow-expanded-backdrop" onClick={() => setOpen(false)}>
+          <div className="about-flow-expanded-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="about-flow-expanded-header">
+              <div className="about-flow-expanded-title">{title}</div>
+              <button type="button" onClick={() => setOpen(false)}>
+                close x
+              </button>
+            </div>
+            <div className="about-flow-expanded-content about-system-shell">
+              <div className="about-flow-expanded-main">
+                <div className="about-flow-expanded-chart">
+                  {children}
+                </div>
+                {detailPane && (
+                  <aside className="about-flow-expanded-detail">
+                    {detailPane}
+                  </aside>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null
+
+  return (
+    <div className="about-flow-expandable">
+      <button
+        type="button"
+        className="about-flow-expand-button"
+        onClick={() => setOpen(true)}
+        title="Expand chart"
+        aria-label="Expand chart"
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2 5V2H5" />
+          <path d="M10 7V10H7" />
+          <path d="M2 2L5 5" />
+          <path d="M10 10L7 7" />
+        </svg>
+      </button>
+      {children}
+      {expandedFlow}
+    </div>
+  )
+}
+
+function MethodDetailPane({ activeNode }: { activeNode: Node<MethodNodeData> }): JSX.Element {
+  return (
+    <section className={`about-system-detail kind-${activeNode.data.kind}`} aria-live="polite">
+      <div className="about-system-detail-header">
+        <div>
+          <p className="about-system-detail-eyebrow">Selected step</p>
+          <h4>{activeNode.data.title}</h4>
+        </div>
+        <span className={`about-system-type-tag kind-${activeNode.data.kind}`}>
+          {nodeKindLabels[activeNode.data.kind]}
+        </span>
+      </div>
+
+      <p className="about-system-detail-summary">{activeNode.data.description}</p>
+
+      <div className="about-system-detail-grid">
+        {Array.isArray(activeNode.data.inputs) && activeNode.data.inputs.length > 0 && (
+          <div className="about-system-detail-card">
+            <span>Inputs</span>
+            <ul>
+              {activeNode.data.inputs.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="about-system-detail-card">
+          <span>How it works</span>
+          <ul>
+            {activeNode.data.details.map((detail) => (
+              <li key={detail}>{detail}</li>
+            ))}
+          </ul>
+        </div>
+
+        {Array.isArray(activeNode.data.outputs) && activeNode.data.outputs.length > 0 && (
+          <div className="about-system-detail-card">
+            <span>Outputs</span>
+            <ul>
+              {activeNode.data.outputs.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {Array.isArray(activeNode.data.references) && activeNode.data.references.length > 0 && (
+          <div className="about-system-detail-card about-system-reference-card">
+            <span>Models and references</span>
+            <div className="about-system-detail-tags">
+              {activeNode.data.references.map((reference) => (
+                reference.href ? (
+                  <a
+                    key={`${reference.label}-${reference.href}`}
+                    className="about-system-detail-tag"
+                    href={reference.href}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {reference.label}
+                  </a>
+                ) : (
+                  <span key={reference.label} className="about-system-detail-tag">
+                    {reference.label}
+                  </span>
+                )
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 function AboutMethodFlow({ mode, onModeChange }: AboutMethodFlowProps): JSX.Element {
   const [searchMode, setSearchMode] = useState<SearchMode>(mode)
   const [retrievalMode, setRetrievalMode] = useState<RetrievalMode>('semantic')
@@ -1375,18 +1529,6 @@ function AboutMethodFlow({ mode, onModeChange }: AboutMethodFlowProps): JSX.Elem
 
   return (
     <section className="about-system-shell">
-      <div className="about-system-header">
-        <div>
-          <p className="about-system-eyebrow">Search Method</p>
-          <h3>How hear! hear! ranks articles</h3>
-        </div>
-
-        <p className="about-system-intro">
-          Follow how your topic or essay moves from prepared Guardian data into relevance scoring, agreement
-          ranking, and the explanations shown with your results.
-        </p>
-      </div>
-
       <div className="about-system-controls">
         {renderControlGroup('Search mode', searchModes, searchMode, handleSearchModeChange, searchModeLabels)}
         {renderControlGroup('Stage 1', retrievalModes, retrievalMode, setRetrievalMode, retrievalModeLabels)}
@@ -1412,116 +1554,51 @@ function AboutMethodFlow({ mode, onModeChange }: AboutMethodFlowProps): JSX.Elem
         <strong>{agreementModeLabels[agreementMode]}</strong>.
       </p>
 
-      <div className="about-flow-shell">
-        <div className="about-flow-drag-hint" aria-hidden="true">
-          <span className="about-flow-drag-icon">DRAG</span>
-          <span>Drag to move the chart</span>
+      <ExpandableMethodFlow
+        title="Method flowchart"
+        detailPane={activeNode ? <MethodDetailPane activeNode={activeNode} /> : null}
+      >
+        <div className="about-flow-shell">
+          <div className="about-flow-drag-hint" aria-hidden="true">
+            <span className="about-flow-drag-icon">DRAG</span>
+            <span>Drag to move the chart</span>
+          </div>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            edgeTypes={edgeTypes}
+            nodeTypes={nodeTypes}
+            onNodeClick={(_, node) => handleNodeFocus(node)}
+            onNodeMouseEnter={(_, node) => handleNodeFocus(node)}
+            defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+            minZoom={0.72}
+            maxZoom={1.08}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            nodesFocusable={false}
+            edgesFocusable={false}
+            elementsSelectable={false}
+            panOnDrag
+            panOnScroll={false}
+            preventScrolling={false}
+            zoomOnDoubleClick={false}
+            zoomOnScroll={false}
+            defaultEdgeOptions={{ type: 'routed' }}
+            className="about-flow-canvas"
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background
+              color="rgba(var(--ink-rgb), 0.08)"
+              gap={22}
+              size={1.2}
+              variant={BackgroundVariant.Dots}
+            />
+          </ReactFlow>
         </div>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          edgeTypes={edgeTypes}
-          nodeTypes={nodeTypes}
-          onNodeClick={(_, node) => handleNodeFocus(node)}
-          onNodeMouseEnter={(_, node) => handleNodeFocus(node)}
-          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
-          minZoom={0.72}
-          maxZoom={1.08}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          nodesFocusable={false}
-          edgesFocusable={false}
-          elementsSelectable={false}
-          panOnDrag
-          panOnScroll={false}
-          preventScrolling={false}
-          zoomOnDoubleClick={false}
-          zoomOnScroll={false}
-          defaultEdgeOptions={{ type: 'routed' }}
-          className="about-flow-canvas"
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background
-            color="rgba(var(--ink-rgb), 0.08)"
-            gap={22}
-            size={1.2}
-            variant={BackgroundVariant.Dots}
-          />
-        </ReactFlow>
-      </div>
+      </ExpandableMethodFlow>
 
       {activeNode && (
-        <section className={`about-system-detail kind-${activeNode.data.kind}`} aria-live="polite">
-          <div className="about-system-detail-header">
-            <div>
-              <p className="about-system-detail-eyebrow">Selected step</p>
-              <h4>{activeNode.data.title}</h4>
-            </div>
-            <span className={`about-system-type-tag kind-${activeNode.data.kind}`}>
-              {nodeKindLabels[activeNode.data.kind]}
-            </span>
-          </div>
-
-          <p className="about-system-detail-summary">{activeNode.data.description}</p>
-
-          <div className="about-system-detail-grid">
-            {Array.isArray(activeNode.data.inputs) && activeNode.data.inputs.length > 0 && (
-              <div className="about-system-detail-card">
-                <span>Inputs</span>
-                <ul>
-                  {activeNode.data.inputs.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <div className="about-system-detail-card">
-              <span>How it works</span>
-              <ul>
-                {activeNode.data.details.map((detail) => (
-                  <li key={detail}>{detail}</li>
-                ))}
-              </ul>
-            </div>
-
-            {Array.isArray(activeNode.data.outputs) && activeNode.data.outputs.length > 0 && (
-              <div className="about-system-detail-card">
-                <span>Outputs</span>
-                <ul>
-                  {activeNode.data.outputs.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {Array.isArray(activeNode.data.references) && activeNode.data.references.length > 0 && (
-              <div className="about-system-detail-card about-system-reference-card">
-                <span>Models and references</span>
-                <div className="about-system-detail-tags">
-                  {activeNode.data.references.map((reference) => (
-                    reference.href ? (
-                      <a
-                        key={`${reference.label}-${reference.href}`}
-                        className="about-system-detail-tag"
-                        href={reference.href}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {reference.label}
-                      </a>
-                    ) : (
-                      <span key={reference.label} className="about-system-detail-tag">
-                        {reference.label}
-                      </span>
-                    )
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
+        <MethodDetailPane activeNode={activeNode} />
       )}
     </section>
   )
