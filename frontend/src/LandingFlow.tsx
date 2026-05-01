@@ -7,6 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 import { PersonaName } from './PersonaName'
+import ThemeToggle, { type Theme } from './ThemeToggle'
 import typewriterFrameUrl from './assets/typewriter-frame.svg'
 
 const INTRO_TOPICS = ['climate', 'immigration', 'minimum wage'] as const
@@ -42,6 +43,8 @@ export type LandingFlowProps = {
   onOpenSettings: () => void
   onOpenAbout: () => void
   onOpenMethod: () => void
+  theme: Theme
+  onToggleTheme: () => void
   chunksLabel: string
   // Persona ids drive the wavy-underline name component on the search page.
   effectiveRetrievalModel: 'tfidf' | 'svd' | 'minilm'
@@ -204,12 +207,12 @@ function TypewriterKey({
       style={{
         width,
         height,
-        border: '1.5px solid #1a1a1a',
+        border: '1.5px solid var(--ink)',
         borderRadius: shape === 'pill' ? 18 : '50%',
         fontFamily: "'IM Fell English', serif",
         fontSize,
         lineHeight: 1,
-        color: '#1a1a1a',
+        color: 'var(--ink)',
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.55 : 1,
         padding: 0,
@@ -217,8 +220,8 @@ function TypewriterKey({
         alignItems: 'center',
         justifyContent: 'center',
         transform: isDown ? 'translateY(2px)' : 'translateY(0)',
-        boxShadow: isDown ? 'inset 0 1px 3px rgba(26,26,26,0.24)' : '0 2px 0 rgba(26,26,26,0.22)',
-        background: isDown ? '#ece4d0' : 'rgba(250,250,247,0.96)',
+        boxShadow: isDown ? 'inset 0 1px 3px rgba(var(--ink-rgb),0.24)' : '0 2px 0 rgba(var(--ink-rgb),0.22)',
+        background: isDown ? 'var(--paper-warm)' : 'rgba(var(--paper-rgb),0.96)',
         transition: 'transform 80ms ease, box-shadow 80ms ease, background 120ms ease',
         userSelect: 'none',
       }}
@@ -320,15 +323,15 @@ function RisingTypewriter({ onType, onBackspace, onEnter, disabled, flashedKey }
             style={{
               width: 'var(--tw-space-width)',
               height: 'var(--tw-space-height)',
-              border: '1.5px solid #1a1a1a',
-              background: isFlashed('space') ? '#ece4d0' : 'rgba(250,250,247,0.96)',
+              border: '1.5px solid var(--ink)',
+              background: isFlashed('space') ? 'var(--paper-warm)' : 'rgba(var(--paper-rgb),0.96)',
               borderRadius: 14,
               cursor: disabled ? 'not-allowed' : 'pointer',
               padding: 0,
               opacity: disabled ? 0.55 : 1,
               userSelect: 'none',
               transform: isFlashed('space') ? 'translateY(2px)' : 'translateY(0)',
-              boxShadow: isFlashed('space') ? 'inset 0 1px 3px rgba(26,26,26,0.24)' : '0 2px 0 rgba(26,26,26,0.22)',
+              boxShadow: isFlashed('space') ? 'inset 0 1px 3px rgba(var(--ink-rgb),0.24)' : '0 2px 0 rgba(var(--ink-rgb),0.22)',
               transition: 'transform 80ms ease, box-shadow 80ms ease, background 120ms ease',
             }}
             aria-label="space"
@@ -376,7 +379,7 @@ function IntroLine({
       transition: 'opacity 0.4s ease',
       width: '100%',
     }}>
-      <span style={{ fontSize: 22, fontStyle: 'italic', color: '#3a3a36', flex: '0 0 140px', minWidth: 0, textAlign: 'right' }}>
+      <span style={{ fontSize: 22, fontStyle: 'italic', color: 'var(--ink-soft)', flex: '0 0 140px', minWidth: 0, textAlign: 'right' }}>
         {label}
       </span>
       {editable ? (
@@ -393,12 +396,12 @@ function IntroLine({
             letterSpacing: '-0.005em',
             background: 'transparent',
             border: 0,
-            borderBottom: active ? '1.5px solid #1a1a1a' : '1px solid #cfcfc7',
+            borderBottom: active ? '1.5px solid var(--ink)' : '1px solid var(--ink-faint)',
             padding: '4px 0 6px',
             flex: 1,
             minWidth: 0,
             width: '100%',
-            color: '#1a1a1a',
+            color: 'var(--ink)',
             outline: 'none',
           }}
         />
@@ -407,7 +410,7 @@ function IntroLine({
           fontFamily: "'Special Elite', monospace",
           fontSize: 32,
           letterSpacing: '-0.005em',
-          borderBottom: '1px solid #1a1a1a',
+          borderBottom: '1px solid var(--ink)',
           paddingBottom: 6,
           flex: 1,
           minWidth: 0,
@@ -440,16 +443,16 @@ function WaxEnvelope({
           width: 380,
           height: 200,
           position: 'relative',
-          background: 'linear-gradient(180deg, #ece4d0 0%, #d9cfb6 100%)',
+          background: 'linear-gradient(180deg, var(--paper-warm) 0%, var(--paper-edge) 100%)',
           boxShadow: '0 14px 30px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.6)',
           border: '1px solid rgba(0,0,0,0.10)',
           padding: 0,
           cursor: isImporting ? 'wait' : 'pointer',
         }}
       >
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 116, background: 'linear-gradient(180deg, #d9cfb6, #c2b89e)', clipPath: 'polygon(0 0, 100% 0, 50% 100%)' }} />
-        <div style={{ position: 'absolute', bottom: 14, left: 38, fontFamily: "'Special Elite', monospace", fontSize: 11, color: '#1a1a1a' }}>
-          To: <span style={{ borderBottom: '1px solid #1a1a1a' }}>The Editor, hear! hear!</span>
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 116, background: 'linear-gradient(180deg, var(--paper-edge), var(--paper-deep))', clipPath: 'polygon(0 0, 100% 0, 50% 100%)' }} />
+        <div style={{ position: 'absolute', bottom: 14, left: 38, fontFamily: "'Special Elite', monospace", fontSize: 11, color: 'var(--ink)' }}>
+          To: <span style={{ borderBottom: '1px solid var(--ink)' }}>The Editor, hear! hear!</span>
         </div>
         <div style={{
           position: 'absolute',
@@ -458,19 +461,19 @@ function WaxEnvelope({
           transform: 'translateX(-50%) rotate(-6deg)',
           width: 46,
           height: 42,
-          background: 'radial-gradient(circle at 30% 30%, #a23036 0%, #7a1d1d 50%, #4a0c0c 100%)',
+          background: 'radial-gradient(circle at 30% 30%, var(--accent-light) 0%, var(--accent) 50%, var(--accent-deep) 100%)',
           borderRadius: '50% 30% 60% 40%',
           boxShadow: 'inset 0 -3px 6px rgba(0,0,0,0.4)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: '#fafaf7',
+          color: 'var(--paper)',
           fontFamily: "'IM Fell English', serif",
           fontStyle: 'italic',
           fontSize: 18,
         }}>h</div>
       </button>
-      <span style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: '#6a6a62' }}>
+      <span style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>
         {isImporting
           ? 'opening the envelope…'
           : importedPdfName
@@ -509,9 +512,9 @@ function FilterPopover({
           top: anchorRect.bottom + 6,
           left: Math.max(12, anchorRect.left - 10),
           width: 320,
-          background: '#fafaf7',
-          border: '1px solid #1a1a1a',
-          boxShadow: '0 14px 30px rgba(26,26,26,0.16)',
+          background: 'var(--paper)',
+          border: '1px solid var(--ink)',
+          boxShadow: '0 14px 30px var(--shadow-strong)',
           padding: '14px 16px',
           fontFamily: "'Old Standard TT', serif",
         }}
@@ -604,7 +607,7 @@ function FilterRow({
       gap: 28,
       fontFamily: "'Special Elite', monospace",
       fontSize: 12,
-      color: '#3a3a36',
+      color: 'var(--ink-soft)',
     }}>
       <button
         ref={yearButtonRef}
@@ -616,14 +619,14 @@ function FilterRow({
           padding: '2px 6px',
           fontFamily: 'inherit',
           fontSize: 'inherit',
-          color: yearActive ? '#1a1a1a' : '#3a3a36',
+          color: yearActive ? 'var(--ink)' : 'var(--ink-soft)',
           cursor: 'pointer',
-          borderBottom: yearActive ? '1px solid #1a1a1a' : '1px dotted rgba(26,26,26,0.3)',
+          borderBottom: yearActive ? '1px solid var(--ink)' : '1px dotted var(--rule-dotted)',
         }}
       >
         year · {yearLabel}
       </button>
-      <span style={{ color: '#9a9a92' }}>·</span>
+      <span style={{ color: 'var(--ink-faint)' }}>·</span>
       <button
         ref={lengthButtonRef}
         type="button"
@@ -634,14 +637,14 @@ function FilterRow({
           padding: '2px 6px',
           fontFamily: 'inherit',
           fontSize: 'inherit',
-          color: lengthActive ? '#1a1a1a' : '#3a3a36',
+          color: lengthActive ? 'var(--ink)' : 'var(--ink-soft)',
           cursor: 'pointer',
-          borderBottom: lengthActive ? '1px solid #1a1a1a' : '1px dotted rgba(26,26,26,0.3)',
+          borderBottom: lengthActive ? '1px solid var(--ink)' : '1px dotted var(--rule-dotted)',
         }}
       >
         length · {lengthUnitLabel} · {lengthSummary}
       </button>
-      <span style={{ color: '#9a9a92' }}>·</span>
+      <span style={{ color: 'var(--ink-faint)' }}>·</span>
       <button
         ref={avoidButtonRef}
         type="button"
@@ -653,9 +656,9 @@ function FilterRow({
           padding: '2px 6px',
           fontFamily: 'inherit',
           fontSize: 'inherit',
-          color: !isLexicalSearchMode ? 'var(--ink-faint)' : (avoidActive ? '#1a1a1a' : '#3a3a36'),
+          color: !isLexicalSearchMode ? 'var(--ink-faint)' : (avoidActive ? 'var(--ink)' : 'var(--ink-soft)'),
           cursor: 'pointer',
-          borderBottom: avoidActive ? '1px solid #1a1a1a' : '1px dotted rgba(26,26,26,0.3)',
+          borderBottom: avoidActive ? '1px solid var(--ink)' : '1px dotted var(--rule-dotted)',
         }}
       >
         avoid · {avoidActive ? `${wordsToAvoid.length} ${wordsToAvoid.length === 1 ? 'word' : 'words'}` : 'none'}
@@ -668,12 +671,12 @@ function FilterRow({
       >
         <div className="tracker" style={{ marginBottom: 8 }}>year published</div>
         {minYear === null || maxYear === null ? (
-          <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: '#6a6a62', fontSize: 13 }}>
+          <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: 'var(--ink-mute)', fontSize: 13 }}>
             year bounds unavailable
           </div>
         ) : (
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Special Elite', monospace", fontSize: 12, color: '#1a1a1a' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Special Elite', monospace", fontSize: 12, color: 'var(--ink)' }}>
               <span>{yearStart ?? minYear}</span>
               <span>{yearEnd ?? maxYear}</span>
             </div>
@@ -724,7 +727,7 @@ function FilterRow({
         onClose={() => setOpenPopover(null)}
       >
         <div className="tracker" style={{ marginBottom: 8 }}>article length</div>
-        <div style={{ display: 'flex', borderTop: '1px solid #1a1a1a', borderBottom: '1px solid #1a1a1a', marginBottom: 10 }}>
+        <div style={{ display: 'flex', borderTop: '1px solid var(--ink)', borderBottom: '1px solid var(--ink)', marginBottom: 10 }}>
           {(['characters', 'words', 'reading_time'] as LengthFilterUnit[]).map((unit, i) => (
             <button
               key={unit}
@@ -732,10 +735,10 @@ function FilterRow({
               onClick={() => onLengthFilterUnitChange(unit)}
               style={{
                 flex: 1,
-                background: lengthFilterUnit === unit ? '#1a1a1a' : 'transparent',
-                color: lengthFilterUnit === unit ? '#fafaf7' : '#1a1a1a',
+                background: lengthFilterUnit === unit ? 'var(--ink)' : 'transparent',
+                color: lengthFilterUnit === unit ? 'var(--paper)' : 'var(--ink)',
                 border: 0,
-                borderLeft: i === 0 ? 0 : '1px solid #1a1a1a',
+                borderLeft: i === 0 ? 0 : '1px solid var(--ink)',
                 padding: '6px 4px',
                 cursor: 'pointer',
                 fontFamily: "'IM Fell English', serif",
@@ -747,12 +750,12 @@ function FilterRow({
           ))}
         </div>
         {lengthRangeMin === null || lengthRangeMax === null ? (
-          <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: '#6a6a62', fontSize: 13 }}>
+          <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: 'var(--ink-mute)', fontSize: 13 }}>
             length bounds unavailable
           </div>
         ) : (
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Special Elite', monospace", fontSize: 12, color: '#1a1a1a' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Special Elite', monospace", fontSize: 12, color: 'var(--ink)' }}>
               <span>{(lengthRangeStart ?? lengthRangeMin).toLocaleString()}</span>
               <span>{(lengthRangeEnd ?? lengthRangeMax).toLocaleString()}</span>
             </div>
@@ -822,12 +825,12 @@ function FilterRow({
             disabled={!isLexicalSearchMode}
             style={{
               flex: 1,
-              border: '1px solid #1a1a1a',
-              background: '#fafaf7',
+              border: '1px solid var(--ink)',
+              background: 'var(--paper)',
               padding: '6px 10px',
               fontFamily: "'Special Elite', monospace",
               fontSize: 12,
-              color: '#1a1a1a',
+              color: 'var(--ink)',
               outline: 'none',
             }}
           />
@@ -837,14 +840,14 @@ function FilterRow({
             disabled={!isLexicalSearchMode}
             style={{
               background: 'transparent',
-              border: '1px solid #1a1a1a',
+              border: '1px solid var(--ink)',
               padding: '6px 12px',
               fontFamily: "'IM Fell DW Pica SC', serif",
               fontSize: 9,
               letterSpacing: '0.24em',
               textTransform: 'uppercase',
               cursor: isLexicalSearchMode ? 'pointer' : 'not-allowed',
-              color: '#1a1a1a',
+              color: 'var(--ink)',
             }}
           >
             add
@@ -853,7 +856,7 @@ function FilterRow({
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
           {wordsToAvoid.map(word => (
             <span key={word} style={{
-              border: '1px solid #1a1a1a',
+              border: '1px solid var(--ink)',
               padding: '3px 9px',
               fontFamily: "'IM Fell DW Pica SC', serif",
               fontSize: 9,
@@ -867,7 +870,7 @@ function FilterRow({
               <button
                 type="button"
                 onClick={() => removeAvoidWord(word)}
-                style={{ background: 'transparent', border: 0, color: '#7a1d1d', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
+                style={{ background: 'transparent', border: 0, color: 'var(--accent)', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
               >
                 ×
               </button>
@@ -901,6 +904,8 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
     onOpenSettings,
     onOpenAbout,
     onOpenMethod,
+    theme,
+    onToggleTheme,
     chunksLabel,
     effectiveRetrievalModel,
     effectiveStanceMethod,
@@ -1032,6 +1037,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           <button type="button" className="active">search</button>
           <button type="button" onClick={onOpenAbout}>about</button>
           <button type="button" onClick={onOpenMethod}>method</button>
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
       </div>
       <div className="top-rule" style={{ flexShrink: 0 }} />
@@ -1053,9 +1059,9 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           </div>
           {/* Small draft slip with the cycling lines inside */}
           <div style={{
-            background: '#fafaf7',
-            border: '1px solid #1a1a1a',
-            boxShadow: '0 8px 20px rgba(26,26,26,0.08)',
+            background: 'var(--paper)',
+            border: '1px solid var(--ink)',
+            boxShadow: '0 8px 20px var(--shadow-mid)',
             padding: '24px 30px 26px',
             width: COMPOSE_SURFACE_WIDTH,
             maxWidth: '100%',
@@ -1073,7 +1079,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
               fontSize: 9,
               letterSpacing: '0.32em',
               textTransform: 'uppercase',
-              color: '#9a9a92',
+              color: 'var(--ink-faint)',
               display: 'flex',
               justifyContent: 'space-between',
             }}>
@@ -1113,7 +1119,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
               fontSize: 11,
               letterSpacing: '0.32em',
               textTransform: 'uppercase',
-              color: '#1a1a1a',
+              color: 'var(--ink)',
             }}>
               <span>find your voice</span>
               <span style={{ fontSize: 18, animation: 'tw-bob 1.6s ease-in-out infinite' }}>↓</span>
@@ -1150,9 +1156,9 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           }}>
             <button type="button" onClick={() => setVoiceMode('stance')} style={{
               padding: '8px 22px',
-              border: '1px solid #1a1a1a',
-              background: voiceMode === 'stance' ? '#1a1a1a' : 'transparent',
-              color: voiceMode === 'stance' ? '#fafaf7' : '#1a1a1a',
+              border: '1px solid var(--ink)',
+              background: voiceMode === 'stance' ? 'var(--ink)' : 'transparent',
+              color: voiceMode === 'stance' ? 'var(--paper)' : 'var(--ink)',
               fontFamily: 'inherit',
               fontSize: 'inherit',
               letterSpacing: 'inherit',
@@ -1161,10 +1167,10 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
             }}>topic & stance</button>
             <button type="button" onClick={() => setVoiceMode('essay')} style={{
               padding: '8px 22px',
-              border: '1px solid #1a1a1a',
+              border: '1px solid var(--ink)',
               borderLeft: 0,
-              background: voiceMode === 'essay' ? '#1a1a1a' : 'transparent',
-              color: voiceMode === 'essay' ? '#fafaf7' : '#1a1a1a',
+              background: voiceMode === 'essay' ? 'var(--ink)' : 'transparent',
+              color: voiceMode === 'essay' ? 'var(--paper)' : 'var(--ink)',
               fontFamily: 'inherit',
               fontSize: 'inherit',
               letterSpacing: 'inherit',
@@ -1190,12 +1196,12 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
               width: COMPOSE_SURFACE_WIDTH,
               maxWidth: '100%',
               height: voiceMode === 'essay' ? 380 : 'auto',
-              background: '#fafaf7',
-              border: voiceMode === 'essay' ? '1px solid rgba(26,26,26,0.6)' : '1px solid #1a1a1a',
-              borderBottom: voiceMode === 'essay' ? 'none' : '1px solid #1a1a1a',
+              background: 'var(--paper)',
+              border: voiceMode === 'essay' ? '1px solid rgba(var(--ink-rgb),0.6)' : '1px solid var(--ink)',
+              borderBottom: voiceMode === 'essay' ? 'none' : '1px solid var(--ink)',
               boxShadow: voiceMode === 'essay'
-                ? '0 -2px 0 rgba(26,26,26,0.04), 0 -8px 24px rgba(26,26,26,0.04)'
-                : '0 8px 20px rgba(26,26,26,0.08)',
+                ? '0 -2px 0 var(--shadow-faint), 0 -8px 24px var(--shadow-faint)'
+                : '0 8px 20px var(--shadow-mid)',
               transition: 'height 0.5s ease',
               padding: voiceMode === 'essay' ? '36px 36px 0' : '24px 30px 26px',
               display: 'flex',
@@ -1215,7 +1221,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
                 fontSize: 9,
                 letterSpacing: '0.32em',
                 textTransform: 'uppercase',
-                color: '#9a9a92',
+                color: 'var(--ink-faint)',
                 display: 'flex',
                 justifyContent: 'space-between',
               }}>
@@ -1255,13 +1261,13 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
               {voiceMode === 'essay' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                    <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 22, fontStyle: 'italic', color: '#3a3a36' }}>An essay,</span>
+                    <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 22, fontStyle: 'italic', color: 'var(--ink-soft)' }}>An essay,</span>
                     <div style={{ display: 'flex', fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase' }}>
                       <button type="button" onClick={() => setEssaySource('paste')} style={{
                         padding: '4px 12px',
-                        border: '1px solid #1a1a1a',
-                        background: essaySource === 'paste' ? '#1a1a1a' : 'transparent',
-                        color: essaySource === 'paste' ? '#fafaf7' : '#1a1a1a',
+                        border: '1px solid var(--ink)',
+                        background: essaySource === 'paste' ? 'var(--ink)' : 'transparent',
+                        color: essaySource === 'paste' ? 'var(--paper)' : 'var(--ink)',
                         fontFamily: 'inherit',
                         fontSize: 'inherit',
                         letterSpacing: 'inherit',
@@ -1270,10 +1276,10 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
                       }}>type / paste</button>
                       <button type="button" onClick={() => setEssaySource('envelope')} style={{
                         padding: '4px 12px',
-                        border: '1px solid #1a1a1a',
+                        border: '1px solid var(--ink)',
                         borderLeft: 0,
-                        background: essaySource === 'envelope' ? '#1a1a1a' : 'transparent',
-                        color: essaySource === 'envelope' ? '#fafaf7' : '#1a1a1a',
+                        background: essaySource === 'envelope' ? 'var(--ink)' : 'transparent',
+                        color: essaySource === 'envelope' ? 'var(--paper)' : 'var(--ink)',
                         fontFamily: 'inherit',
                         fontSize: 'inherit',
                         letterSpacing: 'inherit',
@@ -1284,11 +1290,11 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
                   </div>
 
                   {essaySource === 'paste' && (
-                    <div style={{ position: 'relative', border: '1px solid #cfcfc7', background: '#fafaf7' }}>
+                    <div style={{ position: 'relative', border: '1px solid var(--ink-faint)', background: 'var(--paper)' }}>
                       <div aria-hidden style={{
                         position: 'absolute',
                         inset: 0,
-                        backgroundImage: 'repeating-linear-gradient(0deg, transparent 0, transparent 25px, rgba(26,26,26,0.08) 26px)',
+                        backgroundImage: 'repeating-linear-gradient(0deg, transparent 0, transparent 25px, var(--shadow-mid) 26px)',
                         pointerEvents: 'none',
                       }} />
                       <textarea
@@ -1307,7 +1313,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
                           fontFamily: "'Special Elite', monospace",
                           fontSize: 14,
                           lineHeight: '26px',
-                          color: '#1a1a1a',
+                          color: 'var(--ink)',
                         }}
                       />
                     </div>
@@ -1329,7 +1335,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
                     onChange={onImportPdf}
                   />
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Special Elite', monospace", fontSize: 10, color: '#6a6a62' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Special Elite', monospace", fontSize: 10, color: 'var(--ink-mute)' }}>
                     <span>{essaySource === 'paste' ? `${essayPasteWordCount} words` : ' '}</span>
                     <span>{effectiveStanceMethod === 'nli' ? 'thesis pick · stage 1' : 'sub-editor reads the whole essay'}</span>
                   </div>
@@ -1393,9 +1399,9 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
                 onClick={voiceMode === 'stance' ? onSubmitStance : onSubmitEssayDraft}
                 disabled={voiceMode === 'stance' ? !stanceCanSubmit : !essayCanSubmit}
                 style={{
-                  background: '#1a1a1a',
-                  color: '#fafaf7',
-                  border: '1px solid #1a1a1a',
+                  background: 'var(--ink)',
+                  color: 'var(--paper)',
+                  border: '1px solid var(--ink)',
                   padding: '12px 28px',
                   fontFamily: "'IM Fell DW Pica SC', serif",
                   fontSize: 12,
@@ -1424,13 +1430,13 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           }}>
             <button type="button" onClick={replay} style={{
               background: 'transparent',
-              border: '1px solid #1a1a1a',
+              border: '1px solid var(--ink)',
               padding: '6px 14px',
               fontFamily: "'IM Fell DW Pica SC', serif",
               fontSize: 9,
               letterSpacing: '0.28em',
               textTransform: 'uppercase',
-              color: '#1a1a1a',
+              color: 'var(--ink)',
               cursor: 'pointer',
               whiteSpace: 'nowrap',
             }}>↻ replay intro</button>
@@ -1442,11 +1448,11 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
             }}>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                 <div className="tracker" style={{ color: 'var(--accent)', letterSpacing: '0.32em', fontSize: 9 }}>The Instrument</div>
-                <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 13, color: '#1a1a1a', textAlign: 'right', lineHeight: 1.5 }}>
+                <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 13, color: 'var(--ink)', textAlign: 'right', lineHeight: 1.5 }}>
                   reads with <PersonaName persona={effectiveRetrievalModel} /> &nbsp;·&nbsp; judges with <PersonaName persona={effectiveStanceMethod} />
                   <br />
-                  <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 10, color: '#6a6a62' }}>
-                    chunks · <strong style={{ color: '#1a1a1a' }}>{chunksLabel}</strong>
+                  <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 10, color: 'var(--ink-mute)' }}>
+                    chunks · <strong style={{ color: 'var(--ink)' }}>{chunksLabel}</strong>
                   </span>
                 </div>
               </div>
@@ -1455,14 +1461,14 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
                 onClick={onOpenSettings}
                 style={{
                   background: 'transparent',
-                  border: '1px solid #1a1a1a',
+                  border: '1px solid var(--ink)',
                   padding: '6px 12px',
                   cursor: 'pointer',
                   fontFamily: "'IM Fell DW Pica SC', serif",
                   fontSize: 9,
                   letterSpacing: '0.28em',
                   textTransform: 'uppercase',
-                  color: '#1a1a1a',
+                  color: 'var(--ink)',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 6,
@@ -1481,13 +1487,13 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
       <div style={{ flexShrink: 0, padding: '8px 48px 12px', display: 'flex', justifyContent: 'center' }}>
         <button type="button" onClick={replay} style={{
           background: 'transparent',
-          border: '1px solid #1a1a1a',
+          border: '1px solid var(--ink)',
           padding: '6px 14px',
           fontFamily: "'IM Fell DW Pica SC', serif",
           fontSize: 9,
           letterSpacing: '0.28em',
           textTransform: 'uppercase',
-          color: '#1a1a1a',
+          color: 'var(--ink)',
           cursor: 'pointer',
         }}>↻ replay intro</button>
       </div>

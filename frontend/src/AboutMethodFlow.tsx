@@ -197,9 +197,9 @@ const handles: Array<{ id: HandleId; position: Position; type: 'source' | 'targe
    dim grey but solid; active paths are oxblood with full strength so the
    chosen route is unambiguous against the newsprint backdrop. */
 const edgeToneStyles: Record<EdgeTone, { color: string; opacity: number }> = {
-  neutral: { color: 'rgba(26, 26, 26, 0.55)', opacity: 1 },
-  active: { color: '#7a1d1d', opacity: 1 },
-  support: { color: 'rgba(26, 26, 26, 0.45)', opacity: 0.9 },
+  neutral: { color: 'rgba(var(--ink-rgb), 0.55)', opacity: 1 },
+  active: { color: 'var(--accent)', opacity: 1 },
+  support: { color: 'rgba(var(--ink-rgb), 0.45)', opacity: 0.9 },
 }
 
 const markerByTone = (tone: EdgeTone) => ({
@@ -1442,7 +1442,7 @@ function AboutMethodFlow({ mode, onModeChange }: AboutMethodFlowProps): JSX.Elem
           proOptions={{ hideAttribution: true }}
         >
           <Background
-            color="rgba(255, 255, 255, 0.08)"
+            color="rgba(var(--ink-rgb), 0.08)"
             gap={22}
             size={1.2}
             variant={BackgroundVariant.Dots}

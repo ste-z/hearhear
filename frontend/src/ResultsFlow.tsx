@@ -11,6 +11,7 @@ import type {
   TypoCorrectionSuggestion,
 } from './types'
 import PersonaName from './PersonaName'
+import ThemeToggle, { type Theme } from './ThemeToggle'
 
 export type SearchProgressLine = {
   label: string
@@ -48,6 +49,8 @@ export type ResultsFlowProps = {
   onBackToCompose: () => void
   onOpenAbout: () => void
   onOpenMethod: () => void
+  theme: Theme
+  onToggleTheme: () => void
 
   // typo + rewrite
   typoCorrection: TypoCorrectionSuggestion | null
@@ -143,9 +146,9 @@ function formatDate(value: string | null | undefined): string {
 
 function getSentColor(article: Article): string {
   const label = String(article.vader_sentiment?.label || '').toLocaleLowerCase()
-  if (label === 'positive') return '#1a1a1a'
-  if (label === 'negative') return '#7a1d1d'
-  return '#9a9a92'
+  if (label === 'positive') return 'var(--ink)'
+  if (label === 'negative') return 'var(--accent)'
+  return 'var(--ink-faint)'
 }
 
 function getStanceCategory(article: Article): 'supports' | 'complicates' | 'neutral' {
@@ -234,9 +237,9 @@ function PinnedSlip({ topic, opinion, mode, essayText, thesisSentence, animateOn
         position: 'relative',
         width: 720,
         padding: '12px 22px 14px',
-        background: '#fafaf7',
-        border: '1px solid #1a1a1a',
-        boxShadow: '0 1px 0 rgba(26,26,26,0.06)',
+        background: 'var(--paper)',
+        border: '1px solid var(--ink)',
+        boxShadow: '0 1px 0 var(--shadow-soft)',
         fontFamily: "'IM Fell English', serif",
       }}>
         <div style={{
@@ -246,8 +249,8 @@ function PinnedSlip({ topic, opinion, mode, essayText, thesisSentence, animateOn
           fontSize: 9,
           letterSpacing: '0.28em',
           textTransform: 'uppercase',
-          color: '#6a6a62',
-          borderBottom: '1px solid rgba(26,26,26,0.18)',
+          color: 'var(--ink-mute)',
+          borderBottom: '1px solid var(--rule-soft)',
           paddingBottom: 6,
           marginBottom: 8,
         }}>
@@ -258,23 +261,23 @@ function PinnedSlip({ topic, opinion, mode, essayText, thesisSentence, animateOn
         {mode === 'stance' ? (
           <>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
-              <span style={{ fontStyle: 'italic', fontSize: 14, color: '#6a6a62', minWidth: 70, textAlign: 'right' }}>regarding</span>
+              <span style={{ fontStyle: 'italic', fontSize: 14, color: 'var(--ink-mute)', minWidth: 70, textAlign: 'right' }}>regarding</span>
               <span style={{
                 fontFamily: "'Special Elite', monospace",
                 fontSize: 17,
-                color: '#1a1a1a',
-                borderBottom: '1px solid #1a1a1a',
+                color: 'var(--ink)',
+                borderBottom: '1px solid var(--ink)',
                 paddingBottom: 1,
                 flex: 1,
               }}>{topic || ' '}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginTop: 6 }}>
-              <span style={{ fontStyle: 'italic', fontSize: 14, color: '#6a6a62', minWidth: 70, textAlign: 'right' }}>I believe</span>
+              <span style={{ fontStyle: 'italic', fontSize: 14, color: 'var(--ink-mute)', minWidth: 70, textAlign: 'right' }}>I believe</span>
               <span style={{
                 fontFamily: "'Special Elite', monospace",
                 fontSize: 17,
-                color: '#1a1a1a',
-                borderBottom: '1px solid #1a1a1a',
+                color: 'var(--ink)',
+                borderBottom: '1px solid var(--ink)',
                 paddingBottom: 1,
                 flex: 1,
               }}>{opinion || ' '}</span>
@@ -284,24 +287,24 @@ function PinnedSlip({ topic, opinion, mode, essayText, thesisSentence, animateOn
           <>
             {thesisSentence && (
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
-                <span style={{ fontStyle: 'italic', fontSize: 14, color: '#6a6a62', minWidth: 70, textAlign: 'right' }}>thesis</span>
+                <span style={{ fontStyle: 'italic', fontSize: 14, color: 'var(--ink-mute)', minWidth: 70, textAlign: 'right' }}>thesis</span>
                 <span style={{
                   fontFamily: "'Special Elite', monospace",
                   fontSize: 15,
-                  color: '#1a1a1a',
-                  borderBottom: '1px solid #1a1a1a',
+                  color: 'var(--ink)',
+                  borderBottom: '1px solid var(--ink)',
                   paddingBottom: 1,
                   flex: 1,
                 }}>{thesisSentence}</span>
               </div>
             )}
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginTop: 6 }}>
-              <span style={{ fontStyle: 'italic', fontSize: 14, color: '#6a6a62', minWidth: 70, textAlign: 'right' }}>essay</span>
+              <span style={{ fontStyle: 'italic', fontSize: 14, color: 'var(--ink-mute)', minWidth: 70, textAlign: 'right' }}>essay</span>
               <span style={{
                 fontFamily: "'IM Fell English', serif",
                 fontStyle: 'italic',
                 fontSize: 13,
-                color: '#3a3a36',
+                color: 'var(--ink-soft)',
                 flex: 1,
                 lineHeight: 1.5,
               }}>{essayText.slice(0, 220)}{essayText.length > 220 ? '…' : ''}</span>
@@ -367,9 +370,9 @@ function SortFlight({ articles }: { articles: Article[] }): JSX.Element {
               left: 0,
               width: 280,
               padding: '8px 12px',
-              background: shed ? 'transparent' : '#fafaf7',
-              border: shed ? '1px solid transparent' : '1px solid #1a1a1a',
-              boxShadow: shed ? 'none' : '2px 4px 0 rgba(26,26,26,0.06)',
+              background: shed ? 'transparent' : 'var(--paper)',
+              border: shed ? '1px solid transparent' : '1px solid var(--ink)',
+              boxShadow: shed ? 'none' : '2px 4px 0 var(--shadow-soft)',
               fontFamily: "'Old Standard TT', serif",
               transform: moved
                 ? `translate(${toX}px, ${toY}px) rotate(0deg)`
@@ -387,15 +390,15 @@ function SortFlight({ articles }: { articles: Article[] }): JSX.Element {
               fontSize: 9,
               letterSpacing: '0.24em',
               textTransform: 'uppercase',
-              color: '#6a6a62',
+              color: 'var(--ink-mute)',
             }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: sentColor, display: 'inline-block' }} />
                 {getOutlet(article)}
               </span>
-              <span style={{ color: '#1a1a1a', fontFamily: "'Special Elite', monospace" }}>τ {getTopicPct(article)}</span>
+              <span style={{ color: 'var(--ink)', fontFamily: "'Special Elite', monospace" }}>τ {getTopicPct(article)}</span>
             </div>
-            <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 14, lineHeight: 1.2, marginTop: 4, color: '#1a1a1a' }}>
+            <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 14, lineHeight: 1.2, marginTop: 4, color: 'var(--ink)' }}>
               {article.title.length > 64 ? `${article.title.slice(0, 62)}…` : article.title}
             </div>
           </div>
@@ -433,7 +436,7 @@ function ExpandableChart({
             position: 'fixed',
             inset: 0,
             zIndex: 140,
-            background: 'rgba(26,26,26,0.78)',
+            background: 'rgba(var(--ink-rgb),0.78)',
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'stretch',
@@ -441,7 +444,7 @@ function ExpandableChart({
           }}
         >
           <div onClick={(event) => event.stopPropagation()} style={{
-            background: '#fafaf7',
+            background: 'var(--paper)',
             border: 'none',
             padding: '28px 48px 40px',
             width: '100vw',
@@ -456,13 +459,13 @@ function ExpandableChart({
               <div className="tracker" style={{ color: 'var(--accent)', fontSize: 12, letterSpacing: '0.34em' }}>{title}</div>
               <button type="button" onClick={() => setOpen(false)} style={{
                 background: 'transparent',
-                border: '1px solid #1a1a1a',
+                border: '1px solid var(--ink)',
                 padding: '8px 16px',
                 fontFamily: "'IM Fell DW Pica SC', serif",
                 fontSize: 11,
                 letterSpacing: '0.28em',
                 textTransform: 'uppercase',
-                color: '#1a1a1a',
+                color: 'var(--ink)',
                 cursor: 'pointer',
               }}>close x</button>
             </div>
@@ -489,14 +492,14 @@ function ExpandableChart({
           zIndex: 5,
           width: 24,
           height: 24,
-          background: '#fafaf7',
-          border: '1px solid #1a1a1a',
+          background: 'var(--paper)',
+          border: '1px solid var(--ink)',
           cursor: 'pointer',
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
           padding: 0,
-          color: '#1a1a1a',
+          color: 'var(--ink)',
         }}
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
@@ -515,8 +518,8 @@ function ExpandableChart({
 function StickyNote({
   children,
   rotation = -1.4,
-  pinColor = '#7a1d1d',
-  background = '#fdf6c9',
+  pinColor = 'var(--accent)',
+  background = 'var(--sticky)',
   maxWidth = 360,
   style,
 }: {
@@ -535,9 +538,9 @@ function StickyNote({
       background,
       backgroundImage: `radial-gradient(ellipse at 30% 18%, rgba(255,255,255,0.6), transparent 55%), radial-gradient(ellipse at 80% 90%, rgba(180,150,80,0.18), transparent 60%)`,
       transform: `rotate(${rotation}deg)`,
-      boxShadow: '0 6px 14px rgba(26,26,26,0.16), 0 1px 0 rgba(26,26,26,0.06) inset',
+      boxShadow: '0 6px 14px var(--shadow-strong), 0 1px 0 var(--shadow-soft) inset',
       fontFamily: "'IM Fell English', serif",
-      color: '#1a1a1a',
+      color: 'var(--ink)',
       ...style,
     }}>
       <span style={{
@@ -562,8 +565,8 @@ function RFSpinner(): JSX.Element {
       <span style={{
         position: 'absolute',
         inset: 0,
-        border: '1.5px solid rgba(26,26,26,0.18)',
-        borderTopColor: '#7a1d1d',
+        border: '1.5px solid var(--rule-soft)',
+        borderTopColor: 'var(--accent)',
         borderRadius: '50%',
         animation: 'rf-spin 900ms linear infinite',
       }} />
@@ -572,7 +575,7 @@ function RFSpinner(): JSX.Element {
 }
 
 function RFProgressLine({ line }: { line: SearchProgressLine }): JSX.Element {
-  const color = line.state === 'done' ? '#1a1a1a' : line.state === 'active' ? '#7a1d1d' : '#9a9a92'
+  const color = line.state === 'done' ? 'var(--ink)' : line.state === 'active' ? 'var(--accent)' : 'var(--ink-faint)'
   const symbol = line.state === 'done' ? '◼' : line.state === 'active' ? '◧' : '◻'
   const pct = clampPct(line.pct)
   return (
@@ -581,7 +584,7 @@ function RFProgressLine({ line }: { line: SearchProgressLine }): JSX.Element {
         <span>{symbol} {line.label}</span>
         <span>{line.state === 'done' ? '✓' : line.state === 'queued' ? '— —' : `${pct}%`}</span>
       </div>
-      <div style={{ height: 2, background: 'rgba(26,26,26,0.12)', position: 'relative', marginTop: 2 }}>
+      <div style={{ height: 2, background: 'rgba(var(--ink-rgb),0.12)', position: 'relative', marginTop: 2 }}>
         <div style={{
           position: 'absolute',
           left: 0,
@@ -621,12 +624,12 @@ function RFScatterCard({
         width: 250,
         height: 116,
         padding: '12px 14px',
-        background: '#fafaf7',
-        border: '1px solid #1a1a1a',
+        background: 'var(--paper)',
+        border: '1px solid var(--ink)',
         transform: `rotate(${spot.r}deg)`,
         animation: `rf-scatter 700ms ${delay}ms cubic-bezier(.2,.7,.2,1.05) both`,
         fontFamily: "'Old Standard TT', serif",
-        boxShadow: '2px 4px 0 rgba(26,26,26,0.04)',
+        boxShadow: '2px 4px 0 var(--shadow-faint)',
         // Smooth "shuffle" when the rerank reorders the visible articles —
         // each card slides to its new scatter spot rather than jumping.
         transition: 'left 600ms cubic-bezier(.2,.7,.2,1.05), top 600ms cubic-bezier(.2,.7,.2,1.05), transform 600ms cubic-bezier(.2,.7,.2,1.05)',
@@ -640,15 +643,15 @@ function RFScatterCard({
         fontSize: 9,
         letterSpacing: '0.24em',
         textTransform: 'uppercase',
-        color: '#6a6a62',
+        color: 'var(--ink-mute)',
       }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: sentColor, display: 'inline-block' }} />
           {getOutlet(article)}
         </span>
-        <span style={{ color: '#1a1a1a', fontFamily: "'Special Elite', monospace", letterSpacing: '0.04em' }}>τ {topicPct}</span>
+        <span style={{ color: 'var(--ink)', fontFamily: "'Special Elite', monospace", letterSpacing: '0.04em' }}>τ {topicPct}</span>
       </div>
-      <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 16, lineHeight: 1.15, marginTop: 6, color: '#1a1a1a' }}>
+      <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 16, lineHeight: 1.15, marginTop: 6, color: 'var(--ink)' }}>
         {article.title.length > 68 ? `${article.title.slice(0, 66)}…` : article.title}
       </div>
       <div style={{
@@ -659,7 +662,7 @@ function RFScatterCard({
         fontFamily: "'IM Fell English', serif",
         fontStyle: 'italic',
         fontSize: 11,
-        color: '#6a6a62',
+        color: 'var(--ink-mute)',
         display: 'flex',
         justifyContent: 'space-between',
       }}>
@@ -676,12 +679,12 @@ function RFScatterCard({
             right: -10,
             width: 24,
             height: 24,
-            border: '1px solid #1a1a1a',
-            background: '#fafaf7',
+            border: '1px solid var(--ink)',
+            background: 'var(--paper)',
             cursor: 'pointer',
             fontFamily: "'IM Fell DW Pica SC', serif",
             fontSize: 10,
-            color: '#7a1d1d',
+            color: 'var(--accent)',
           }}
           title="mark as not relevant"
         >×</button>
@@ -691,14 +694,14 @@ function RFScatterCard({
 }
 
 function RFMicroDial({ label, value, accent, active }: { label: string; value: number; accent?: boolean; active?: boolean }): JSX.Element {
-  const fill = accent ? '#7a1d1d' : (active ? '#fafaf7' : '#1a1a1a')
+  const fill = accent ? 'var(--accent)' : (active ? 'var(--paper)' : 'var(--ink)')
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: "'Special Elite', monospace", fontSize: 9 }}>
       <span>{label}</span>
       <div style={{
         flex: 1,
         height: 3,
-        background: active ? 'rgba(250,250,247,0.18)' : 'rgba(26,26,26,0.12)',
+        background: active ? 'rgba(var(--paper-rgb),0.18)' : 'rgba(var(--ink-rgb),0.12)',
         position: 'relative',
       }}>
         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${value}%`, background: fill }} />
@@ -737,9 +740,9 @@ function RFRankedRow({
         gap: 14,
         alignItems: 'center',
         padding: '12px 4px',
-        borderBottom: '1px solid rgba(26,26,26,0.18)',
-        background: active ? '#1a1a1a' : 'transparent',
-        color: active ? '#fafaf7' : '#1a1a1a',
+        borderBottom: '1px solid var(--rule-soft)',
+        background: active ? 'var(--ink)' : 'transparent',
+        color: active ? 'var(--paper)' : 'var(--ink)',
         fontFamily: "'Old Standard TT', serif",
         cursor: hideArticleInfo ? 'default' : 'pointer',
       }}
@@ -748,14 +751,14 @@ function RFRankedRow({
         fontFamily: "'IM Fell English', serif",
         fontSize: 26,
         lineHeight: 1,
-        color: active ? '#fafaf7' : '#7a1d1d',
+        color: active ? 'var(--paper)' : 'var(--accent)',
         textAlign: 'center',
       }}>{String(rank).padStart(2, '0')}</div>
       {hideArticleInfo ? (
         <div style={{
           minHeight: 36,
-          border: '1px dashed rgba(26,26,26,0.22)',
-          background: 'rgba(26,26,26,0.025)',
+          border: '1px dashed rgba(var(--ink-rgb),0.22)',
+          background: 'rgba(var(--ink-rgb),0.025)',
           opacity: 0.85,
         }} aria-hidden />
       ) : (
@@ -781,8 +784,8 @@ function RFRankedRow({
         style={{
           background: 'transparent',
           border: '1px solid',
-          borderColor: active ? '#fafaf7' : '#1a1a1a',
-          color: active ? '#fafaf7' : '#7a1d1d',
+          borderColor: active ? 'var(--paper)' : 'var(--ink)',
+          color: active ? 'var(--paper)' : 'var(--accent)',
           cursor: 'pointer',
           width: 22,
           height: 22,
@@ -802,25 +805,25 @@ function RFMetric({ label, value, text, accent }: { label: string; value?: numbe
       justifyContent: 'space-between',
       alignItems: 'center',
       padding: '6px 0',
-      borderBottom: '1px solid rgba(26,26,26,0.18)',
+      borderBottom: '1px solid var(--rule-soft)',
     }}>
-      <span style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#6a6a62' }}>{label}</span>
+      <span style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--ink-mute)' }}>{label}</span>
       {value !== undefined ? (
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 130 }}>
-          <span style={{ flex: 1, height: 3, background: 'rgba(26,26,26,0.12)', position: 'relative' }}>
+          <span style={{ flex: 1, height: 3, background: 'rgba(var(--ink-rgb),0.12)', position: 'relative' }}>
             <span style={{
               position: 'absolute',
               left: 0,
               top: 0,
               bottom: 0,
               width: `${value}%`,
-              background: accent ? '#7a1d1d' : '#1a1a1a',
+              background: accent ? 'var(--accent)' : 'var(--ink)',
             }} />
           </span>
-          <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 11, color: '#1a1a1a' }}>{value}</span>
+          <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 11, color: 'var(--ink)' }}>{value}</span>
         </span>
       ) : (
-        <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 11, color: '#1a1a1a' }}>{text}</span>
+        <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 11, color: 'var(--ink)' }}>{text}</span>
       )}
     </div>
   )
@@ -882,7 +885,7 @@ function VintageSvdRadar({
 }): JSX.Element {
   const dims = articleDims.slice(0, 8)
   if (dims.length === 0) {
-    return <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: '#6a6a62', padding: 24, textAlign: 'center' }}>No SVD concepts available for this article.</div>
+    return <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: 'var(--ink-mute)', padding: 24, textAlign: 'center' }}>No SVD concepts available for this article.</div>
   }
   const queryByIndex = new Map<number, SvdLatentDimension>()
   for (const d of queryDims) {
@@ -908,7 +911,7 @@ function VintageSvdRadar({
     : ''
 
   return (
-    <div className="svd-radar-panel" style={{ display: 'grid', gridTemplateColumns: '1fr 200px', gap: 16, alignItems: 'start', border: '1px solid #1a1a1a', background: '#fafaf7', padding: '12px 14px', overflow: 'hidden' }}>
+    <div className="svd-radar-panel" style={{ display: 'grid', gridTemplateColumns: '1fr 200px', gap: 16, alignItems: 'start', border: '1px solid var(--ink)', background: 'var(--paper)', padding: '12px 14px', overflow: 'hidden' }}>
       <svg className="svd-radar-svg" width="100%" viewBox={`-60 -10 ${SVD_RADAR_SIZE + 120} ${SVD_RADAR_SIZE + 60}`} style={{ display: 'block', overflow: 'visible' }}>
         {Array.from({ length: SVD_RADAR_LEVELS }).map((_, l) => {
           const scale = (l + 1) / SVD_RADAR_LEVELS
@@ -921,7 +924,7 @@ function VintageSvdRadar({
               key={l}
               points={poly}
               fill="none"
-              stroke="#1a1a1a"
+              stroke="var(--ink)"
               strokeOpacity={0.18}
               strokeWidth={l === SVD_RADAR_LEVELS - 1 ? 1 : 0.5}
               strokeDasharray={l === SVD_RADAR_LEVELS - 1 ? '0' : '2 3'}
@@ -930,39 +933,39 @@ function VintageSvdRadar({
         })}
         {dims.map((_d, i) => {
           const p = point(i, 1)
-          return <line key={i} x1={SVD_RADAR_CENTER} y1={SVD_RADAR_CENTER} x2={p.x} y2={p.y} stroke="#1a1a1a" strokeOpacity={0.22} strokeWidth={0.6} />
+          return <line key={i} x1={SVD_RADAR_CENTER} y1={SVD_RADAR_CENTER} x2={p.x} y2={p.y} stroke="var(--ink)" strokeOpacity={0.22} strokeWidth={0.6} />
         })}
         {hasQuery && (
-          <polygon points={queryHull} fill="rgba(122, 29, 29, 0.10)" stroke="#7a1d1d" strokeWidth={1.2} strokeDasharray="3 2" />
+          <polygon points={queryHull} fill="var(--accent-wash-strong)" stroke="var(--accent)" strokeWidth={1.2} strokeDasharray="3 2" />
         )}
-        <polygon points={articleHull} fill="rgba(26, 26, 26, 0.20)" stroke="#1a1a1a" strokeWidth={1.4} />
+        <polygon points={articleHull} fill="rgba(var(--ink-rgb), 0.20)" stroke="var(--ink)" strokeWidth={1.4} />
         {dims.map((d, i) => {
           const ap = point(i, clampSvdMagnitude(getSvdMagnitude(d)))
           const lp = point(i, 1.16)
           const dx = lp.x - SVD_RADAR_CENTER
           const anchor: 'start' | 'middle' | 'end' = Math.abs(dx) < 24 ? 'middle' : (dx < 0 ? 'end' : 'start')
-          const aFill = (Number(d.value) >= 0) ? '#1a1a1a' : '#7a1d1d'
+          const aFill = (Number(d.value) >= 0) ? 'var(--ink)' : 'var(--accent)'
           return (
             <g key={i}>
-              {Number(d.value) < 0 && <circle cx={ap.x} cy={ap.y} r={6} fill="none" stroke="#7a1d1d" strokeWidth={1} />}
+              {Number(d.value) < 0 && <circle cx={ap.x} cy={ap.y} r={6} fill="none" stroke="var(--accent)" strokeWidth={1} />}
               <circle cx={ap.x} cy={ap.y} r={3.5} fill={aFill} />
               {hasQuery && (() => {
                 const q = queryByIndex.get(d.dimension_index)
                 if (!q) return null
                 const qp = point(i, clampSvdMagnitude(getSvdMagnitude(q)))
-                return <circle cx={qp.x} cy={qp.y} r={3.5} fill="#fafaf7" stroke="#7a1d1d" strokeWidth={1.2} />
+                return <circle cx={qp.x} cy={qp.y} r={3.5} fill="var(--paper)" stroke="var(--accent)" strokeWidth={1.2} />
               })()}
               {(() => {
                 const lines = wrapLabelLines(getSvdLabel(d), 22)
                 const valueY = lp.y + 4 + lines.length * 14
                 return (
                   <>
-                    <text x={lp.x} y={lp.y + 4} fontFamily="'IM Fell English', serif" fontStyle="italic" fontSize="12" fill="#1a1a1a" textAnchor={anchor}>
+                    <text x={lp.x} y={lp.y + 4} fontFamily="'IM Fell English', serif" fontStyle="italic" fontSize="12" fill="var(--ink)" textAnchor={anchor}>
                       {lines.map((line, idx) => (
                         <tspan key={idx} x={lp.x} dy={idx === 0 ? 0 : '1.15em'}>{line}</tspan>
                       ))}
                     </text>
-                    <text x={lp.x} y={valueY} fontFamily="'Special Elite', monospace" fontSize="9" fill="#6a6a62" textAnchor={anchor}>
+                    <text x={lp.x} y={valueY} fontFamily="'Special Elite', monospace" fontSize="9" fill="var(--ink-mute)" textAnchor={anchor}>
                       a {Number(d.value) >= 0 ? '+' : ''}{Number(d.value).toFixed(2)}{hasQuery && (() => {
                         const q = queryByIndex.get(d.dimension_index)
                         if (!q) return ''
@@ -975,31 +978,31 @@ function VintageSvdRadar({
             </g>
           )
         })}
-        <circle cx={SVD_RADAR_CENTER} cy={SVD_RADAR_CENTER} r={1.4} fill="#1a1a1a" />
+        <circle cx={SVD_RADAR_CENTER} cy={SVD_RADAR_CENTER} r={1.4} fill="var(--ink)" />
       </svg>
 
       <div style={{ paddingTop: 6 }}>
         <div className="tracker" style={{ marginBottom: 8 }}>The legend</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <span style={{ width: 18, height: 10, background: 'rgba(26,26,26,0.20)', border: '1px solid #1a1a1a', display: 'inline-block' }} />
+          <span style={{ width: 18, height: 10, background: 'rgba(var(--ink-rgb),0.20)', border: '1px solid var(--ink)', display: 'inline-block' }} />
           <span style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13 }}>this article</span>
         </div>
         {hasQuery && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-            <span style={{ width: 18, height: 10, background: 'rgba(122,29,29,0.10)', border: '1px dashed #7a1d1d', display: 'inline-block' }} />
+            <span style={{ width: 18, height: 10, background: 'var(--accent-wash-strong)', border: '1px dashed var(--accent)', display: 'inline-block' }} />
             <span style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13 }}>your slip</span>
           </div>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#1a1a1a', display: 'inline-block', margin: '0 5px' }} />
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--ink)', display: 'inline-block', margin: '0 5px' }} />
           <span style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13 }}>positive pole</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <span style={{ width: 12, height: 12, border: '1px solid #7a1d1d', display: 'inline-block', borderRadius: '50%' }} />
+          <span style={{ width: 12, height: 12, border: '1px solid var(--accent)', display: 'inline-block', borderRadius: '50%' }} />
           <span style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13 }}>negative pole</span>
         </div>
-        <div style={{ height: 1, background: 'rgba(26,26,26,0.18)', margin: '12px 0 10px' }} />
-        <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, lineHeight: 1.5, color: '#3a3a36' }}>
+        <div style={{ height: 1, background: 'var(--rule-soft)', margin: '12px 0 10px' }} />
+        <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, lineHeight: 1.5, color: 'var(--ink-soft)' }}>
           Concentric rings mark magnitude in quartiles, 0 at the center, ±1 at the edge. Vertices = where each side stands on each concept.
         </div>
       </div>
@@ -1017,7 +1020,7 @@ function VintageSvdConceptBars({
   const dims = dimensions.slice(0, 10)
   if (dims.length === 0) {
     return (
-      <div style={{ border: '1px solid #1a1a1a', background: '#fafaf7', padding: '12px 14px', fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: '#6a6a62' }}>
+      <div style={{ border: '1px solid var(--ink)', background: 'var(--paper)', padding: '12px 14px', fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: 'var(--ink-mute)' }}>
         No article-specific SVD concepts available.
       </div>
     )
@@ -1039,10 +1042,10 @@ function VintageSvdConceptBars({
   const renderBar = (d: SvdLatentDimension, accent: 'article' | 'query'): JSX.Element => {
     const value = Number(d.value)
     const widthPct = Math.min(100, (Math.abs(value) / maxMag) * 100)
-    const color = accent === 'query' ? '#7a1d1d' : '#1a1a1a'
+    const color = accent === 'query' ? 'var(--accent)' : 'var(--ink)'
     return (
-      <div style={{ display: 'flex', height: 14, border: '1px solid #1a1a1a', position: 'relative', background: '#fafaf7' }}>
-        <div style={{ flex: 1, position: 'relative', borderRight: '1px solid rgba(26,26,26,0.4)' }}>
+      <div style={{ display: 'flex', height: 14, border: '1px solid var(--ink)', position: 'relative', background: 'var(--paper)' }}>
+        <div style={{ flex: 1, position: 'relative', borderRight: '1px solid var(--shadow-block)' }}>
           {value < 0 && (
             <span style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: `${widthPct}%`, background: color, opacity: accent === 'query' ? 0.5 : 0.85 }} />
           )}
@@ -1057,20 +1060,20 @@ function VintageSvdConceptBars({
   }
 
   return (
-    <div style={{ border: '1px solid #1a1a1a', background: '#fafaf7', padding: '12px 14px' }}>
+    <div style={{ border: '1px solid var(--ink)', background: 'var(--paper)', padding: '12px 14px' }}>
       {hasComparison && (
         <div style={{ display: 'flex', gap: 14, marginBottom: 10, fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.22em', textTransform: 'uppercase', color: 'var(--ink-mute)' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 14, height: 8, background: '#1a1a1a' }} />article
+            <span style={{ width: 14, height: 8, background: 'var(--ink)' }} />article
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 14, height: 8, background: '#7a1d1d', opacity: 0.7 }} />your slip
+            <span style={{ width: 14, height: 8, background: 'var(--accent)', opacity: 0.7 }} />your slip
           </span>
         </div>
       )}
       <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--ink-mute)', marginBottom: 6 }}>
         <span>negative pole</span>
-        <span style={{ borderLeft: '1px solid rgba(26,26,26,0.4)', height: 12 }} />
+        <span style={{ borderLeft: '1px solid var(--shadow-block)', height: 12 }} />
         <span>positive pole</span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1083,7 +1086,7 @@ function VintageSvdConceptBars({
                   {getSvdLabel(d)}
                 </div>
                 {Array.isArray(d.label_terms) && d.label_terms.length > 0 && (
-                  <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 8, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#9a9a92', marginTop: 2, lineHeight: 1.4, wordBreak: 'break-word' }}>
+                  <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 8, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginTop: 2, lineHeight: 1.4, wordBreak: 'break-word' }}>
                     {d.label_terms.slice(0, 3).join(' · ')}
                   </div>
                 )}
@@ -1092,13 +1095,13 @@ function VintageSvdConceptBars({
                 {renderBar(d, 'article')}
                 {hasComparison && c && renderBar(c, 'query')}
                 {hasComparison && !c && (
-                  <div style={{ height: 14, border: '1px dashed rgba(26,26,26,0.3)', background: 'rgba(26,26,26,0.04)' }} />
+                  <div style={{ height: 14, border: '1px dashed var(--rule-dotted)', background: 'var(--shadow-faint)' }} />
                 )}
               </div>
-              <div style={{ fontFamily: "'Special Elite', monospace", fontSize: 11, color: '#1a1a1a', textAlign: 'right' }}>
+              <div style={{ fontFamily: "'Special Elite', monospace", fontSize: 11, color: 'var(--ink)', textAlign: 'right' }}>
                 <div>a {Number(d.value) >= 0 ? '+' : ''}{Number(d.value).toFixed(2)}</div>
                 {hasComparison && (
-                  <div style={{ color: c ? '#7a1d1d' : '#9a9a92', opacity: c ? 1 : 0.5 }}>
+                  <div style={{ color: c ? 'var(--accent)' : 'var(--ink-faint)', opacity: c ? 1 : 0.5 }}>
                     q {c ? `${Number(c.value) >= 0 ? '+' : ''}${Number(c.value).toFixed(2)}` : 'n/a'}
                   </div>
                 )}
@@ -1467,7 +1470,7 @@ function ChatBubble({
         fontSize: 9,
         letterSpacing: '0.28em',
         textTransform: 'uppercase',
-        color: '#6a6a62',
+        color: 'var(--ink-mute)',
         marginBottom: 4,
       }}>
         {isAssistant ? 'ai assistant editor' : 'you'}
@@ -1475,9 +1478,9 @@ function ChatBubble({
       <div style={{
         maxWidth: '88%',
         padding: '10px 14px',
-        background: isAssistant ? '#fafaf7' : '#1a1a1a',
-        color: isAssistant ? '#1a1a1a' : '#fafaf7',
-        border: '1px solid #1a1a1a',
+        background: isAssistant ? 'var(--paper)' : 'var(--ink)',
+        color: isAssistant ? 'var(--ink)' : 'var(--paper)',
+        border: '1px solid var(--ink)',
         fontFamily: "'IM Fell English', serif",
         fontSize: 14,
         lineHeight: 1.5,
@@ -1487,7 +1490,7 @@ function ChatBubble({
           <div style={{
             marginBottom: 8,
             paddingBottom: 8,
-            borderBottom: '1px dotted rgba(255,255,255,0.4)',
+            borderBottom: '1px dotted rgba(var(--paper-rgb),0.4)',
             display: 'flex',
             flexWrap: 'wrap',
             gap: 6,
@@ -1524,7 +1527,7 @@ function ChatBubble({
             width: '0.55ch',
             height: '0.95em',
             verticalAlign: '-0.1em',
-            background: '#1a1a1a',
+            background: 'var(--ink)',
             animation: 'caret-blink 1s steps(1) infinite',
           }} />
         )}
@@ -1569,7 +1572,7 @@ function BroadsheetOverlay({
     <div onClick={onClose} style={{
       position: 'fixed',
       inset: 0,
-      background: 'rgba(26,26,26,0.32)',
+      background: 'rgba(var(--ink-rgb),0.32)',
       display: 'flex',
       justifyContent: 'flex-end',
       zIndex: 30,
@@ -1578,31 +1581,31 @@ function BroadsheetOverlay({
       <div onClick={(event) => event.stopPropagation()} className="tray-scroll" style={{
         width: 'min(960px, 92vw)',
         height: '100%',
-        background: '#fafaf7',
-        borderLeft: '1px solid #1a1a1a',
-        boxShadow: '-30px 0 60px rgba(26,26,26,0.18)',
+        background: 'var(--paper)',
+        borderLeft: '1px solid var(--ink)',
+        boxShadow: '-30px 0 60px var(--rule-soft)',
         padding: '28px 48px 60px',
         animation: 'rf-slide 360ms cubic-bezier(.2,.7,.2,1.05) both',
         fontFamily: "'Old Standard TT', serif",
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: '#6a6a62' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: 'var(--ink-mute)' }}>
           <span>broadsheet · the article in full</span>
           <button type="button" onClick={onClose} style={{
             background: 'transparent',
-            border: '1px solid #1a1a1a',
+            border: '1px solid var(--ink)',
             padding: '6px 12px',
             fontFamily: 'inherit',
             fontSize: 'inherit',
             letterSpacing: 'inherit',
             textTransform: 'inherit',
-            color: '#1a1a1a',
+            color: 'var(--ink)',
             cursor: 'pointer',
           }}>← back to the ledger</button>
         </div>
 
-        <div style={{ borderTop: '1px solid #1a1a1a', borderBottom: '1px solid #1a1a1a', textAlign: 'center', padding: '14px 0 10px', marginTop: 14 }}>
+        <div style={{ borderTop: '1px solid var(--ink)', borderBottom: '1px solid var(--ink)', textAlign: 'center', padding: '14px 0 10px', marginTop: 14 }}>
           <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 32, lineHeight: 1 }}>{getOutlet(article)}</div>
-          <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: '#6a6a62', marginTop: 6 }}>
+          <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: 'var(--ink-mute)', marginTop: 6 }}>
             {formatDate(article.date)} · No. {String(rank).padStart(3, '0')} of {total}
           </div>
         </div>
@@ -1612,15 +1615,15 @@ function BroadsheetOverlay({
           <div style={{
             display: 'flex',
             justifyContent: 'space-between',
-            borderTop: '1px solid rgba(26,26,26,0.18)',
-            borderBottom: '1px solid rgba(26,26,26,0.18)',
+            borderTop: '1px solid var(--rule-soft)',
+            borderBottom: '1px solid var(--rule-soft)',
             padding: '6px 0',
             marginTop: 16,
             fontFamily: "'IM Fell DW Pica SC', serif",
             fontSize: 10,
             letterSpacing: '0.24em',
             textTransform: 'uppercase',
-            color: '#6a6a62',
+            color: 'var(--ink-mute)',
           }}>
             <span>by {getAuthorDisplay(article)}</span>
             <span>{wordCount ? `${wordCount.toLocaleString()} words` : (article.character_count ? `${article.character_count.toLocaleString()} chars` : '')}</span>
@@ -1628,7 +1631,7 @@ function BroadsheetOverlay({
         </div>
 
         {getCentralClaim(article) && (
-          <div style={{ marginTop: 22, padding: '14px 18px', borderTop: '2px solid #1a1a1a', borderBottom: '2px solid #1a1a1a' }}>
+          <div style={{ marginTop: 22, padding: '14px 18px', borderTop: '2px solid var(--ink)', borderBottom: '2px solid var(--ink)' }}>
             <div className="tracker" style={{ color: 'var(--accent)' }}>the author's central claim</div>
             <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 18, lineHeight: 1.45, fontStyle: 'italic', marginTop: 6 }}>
               {getCentralClaim(article)}
@@ -1645,7 +1648,7 @@ function BroadsheetOverlay({
           <div style={{ marginTop: 20 }}>
             <div className="tracker" style={{ color: 'var(--accent)', marginBottom: 8 }}>most important quotes</div>
             {article.support_sentences.slice(0, 3).map((quote, i) => {
-              const stanceColor = stance === 'supports' ? '#1a1a1a' : stance === 'complicates' ? '#7a1d1d' : '#9a9a92'
+              const stanceColor = stance === 'supports' ? 'var(--ink)' : stance === 'complicates' ? 'var(--accent)' : 'var(--ink-faint)'
               return (
                 <blockquote key={i} style={{
                   margin: '0 0 12px',
@@ -1655,7 +1658,7 @@ function BroadsheetOverlay({
                   fontStyle: 'italic',
                   fontSize: 16,
                   lineHeight: 1.5,
-                  color: '#1a1a1a',
+                  color: 'var(--ink)',
                 }}>{quote}</blockquote>
               )
             })}
@@ -1705,13 +1708,13 @@ function BroadsheetOverlay({
                   <blockquote key={p.id} style={{
                     margin: '0 0 12px',
                     padding: '8px 14px 10px 18px',
-                    borderLeft: '2px solid #1a1a1a',
-                    background: 'rgba(26,26,26,0.02)',
+                    borderLeft: '2px solid var(--ink)',
+                    background: 'rgba(var(--ink-rgb),0.02)',
                     fontFamily: "'IM Fell English', serif",
                     fontStyle: 'italic',
                     fontSize: 15,
                     lineHeight: 1.5,
-                    color: '#1a1a1a',
+                    color: 'var(--ink)',
                   }}>
                     <div style={{
                       display: 'flex',
@@ -1721,24 +1724,24 @@ function BroadsheetOverlay({
                       fontSize: 9,
                       letterSpacing: '0.24em',
                       textTransform: 'uppercase',
-                      color: '#6a6a62',
+                      color: 'var(--ink-mute)',
                       marginBottom: 6,
                       fontStyle: 'normal',
                     }}>
                       <span>chunk {rankLabel}</span>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 14, letterSpacing: 0, textTransform: 'none', fontFamily: "'Special Elite', monospace", fontSize: 11 }}>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ width: 50, height: 3, background: 'rgba(26,26,26,0.12)', position: 'relative' }}>
-                            <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${tPct}%`, background: '#1a1a1a' }} />
+                          <span style={{ width: 50, height: 3, background: 'rgba(var(--ink-rgb),0.12)', position: 'relative' }}>
+                            <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${tPct}%`, background: 'var(--ink)' }} />
                           </span>
-                          <span style={{ color: '#1a1a1a' }}>τ {tPct}</span>
+                          <span style={{ color: 'var(--ink)' }}>τ {tPct}</span>
                         </span>
                         {p.agreementScore !== null && (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ width: 50, height: 3, background: 'rgba(26,26,26,0.12)', position: 'relative' }}>
-                              <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${aPct}%`, background: '#7a1d1d' }} />
+                            <span style={{ width: 50, height: 3, background: 'rgba(var(--ink-rgb),0.12)', position: 'relative' }}>
+                              <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${aPct}%`, background: 'var(--accent)' }} />
                             </span>
-                            <span style={{ color: '#7a1d1d' }}>A {aPct}</span>
+                            <span style={{ color: 'var(--accent)' }}>A {aPct}</span>
                           </span>
                         )}
                       </span>
@@ -1753,7 +1756,7 @@ function BroadsheetOverlay({
 
         <div style={{ marginTop: 22, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28 }}>
           <div>
-            <div className="tracker" style={{ marginBottom: 6, borderBottom: '1px solid #1a1a1a', paddingBottom: 6 }}>the editor's marks</div>
+            <div className="tracker" style={{ marginBottom: 6, borderBottom: '1px solid var(--ink)', paddingBottom: 6 }}>the editor's marks</div>
             <RFMetric label="topic relevance" value={getTopicPct(article)} />
             <RFMetric label="stance agreement" value={getAgreementPct(article)} accent />
             <RFMetric label="recency score" value={getRecencyPct(article)} />
@@ -1765,11 +1768,11 @@ function BroadsheetOverlay({
             )}
           </div>
           <div>
-            <div className="tracker" style={{ marginBottom: 8, borderBottom: '1px solid #1a1a1a', paddingBottom: 6 }}>filed under</div>
+            <div className="tracker" style={{ marginBottom: 8, borderBottom: '1px solid var(--ink)', paddingBottom: 6 }}>filed under</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {getDisplayKeywords(article).map(k => (
                 <span key={k} style={{
-                  border: '1px solid #1a1a1a',
+                  border: '1px solid var(--ink)',
                   padding: '3px 9px',
                   fontFamily: "'IM Fell DW Pica SC', serif",
                   fontSize: 9,
@@ -1778,12 +1781,12 @@ function BroadsheetOverlay({
                 }}>{k}</span>
               ))}
               {getDisplayKeywords(article).length === 0 && (
-                <span style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: '#6a6a62' }}>
+                <span style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>
                   no tags filed
                 </span>
               )}
             </div>
-            <div style={{ marginTop: 14, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: '#6a6a62', lineHeight: 1.5 }}>
+            <div style={{ marginTop: 14, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)', lineHeight: 1.5 }}>
               {article.stance_method ? `agreement scored by ${article.stance_method.toUpperCase()}` : 'agreement scoring pending'}
             </div>
           </div>
@@ -1792,7 +1795,7 @@ function BroadsheetOverlay({
         {articleQuerySvd.length > 0 && (
           <div style={{ marginTop: 28 }}>
             <div className="tracker" style={{ color: 'var(--accent)', marginBottom: 6 }}>the latent dimensions · query-anchored compass</div>
-            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#3a3a36', marginBottom: 8, lineHeight: 1.5 }}>
+            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--ink-soft)', marginBottom: 8, lineHeight: 1.5 }}>
               Each spoke is one of the concepts your slip activated most strongly. The dark hull is this article's footprint on those same concepts; the oxblood hull is your slip's. Where the hulls part company, the author is travelling somewhere you did not ask to go.
             </div>
             <ExpandableChart title="query-anchored compass">
@@ -1804,7 +1807,7 @@ function BroadsheetOverlay({
         {articleCorpusSvd.length > 0 && (
           <div style={{ marginTop: 28 }}>
             <div className="tracker" style={{ color: 'var(--accent)', marginBottom: 6 }}>the latent dimensions · the archive's broad concepts</div>
-            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#3a3a36', marginBottom: 8, lineHeight: 1.5 }}>
+            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--ink-soft)', marginBottom: 8, lineHeight: 1.5 }}>
               The same article, plotted against the archive's ten broadest concepts. Useful for seeing how its focus differs from the rest of the running order.
             </div>
             <ExpandableChart title="the archive's broad concepts">
@@ -1816,7 +1819,7 @@ function BroadsheetOverlay({
         {articleOwnSvd.length > 0 && (
           <div style={{ marginTop: 28 }}>
             <div className="tracker" style={{ color: 'var(--accent)', marginBottom: 6 }}>top concepts for this article</div>
-            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#3a3a36', marginBottom: 8, lineHeight: 1.5 }}>
+            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--ink-soft)', marginBottom: 8, lineHeight: 1.5 }}>
               Longer bars mean the article is more strongly associated with that concept. Direction (left = negative pole, right = positive pole) marks which side of the dimension the article lands on — opposite poles are different but related themes.
             </div>
             <ExpandableChart title="top concepts for this article">
@@ -1832,8 +1835,8 @@ function BroadsheetOverlay({
         {sentiment && (
           <div style={{ marginTop: 28 }}>
             <div className="tracker" style={{ color: 'var(--accent)', marginBottom: 6 }}>sentiment · vader</div>
-            <div style={{ border: '1px solid #1a1a1a', background: '#fafaf7', padding: '12px 14px' }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, fontFamily: "'Special Elite', monospace", fontSize: 12, color: '#1a1a1a' }}>
+            <div style={{ border: '1px solid var(--ink)', background: 'var(--paper)', padding: '12px 14px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, fontFamily: "'Special Elite', monospace", fontSize: 12, color: 'var(--ink)' }}>
                 <span><strong>compound</strong> {sentiment.compound >= 0 ? '+' : ''}{sentiment.compound.toFixed(2)}</span>
                 <span><strong>label</strong> {sentiment.label}</span>
                 {sentiment.tone_strength && <span><strong>tone</strong> {sentiment.tone_strength}</span>}
@@ -1852,15 +1855,15 @@ function BroadsheetOverlay({
                 const fmt = (v: number): string => `${(v * 100).toFixed(0)}%`
                 return (
                   <div style={{ marginTop: 10 }}>
-                    <div style={{ display: 'flex', height: 10, border: '1px solid #1a1a1a', overflow: 'hidden' }}>
-                      <div style={{ width: `${negPct}%`, background: '#7a1d1d' }} title={`negative ${fmt(neg)}`} />
-                      <div style={{ width: `${neuPct}%`, background: '#cdcabd' }} title={`neutral ${fmt(neu)}`} />
-                      <div style={{ width: `${posPct}%`, background: '#1a1a1a' }} title={`positive ${fmt(pos)}`} />
+                    <div style={{ display: 'flex', height: 10, border: '1px solid var(--ink)', overflow: 'hidden' }}>
+                      <div style={{ width: `${negPct}%`, background: 'var(--accent)' }} title={`negative ${fmt(neg)}`} />
+                      <div style={{ width: `${neuPct}%`, background: 'var(--neutral)' }} title={`neutral ${fmt(neu)}`} />
+                      <div style={{ width: `${posPct}%`, background: 'var(--ink)' }} title={`positive ${fmt(pos)}`} />
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.22em', textTransform: 'uppercase', color: '#6a6a62' }}>
-                      <span style={{ color: '#7a1d1d' }}>negative {fmt(neg)}</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.22em', textTransform: 'uppercase', color: 'var(--ink-mute)' }}>
+                      <span style={{ color: 'var(--accent)' }}>negative {fmt(neg)}</span>
                       <span>neutral {fmt(neu)}</span>
-                      <span style={{ color: '#1a1a1a' }}>positive {fmt(pos)}</span>
+                      <span style={{ color: 'var(--ink)' }}>positive {fmt(pos)}</span>
                     </div>
                   </div>
                 )
@@ -1871,7 +1874,7 @@ function BroadsheetOverlay({
                     const s = sentiment.text_scores?.[k]
                     if (!s || typeof s.compound !== 'number') return null
                     return (
-                      <div key={k} style={{ borderTop: '1px solid rgba(26,26,26,0.18)', paddingTop: 6, fontFamily: "'IM Fell English', serif", fontSize: 12 }}>
+                      <div key={k} style={{ borderTop: '1px solid var(--rule-soft)', paddingTop: 6, fontFamily: "'IM Fell English', serif", fontSize: 12 }}>
                         <div className="tracker" style={{ marginBottom: 2 }}>{k}</div>
                         <div style={{ fontFamily: "'Special Elite', monospace" }}>{s.compound >= 0 ? '+' : ''}{s.compound.toFixed(2)} · {s.label}</div>
                       </div>
@@ -1882,21 +1885,21 @@ function BroadsheetOverlay({
               {sentiment.snippets && (sentiment.snippets.positive?.length || sentiment.snippets.negative?.length) && (
                 <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div>
-                    <div className="tracker" style={{ color: '#1a1a1a', marginBottom: 6 }}>most positive lines</div>
+                    <div className="tracker" style={{ color: 'var(--ink)', marginBottom: 6 }}>most positive lines</div>
                     {(sentiment.snippets.positive ?? []).slice(0, 3).map((sn, i) => (
                       <blockquote key={i} style={{
                         margin: '0 0 8px',
                         padding: '4px 0 4px 12px',
-                        borderLeft: '2px solid #1a1a1a',
+                        borderLeft: '2px solid var(--ink)',
                         fontFamily: "'IM Fell English', serif",
                         fontStyle: 'italic',
                         fontSize: 13,
-                        color: '#1a1a1a',
+                        color: 'var(--ink)',
                         lineHeight: 1.5,
-                      }}>{sn.text} <span style={{ fontFamily: "'Special Elite', monospace", fontStyle: 'normal', fontSize: 10, color: '#6a6a62', whiteSpace: 'nowrap' }}>{sn.compound >= 0 ? '+' : ''}{sn.compound.toFixed(2)}</span></blockquote>
+                      }}>{sn.text} <span style={{ fontFamily: "'Special Elite', monospace", fontStyle: 'normal', fontSize: 10, color: 'var(--ink-mute)', whiteSpace: 'nowrap' }}>{sn.compound >= 0 ? '+' : ''}{sn.compound.toFixed(2)}</span></blockquote>
                     ))}
                     {(sentiment.snippets.positive ?? []).length === 0 && (
-                      <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: '#6a6a62' }}>none</div>
+                      <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>none</div>
                     )}
                   </div>
                   <div>
@@ -1905,16 +1908,16 @@ function BroadsheetOverlay({
                       <blockquote key={i} style={{
                         margin: '0 0 8px',
                         padding: '4px 0 4px 12px',
-                        borderLeft: '2px solid #7a1d1d',
+                        borderLeft: '2px solid var(--accent)',
                         fontFamily: "'IM Fell English', serif",
                         fontStyle: 'italic',
                         fontSize: 13,
-                        color: '#1a1a1a',
+                        color: 'var(--ink)',
                         lineHeight: 1.5,
-                      }}>{sn.text} <span style={{ fontFamily: "'Special Elite', monospace", fontStyle: 'normal', fontSize: 10, color: '#6a6a62', whiteSpace: 'nowrap' }}>{sn.compound >= 0 ? '+' : ''}{sn.compound.toFixed(2)}</span></blockquote>
+                      }}>{sn.text} <span style={{ fontFamily: "'Special Elite', monospace", fontStyle: 'normal', fontSize: 10, color: 'var(--ink-mute)', whiteSpace: 'nowrap' }}>{sn.compound >= 0 ? '+' : ''}{sn.compound.toFixed(2)}</span></blockquote>
                     ))}
                     {(sentiment.snippets.negative ?? []).length === 0 && (
-                      <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: '#6a6a62' }}>none</div>
+                      <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>none</div>
                     )}
                   </div>
                 </div>
@@ -1929,14 +1932,14 @@ function BroadsheetOverlay({
             <div className="tracker" style={{ color: 'var(--accent)', marginBottom: 6 }}>why is this ranked here?</div>
             {explainState?.loading || explainState?.explanation ? (
               <div style={{
-                border: '1px solid #1a1a1a',
+                border: '1px solid var(--ink)',
                 padding: '12px 14px',
-                background: '#fafaf7',
+                background: 'var(--paper)',
                 fontFamily: "'IM Fell English', serif",
                 fontStyle: 'italic',
                 fontSize: 14,
                 lineHeight: 1.5,
-                color: '#1a1a1a',
+                color: 'var(--ink)',
                 whiteSpace: 'pre-wrap',
               }}>
                 {explainState.explanation || (explainState.loading && !explainState.explanation
@@ -1950,7 +1953,7 @@ function BroadsheetOverlay({
                     height: '0.95em',
                     marginLeft: 2,
                     verticalAlign: '-0.1em',
-                    background: '#1a1a1a',
+                    background: 'var(--ink)',
                     animation: 'caret-blink 1s steps(1) infinite',
                   }} />
                 )}
@@ -1958,8 +1961,8 @@ function BroadsheetOverlay({
             ) : (
               <button type="button" onClick={onExplainRanking} style={{
                 background: 'transparent',
-                color: '#1a1a1a',
-                border: '1px solid #1a1a1a',
+                color: 'var(--ink)',
+                border: '1px solid var(--ink)',
                 padding: '8px 16px',
                 fontFamily: "'IM Fell DW Pica SC', serif",
                 fontSize: 10,
@@ -1969,16 +1972,16 @@ function BroadsheetOverlay({
               }}>↳ ask the AI Assistant Editor to explain this ranking</button>
             )}
             {explainState?.error && (
-              <div style={{ marginTop: 8, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#7a1d1d' }}>{explainState.error}</div>
+              <div style={{ marginTop: 8, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--accent)' }}>{explainState.error}</div>
             )}
           </div>
         )}
 
-        <div style={{ marginTop: 30, paddingTop: 18, borderTop: '1px solid #1a1a1a', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+        <div style={{ marginTop: 30, paddingTop: 18, borderTop: '1px solid var(--ink)', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
           <button type="button" onClick={onChatThis} style={{
-            background: '#1a1a1a',
-            color: '#fafaf7',
-            border: '1px solid #1a1a1a',
+            background: 'var(--ink)',
+            color: 'var(--paper)',
+            border: '1px solid var(--ink)',
             padding: '12px 14px',
             fontFamily: "'IM Fell DW Pica SC', serif",
             fontSize: 9,
@@ -1988,8 +1991,8 @@ function BroadsheetOverlay({
           }}>↳ ask the editor about this article</button>
           <button type="button" onClick={onFindSimilar} style={{
             background: 'transparent',
-            color: '#1a1a1a',
-            border: '1px solid #1a1a1a',
+            color: 'var(--ink)',
+            border: '1px solid var(--ink)',
             padding: '12px 14px',
             fontFamily: "'IM Fell DW Pica SC', serif",
             fontSize: 9,
@@ -1999,8 +2002,8 @@ function BroadsheetOverlay({
           }}>⌕ find similar articles</button>
           <button type="button" onClick={onDismiss} style={{
             background: 'transparent',
-            color: '#7a1d1d',
-            border: '1px solid #7a1d1d',
+            color: 'var(--accent)',
+            border: '1px solid var(--accent)',
             padding: '12px 14px',
             fontFamily: "'IM Fell DW Pica SC', serif",
             fontSize: 9,
@@ -2021,8 +2024,8 @@ function BroadsheetOverlay({
                 fontSize: 9,
                 letterSpacing: '0.28em',
                 textTransform: 'uppercase',
-                color: '#6a6a62',
-                borderBottom: '1px solid #6a6a62',
+                color: 'var(--ink-mute)',
+                borderBottom: '1px solid var(--ink-mute)',
                 paddingBottom: 1,
                 textDecoration: 'none',
               }}
@@ -2058,7 +2061,7 @@ function SimilarOverlay({
     <div onClick={onClose} style={{
       position: 'fixed',
       inset: 0,
-      background: 'rgba(26,26,26,0.42)',
+      background: 'var(--runtime-veil-top)',
       zIndex: 60,
       display: 'flex',
       justifyContent: 'center',
@@ -2068,40 +2071,40 @@ function SimilarOverlay({
       <div onClick={(event) => event.stopPropagation()} style={{
         width: 760,
         maxHeight: '90%',
-        background: '#fafaf7',
-        border: '1px solid #1a1a1a',
-        boxShadow: '0 24px 60px rgba(26,26,26,0.36)',
+        background: 'var(--paper)',
+        border: '1px solid var(--ink)',
+        boxShadow: '0 24px 60px rgba(var(--ink-rgb),0.36)',
         display: 'flex',
         flexDirection: 'column',
         fontFamily: "'Old Standard TT', serif",
         animation: 'rf-rise 360ms cubic-bezier(.2,.7,.2,1.05) both',
       }}>
-        <div style={{ padding: '20px 28px 14px', borderBottom: '1px solid #1a1a1a' }}>
+        <div style={{ padding: '20px 28px 14px', borderBottom: '1px solid var(--ink)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
             <div className="tracker" style={{ color: 'var(--accent)' }}>from the archive · neighbours of this article</div>
             <button type="button" onClick={onClose} style={{
               background: 'transparent',
-              border: '1px solid #1a1a1a',
+              border: '1px solid var(--ink)',
               padding: '6px 12px',
               fontFamily: "'IM Fell DW Pica SC', serif",
               fontSize: 10,
               letterSpacing: '0.28em',
               textTransform: 'uppercase',
-              color: '#1a1a1a',
+              color: 'var(--ink)',
               cursor: 'pointer',
             }}>close</button>
           </div>
           <div style={{ marginTop: 10, fontFamily: "'IM Fell English', serif", fontSize: 16, lineHeight: 1.4 }}>
             articles that share latitude with <em style={{ fontStyle: 'italic' }}>"{source.title}"</em>
           </div>
-          <div style={{ marginTop: 6, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: '#6a6a62' }}>
+          <div style={{ marginTop: 6, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>
             measured by SVD cosine on the article body · {getAuthorDisplay(source)} · {getOutlet(source)}
           </div>
           {sharedKeywords.length > 0 && (
             <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {sharedKeywords.map(k => (
                 <span key={k} style={{
-                  border: '1px solid #1a1a1a',
+                  border: '1px solid var(--ink)',
                   padding: '3px 9px',
                   fontFamily: "'IM Fell DW Pica SC', serif",
                   fontSize: 9,
@@ -2119,7 +2122,7 @@ function SimilarOverlay({
               padding: '14px 28px',
               fontFamily: "'IM Fell English', serif",
               fontStyle: 'italic',
-              color: '#7a1d1d',
+              color: 'var(--accent)',
             }}>{error}</div>
           )}
           {similar.length === 0 && !loading && !error && (
@@ -2127,7 +2130,7 @@ function SimilarOverlay({
               padding: '24px 28px',
               fontFamily: "'IM Fell English', serif",
               fontStyle: 'italic',
-              color: '#6a6a62',
+              color: 'var(--ink-mute)',
             }}>No close neighbours surfaced from the archive yet.</div>
           )}
           {similar.map((article) => {
@@ -2142,7 +2145,7 @@ function SimilarOverlay({
                   gap: 18,
                   alignItems: 'center',
                   padding: '14px 28px',
-                  borderBottom: '1px solid rgba(26,26,26,0.18)',
+                  borderBottom: '1px solid var(--rule-soft)',
                   cursor: 'pointer',
                 }}
               >
@@ -2150,7 +2153,7 @@ function SimilarOverlay({
                   fontFamily: "'IM Fell English', serif",
                   fontSize: 22,
                   lineHeight: 1,
-                  color: '#7a1d1d',
+                  color: 'var(--accent)',
                   textAlign: 'center',
                 }}>
                   {clampPct(article.score ?? null)}
@@ -2160,14 +2163,14 @@ function SimilarOverlay({
                     <span style={{ width: 7, height: 7, borderRadius: '50%', background: sentColor, display: 'inline-block', flexShrink: 0 }} />
                     <span>{article.title}</span>
                   </div>
-                  <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: '#6a6a62', marginTop: 3 }}>
+                  <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)', marginTop: 3 }}>
                     {getAuthorDisplay(article)} · {getOutlet(article)} · {formatDate(article.date)}
                   </div>
                   <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                     {(article.keywords ?? []).slice(0, 4).map(k => (
                       <span key={k} style={{
-                        background: '#1a1a1a',
-                        color: '#fafaf7',
+                        background: 'var(--ink)',
+                        color: 'var(--paper)',
                         padding: '2px 7px',
                         fontFamily: "'IM Fell DW Pica SC', serif",
                         fontSize: 8,
@@ -2178,7 +2181,7 @@ function SimilarOverlay({
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <span className="tracker" style={{ borderBottom: '1px solid #1a1a1a', paddingBottom: 2, color: '#1a1a1a' }}>read the article →</span>
+                  <span className="tracker" style={{ borderBottom: '1px solid var(--ink)', paddingBottom: 2, color: 'var(--ink)' }}>read the article →</span>
                 </div>
               </div>
             )
@@ -2187,7 +2190,7 @@ function SimilarOverlay({
 
         <div style={{
           padding: '12px 28px',
-          borderTop: '1px solid #1a1a1a',
+          borderTop: '1px solid var(--ink)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -2201,9 +2204,9 @@ function SimilarOverlay({
             disabled={!hasMore || loading}
             style={{
               background: 'transparent',
-              color: hasMore ? '#1a1a1a' : '#9a9a92',
+              color: hasMore ? 'var(--ink)' : 'var(--ink-faint)',
               border: '1px solid',
-              borderColor: hasMore ? '#1a1a1a' : '#9a9a92',
+              borderColor: hasMore ? 'var(--ink)' : 'var(--ink-faint)',
               padding: '7px 14px',
               fontFamily: "'IM Fell DW Pica SC', serif",
               fontSize: 9,
@@ -2255,7 +2258,7 @@ function ResultsChatOverlay({
     <div onClick={onClose} style={{
       position: 'fixed',
       inset: 0,
-      background: 'rgba(26,26,26,0.32)',
+      background: 'rgba(var(--ink-rgb),0.32)',
       zIndex: 40,
       display: 'flex',
       justifyContent: 'flex-end',
@@ -2264,8 +2267,8 @@ function ResultsChatOverlay({
       <div onClick={(event) => event.stopPropagation()} style={{
         width: 560,
         height: '100%',
-        background: '#fafaf7',
-        borderLeft: '1px solid #1a1a1a',
+        background: 'var(--paper)',
+        borderLeft: '1px solid var(--ink)',
         animation: 'rf-slide 360ms cubic-bezier(.2,.7,.2,1.05) both',
         display: 'flex',
         flexDirection: 'column',
@@ -2273,7 +2276,7 @@ function ResultsChatOverlay({
       }}>
         <div style={{
           padding: '20px 24px 14px',
-          borderBottom: '1px solid #1a1a1a',
+          borderBottom: '1px solid var(--ink)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'baseline',
@@ -2283,24 +2286,24 @@ function ResultsChatOverlay({
             {/* Chat is an AI-assistant feature, separate from the persona
                 stance-scorer. Plain label, no portrait. */}
             <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 24, marginTop: 2 }}>AI Assistant Editor</div>
-            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: '#6a6a62' }}>has read all {total} articles · cites by [number]</div>
+            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>has read all {total} articles · cites by [number]</div>
           </div>
           <button type="button" onClick={onClose} style={{
             background: 'transparent',
-            border: '1px solid #1a1a1a',
+            border: '1px solid var(--ink)',
             padding: '6px 12px',
             fontFamily: "'IM Fell DW Pica SC', serif",
             fontSize: 10,
             letterSpacing: '0.28em',
             textTransform: 'uppercase',
-            color: '#1a1a1a',
+            color: 'var(--ink)',
             cursor: 'pointer',
           }}>close</button>
         </div>
 
         <div className="tray-scroll" style={{ flex: 1, padding: '20px 24px' }}>
           {messages.length === 0 && !loading && (
-            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 14, color: '#6a6a62', marginBottom: 14 }}>
+            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 14, color: 'var(--ink-mute)', marginBottom: 14 }}>
               Good afternoon. I have your articles in front of me. Ask whatever you like — about the running order, the dissent, or any single article.
             </div>
           )}
@@ -2308,12 +2311,12 @@ function ResultsChatOverlay({
             <ChatBubble key={message.id} message={message} onOpenSource={onOpenSource} />
           ))}
           {loading && messages.length > 0 && messages[messages.length - 1].content === '' && (
-            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#6a6a62', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--ink-mute)', display: 'flex', gap: 8, alignItems: 'center' }}>
               <RFSpinner /> Hollis is at the lectern…
             </div>
           )}
           {error && (
-            <div style={{ marginTop: 12, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#7a1d1d' }}>{error}</div>
+            <div style={{ marginTop: 12, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--accent)' }}>{error}</div>
           )}
           <div style={{ marginTop: 16 }}>
             <div className="tracker" style={{ marginBottom: 6 }}>ready-made questions</div>
@@ -2329,12 +2332,12 @@ function ResultsChatOverlay({
                   padding: '8px 12px',
                   marginBottom: 6,
                   background: 'transparent',
-                  border: '1px solid rgba(26,26,26,0.4)',
+                  border: '1px solid var(--shadow-block)',
                   cursor: 'pointer',
                   fontFamily: "'IM Fell English', serif",
                   fontStyle: 'italic',
                   fontSize: 13,
-                  color: '#1a1a1a',
+                  color: 'var(--ink)',
                 }}
               >{q}</button>
             ))}
@@ -2343,7 +2346,7 @@ function ResultsChatOverlay({
 
         {/* Attachment chips + picker */}
         {(attachedIds.length > 0 || pickerOpen) && (
-          <div style={{ padding: '10px 24px', borderTop: '1px solid rgba(26,26,26,0.18)' }}>
+          <div style={{ padding: '10px 24px', borderTop: '1px solid var(--rule-soft)' }}>
             {attachedIds.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: pickerOpen ? 10 : 0 }}>
                 {attachedIds.map(id => {
@@ -2352,19 +2355,19 @@ function ResultsChatOverlay({
                   return (
                     <span key={id} style={{
                       display: 'inline-flex', alignItems: 'center', gap: 6,
-                      border: '1px solid #1a1a1a', padding: '3px 8px',
+                      border: '1px solid var(--ink)', padding: '3px 8px',
                       fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase',
-                      background: '#1a1a1a', color: '#fafaf7',
+                      background: 'var(--ink)', color: 'var(--paper)',
                     }}>
                       [{String(a.rank).padStart(2, '0')}] {a.title.slice(0, 28)}{a.title.length > 28 ? '…' : ''}
-                      <button type="button" onClick={() => onToggleAttachment(id)} style={{ background: 'transparent', border: 0, color: '#fafaf7', cursor: 'pointer', padding: 0, fontSize: 11 }}>×</button>
+                      <button type="button" onClick={() => onToggleAttachment(id)} style={{ background: 'transparent', border: 0, color: 'var(--paper)', cursor: 'pointer', padding: 0, fontSize: 11 }}>×</button>
                     </span>
                   )
                 })}
               </div>
             )}
             {pickerOpen && (
-              <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid rgba(26,26,26,0.18)', padding: '6px' }}>
+              <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--rule-soft)', padding: '6px' }}>
                 {attachableArticles.map(a => {
                   const isAttached = attachedIds.includes(a.id)
                   return (
@@ -2374,8 +2377,8 @@ function ResultsChatOverlay({
                       onClick={() => onToggleAttachment(a.id)}
                       style={{
                         display: 'flex', width: '100%', alignItems: 'baseline', gap: 8, padding: '4px 6px',
-                        background: isAttached ? '#1a1a1a' : 'transparent',
-                        color: isAttached ? '#fafaf7' : '#1a1a1a',
+                        background: isAttached ? 'var(--ink)' : 'transparent',
+                        color: isAttached ? 'var(--paper)' : 'var(--ink)',
                         border: 0, cursor: 'pointer', textAlign: 'left',
                         fontFamily: "'IM Fell English', serif", fontSize: 13,
                       }}
@@ -2391,15 +2394,15 @@ function ResultsChatOverlay({
           </div>
         )}
 
-        <form onSubmit={onSubmit} style={{ padding: '14px 24px', borderTop: '1px solid #1a1a1a', display: 'flex', gap: 10, alignItems: 'center' }}>
+        <form onSubmit={onSubmit} style={{ padding: '14px 24px', borderTop: '1px solid var(--ink)', display: 'flex', gap: 10, alignItems: 'center' }}>
           <button
             type="button"
             onClick={() => setPickerOpen(p => !p)}
             title="Attach an article to your question"
             style={{
-              background: pickerOpen ? '#1a1a1a' : 'transparent',
-              color: pickerOpen ? '#fafaf7' : '#1a1a1a',
-              border: '1px solid #1a1a1a',
+              background: pickerOpen ? 'var(--ink)' : 'transparent',
+              color: pickerOpen ? 'var(--paper)' : 'var(--ink)',
+              border: '1px solid var(--ink)',
               padding: '8px 10px',
               cursor: 'pointer',
               fontFamily: "'IM Fell DW Pica SC', serif",
@@ -2417,9 +2420,9 @@ function ResultsChatOverlay({
               padding: '10px 12px',
               fontFamily: "'Special Elite', monospace",
               fontSize: 13,
-              color: '#1a1a1a',
-              border: '1px solid #1a1a1a',
-              background: '#fafaf7',
+              color: 'var(--ink)',
+              border: '1px solid var(--ink)',
+              background: 'var(--paper)',
               outline: 'none',
             }}
           />
@@ -2427,9 +2430,9 @@ function ResultsChatOverlay({
             type="submit"
             disabled={loading || input.trim() === ''}
             style={{
-              background: '#1a1a1a',
-              color: '#fafaf7',
-              border: '1px solid #1a1a1a',
+              background: 'var(--ink)',
+              color: 'var(--paper)',
+              border: '1px solid var(--ink)',
               padding: '8px 18px',
               fontFamily: "'IM Fell DW Pica SC', serif",
               fontSize: 10,
@@ -2473,7 +2476,7 @@ function ArticleChatOverlay({
     <div onClick={onClose} style={{
       position: 'fixed',
       inset: 0,
-      background: 'rgba(26,26,26,0.42)',
+      background: 'var(--runtime-veil-top)',
       zIndex: 50,
       display: 'flex',
       justifyContent: 'center',
@@ -2483,16 +2486,16 @@ function ArticleChatOverlay({
       <div onClick={(event) => event.stopPropagation()} style={{
         width: 640,
         maxHeight: '88%',
-        background: '#fafaf7',
-        border: '1px solid #1a1a1a',
-        boxShadow: '0 24px 60px rgba(26,26,26,0.36)',
+        background: 'var(--paper)',
+        border: '1px solid var(--ink)',
+        boxShadow: '0 24px 60px rgba(var(--ink-rgb),0.36)',
         display: 'flex',
         flexDirection: 'column',
         fontFamily: "'Old Standard TT', serif",
       }}>
         <div style={{
           padding: '18px 22px',
-          borderBottom: '1px solid #1a1a1a',
+          borderBottom: '1px solid var(--ink)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'baseline',
@@ -2501,26 +2504,26 @@ function ArticleChatOverlay({
           <div>
             <div className="tracker" style={{ color: 'var(--accent)' }}>asking about a single article</div>
             <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 18, marginTop: 4, lineHeight: 1.2 }}>{article.title}</div>
-            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: '#6a6a62' }}>
+            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>
               by {getAuthorDisplay(article)} · {getOutlet(article)}
             </div>
           </div>
           <button type="button" onClick={onClose} style={{
             background: 'transparent',
-            border: '1px solid #1a1a1a',
+            border: '1px solid var(--ink)',
             padding: '6px 12px',
             fontFamily: "'IM Fell DW Pica SC', serif",
             fontSize: 10,
             letterSpacing: '0.28em',
             textTransform: 'uppercase',
-            color: '#1a1a1a',
+            color: 'var(--ink)',
             cursor: 'pointer',
           }}>close</button>
         </div>
 
         <div className="tray-scroll" style={{ flex: 1, padding: '18px 22px', minHeight: 200 }}>
           {messages.length === 0 && !loading && (
-            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#6a6a62', marginBottom: 12 }}>
+            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--ink-mute)', marginBottom: 12 }}>
               I've read this article in full. What do you want to know?
             </div>
           )}
@@ -2528,7 +2531,7 @@ function ArticleChatOverlay({
             <ChatBubble key={message.id} message={message} />
           ))}
           {error && (
-            <div style={{ marginTop: 12, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#7a1d1d' }}>{error}</div>
+            <div style={{ marginTop: 12, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--accent)' }}>{error}</div>
           )}
           <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {presets.map(p => (
@@ -2538,20 +2541,20 @@ function ArticleChatOverlay({
                 onClick={() => onInputChange(p)}
                 style={{
                   background: 'transparent',
-                  border: '1px solid rgba(26,26,26,0.4)',
+                  border: '1px solid var(--shadow-block)',
                   padding: '6px 10px',
                   fontFamily: "'IM Fell English', serif",
                   fontStyle: 'italic',
                   fontSize: 12,
                   cursor: 'pointer',
-                  color: '#1a1a1a',
+                  color: 'var(--ink)',
                 }}
               >{p}</button>
             ))}
           </div>
         </div>
 
-        <form onSubmit={onSubmit} style={{ padding: '12px 22px', borderTop: '1px solid #1a1a1a', display: 'flex', gap: 8 }}>
+        <form onSubmit={onSubmit} style={{ padding: '12px 22px', borderTop: '1px solid var(--ink)', display: 'flex', gap: 8 }}>
           <input
             value={input}
             onChange={(event) => onInputChange(event.target.value)}
@@ -2561,19 +2564,19 @@ function ArticleChatOverlay({
               padding: '8px 12px',
               fontFamily: "'Special Elite', monospace",
               fontSize: 12,
-              border: '1px solid #1a1a1a',
-              background: '#fafaf7',
+              border: '1px solid var(--ink)',
+              background: 'var(--paper)',
               outline: 'none',
-              color: '#1a1a1a',
+              color: 'var(--ink)',
             }}
           />
           <button
             type="submit"
             disabled={loading || input.trim() === ''}
             style={{
-              background: '#1a1a1a',
-              color: '#fafaf7',
-              border: '1px solid #1a1a1a',
+              background: 'var(--ink)',
+              color: 'var(--paper)',
+              border: '1px solid var(--ink)',
               padding: '6px 16px',
               fontFamily: "'IM Fell DW Pica SC', serif",
               fontSize: 10,
@@ -2605,11 +2608,11 @@ function OverviewItem({
       gap: 10,
       alignItems: 'baseline',
       paddingBottom: 6,
-      borderBottom: '1px dotted rgba(26,26,26,0.2)',
+      borderBottom: '1px dotted rgba(var(--ink-rgb),0.2)',
     }}>
-      <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 18, color: '#7a1d1d', fontStyle: 'italic' }}>"</span>
+      <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 18, color: 'var(--accent)', fontStyle: 'italic' }}>"</span>
       <div>
-        <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 14, lineHeight: 1.45, color: '#1a1a1a' }}>
+        <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 14, lineHeight: 1.45, color: 'var(--ink)' }}>
           <MarkdownText
             text={item.argument}
             sources={sources}
@@ -2640,6 +2643,8 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
     onBackToCompose,
     onOpenAbout,
     onOpenMethod,
+    theme,
+    onToggleTheme,
     typoCorrection,
     onApplyTypoCorrection,
     onSearchAnyway,
@@ -2825,6 +2830,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
           <button type="button" className="active">search</button>
           <button type="button" onClick={onOpenAbout}>about</button>
           <button type="button" onClick={onOpenMethod}>method</button>
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
       </div>
       <div className="top-rule" />
@@ -2855,8 +2861,8 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
             position: 'absolute',
             right: 'calc((100% - 720px) / 2 - 36px)',
             top: 24,
-            background: '#fafaf7',
-            border: '1px solid #1a1a1a',
+            background: 'var(--paper)',
+            border: '1px solid var(--ink)',
             cursor: 'pointer',
             width: 28,
             height: 28,
@@ -2864,7 +2870,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#1a1a1a',
+            color: 'var(--ink)',
             zIndex: 4,
           }}
         >
@@ -2880,8 +2886,8 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
         margin: '14px 48px 0',
         display: 'grid',
         gridTemplateColumns: 'repeat(3, 1fr)',
-        borderTop: '1px solid #1a1a1a',
-        borderBottom: '1px solid #1a1a1a',
+        borderTop: '1px solid var(--ink)',
+        borderBottom: '1px solid var(--ink)',
       }}>
         {stageLabels.map((s, i) => {
           const active = stageNumber === s.n
@@ -2890,9 +2896,9 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
             <div
               key={s.n}
               style={{
-                background: active ? '#1a1a1a' : 'transparent',
-                color: active ? '#fafaf7' : (passed ? '#1a1a1a' : '#6a6a62'),
-                borderLeft: i === 0 ? 0 : '1px solid #1a1a1a',
+                background: active ? 'var(--ink)' : 'transparent',
+                color: active ? 'var(--paper)' : (passed ? 'var(--ink)' : 'var(--ink-mute)'),
+                borderLeft: i === 0 ? 0 : '1px solid var(--ink)',
                 padding: '10px 14px',
                 fontFamily: "'IM Fell DW Pica SC', serif",
               }}
@@ -2930,26 +2936,26 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
         {isStage1 && inputMode === 'essay' && (
           <div>
             <div className="tracker" style={{ color: 'var(--accent)', fontSize: 10, letterSpacing: '0.32em' }}>the editor's lectern · pick the thesis</div>
-            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: '#3a3a36', marginTop: 8, marginBottom: 14, maxWidth: 720 }}>
+            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: 'var(--ink-soft)', marginTop: 8, marginBottom: 14, maxWidth: 720 }}>
               The NLI sub-editor (<PersonaName persona="nli" />) marks one sentence at a time, so we need a single thesis sentence to score against each article. Pick the candidate the editor pulled from your essay, or write your own.
             </div>
 
             <div style={{ display: 'flex', gap: 0, marginBottom: 14, fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase' }}>
               <button type="button" onClick={() => onThesisModeChange('candidate')} disabled={essayCandidates.length === 0} style={{
                 padding: '8px 18px',
-                border: '1px solid #1a1a1a',
-                background: thesisMode === 'candidate' ? '#1a1a1a' : 'transparent',
-                color: thesisMode === 'candidate' ? '#fafaf7' : '#1a1a1a',
+                border: '1px solid var(--ink)',
+                background: thesisMode === 'candidate' ? 'var(--ink)' : 'transparent',
+                color: thesisMode === 'candidate' ? 'var(--paper)' : 'var(--ink)',
                 fontFamily: 'inherit', fontSize: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit',
                 cursor: essayCandidates.length === 0 ? 'not-allowed' : 'pointer',
                 opacity: essayCandidates.length === 0 ? 0.5 : 1,
               }}>extracted candidates</button>
               <button type="button" onClick={() => onThesisModeChange('custom')} style={{
                 padding: '8px 18px',
-                border: '1px solid #1a1a1a',
+                border: '1px solid var(--ink)',
                 borderLeft: 0,
-                background: thesisMode === 'custom' ? '#1a1a1a' : 'transparent',
-                color: thesisMode === 'custom' ? '#fafaf7' : '#1a1a1a',
+                background: thesisMode === 'custom' ? 'var(--ink)' : 'transparent',
+                color: thesisMode === 'custom' ? 'var(--paper)' : 'var(--ink)',
                 fontFamily: 'inherit', fontSize: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit',
                 cursor: 'pointer',
               }}>write a custom thesis</button>
@@ -2958,12 +2964,12 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
             {thesisMode === 'candidate' && (
               <>
                 {loading && essayCandidates.length === 0 && (
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontFamily: "'Special Elite', monospace", fontSize: 12, color: '#6a6a62' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontFamily: "'Special Elite', monospace", fontSize: 12, color: 'var(--ink-mute)' }}>
                     <RFSpinner /><span>· · · the editor is reading your essay</span>
                   </div>
                 )}
                 {essayCandidates.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: '1px solid #1a1a1a', maxWidth: 920 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: '1px solid var(--ink)', maxWidth: 920 }}>
                     {essayCandidates.map((c, i) => {
                       const active = selectedThesisId === c.sentence_id
                       return (
@@ -2975,10 +2981,10 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                             padding: '12px 16px',
                             textAlign: 'left',
                             cursor: 'pointer',
-                            background: active ? '#1a1a1a' : 'transparent',
-                            color: active ? '#fafaf7' : '#1a1a1a',
+                            background: active ? 'var(--ink)' : 'transparent',
+                            color: active ? 'var(--paper)' : 'var(--ink)',
                             border: 0,
-                            borderTop: i === 0 ? 0 : '1px solid #1a1a1a',
+                            borderTop: i === 0 ? 0 : '1px solid var(--ink)',
                             display: 'flex',
                             gap: 14,
                             alignItems: 'baseline',
@@ -2989,14 +2995,14 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                             fontFamily: "'IM Fell English', serif",
                             fontStyle: 'italic',
                             fontSize: 18,
-                            color: active ? '#fafaf7' : '#7a1d1d',
+                            color: active ? 'var(--paper)' : 'var(--accent)',
                             minWidth: 22,
                           }}>{i + 1}.</span>
                           <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 16, lineHeight: 1.45, flex: 1 }}>
                             {c.sentence}
                           </span>
                           {typeof c.score === 'number' && (
-                            <span className="tracker" style={{ color: active ? 'rgba(250,250,247,0.7)' : 'var(--ink-mute)' }}>
+                            <span className="tracker" style={{ color: active ? 'rgba(var(--paper-rgb),0.7)' : 'var(--ink-mute)' }}>
                               {(c.score * 100).toFixed(0)}%
                             </span>
                           )}
@@ -3006,7 +3012,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                   </div>
                 )}
                 {!loading && essayCandidates.length === 0 && (
-                  <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 14, color: '#6a6a62' }}>
+                  <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 14, color: 'var(--ink-mute)' }}>
                     No clear thesis sentences could be pulled from this essay. Switch to "write a custom thesis" instead.
                   </div>
                 )}
@@ -3024,12 +3030,12 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                     width: '100%',
                     minHeight: 90,
                     padding: '10px 14px',
-                    border: '1px solid #1a1a1a',
-                    background: '#fafaf7',
+                    border: '1px solid var(--ink)',
+                    background: 'var(--paper)',
                     fontFamily: "'Special Elite', monospace",
                     fontSize: 14,
                     lineHeight: 1.5,
-                    color: '#1a1a1a',
+                    color: 'var(--ink)',
                     outline: 'none',
                     resize: 'vertical',
                   }}
@@ -3038,8 +3044,8 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
             )}
 
             {/* Confirmation gate */}
-            <div style={{ marginTop: 28, paddingTop: 16, borderTop: '1px solid rgba(26,26,26,0.18)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#6a6a62' }}>
+            <div style={{ marginTop: 28, paddingTop: 16, borderTop: '1px solid var(--rule-soft)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--ink-mute)' }}>
                 {loading
                   ? 'reading your essay…'
                   : 'pick a thesis above, then send the slip across the bench.'}
@@ -3049,9 +3055,9 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                 onClick={onConfirmEssayThesis}
                 disabled={loading || (thesisMode === 'candidate' ? !selectedThesisId : customThesis.trim() === '')}
                 style={{
-                  background: '#1a1a1a',
-                  color: '#fafaf7',
-                  border: '1px solid #1a1a1a',
+                  background: 'var(--ink)',
+                  color: 'var(--paper)',
+                  border: '1px solid var(--ink)',
                   padding: '10px 22px',
                   fontFamily: "'IM Fell DW Pica SC', serif",
                   fontSize: 11,
@@ -3073,7 +3079,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
             <div>
               <div className="tracker" style={{ color: 'var(--accent)', fontSize: 10, letterSpacing: '0.32em' }}>the proofreader's mark</div>
               {loading && !hasTypo ? (
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginTop: 10, fontFamily: "'Special Elite', monospace", fontSize: 12, color: '#6a6a62' }}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginTop: 10, fontFamily: "'Special Elite', monospace", fontSize: 12, color: 'var(--ink-mute)' }}>
                   <RFSpinner /><span>· · · cross-checking the archive's vocabulary</span>
                 </div>
               ) : hasTypo ? (
@@ -3087,17 +3093,17 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                         const lower = tok.toLocaleLowerCase().replace(/[^\p{L}\p{N}'-]/gu, '')
                         const isTypo = lower && terms.includes(lower)
                         return isTypo
-                          ? <span key={i} style={{ borderBottom: '2px wavy #7a1d1d', paddingBottom: 2 }}>{tok}</span>
+                          ? <span key={i} style={{ borderBottom: '2px wavy var(--accent)', paddingBottom: 2 }}>{tok}</span>
                           : <span key={i}>{tok}</span>
                       })
                     })()}
                   </div>
-                  <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 14, color: '#6a6a62', marginTop: 8, marginBottom: 12 }}>
+                  <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 14, color: 'var(--ink-mute)', marginTop: 8, marginBottom: 12 }}>
                     {(typoCorrection.highlighted_terms?.length ?? 0) > 1
                       ? `${typoCorrection.highlighted_terms?.length} words look mistyped. The archive suggests:`
                       : 'A small thing — the archive suggests a more usual spelling.'}
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: '1px solid #1a1a1a' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: '1px solid var(--ink)' }}>
                     {typoCorrection.options.map((option, i) => (
                       <button
                         key={option.query}
@@ -3108,9 +3114,9 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                           textAlign: 'left',
                           cursor: 'pointer',
                           background: 'transparent',
-                          color: '#1a1a1a',
+                          color: 'var(--ink)',
                           border: 0,
-                          borderTop: i === 0 ? 0 : '1px solid #1a1a1a',
+                          borderTop: i === 0 ? 0 : '1px solid var(--ink)',
                           display: 'flex',
                           justifyContent: 'space-between',
                           alignItems: 'center',
@@ -3133,9 +3139,9 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                         textAlign: 'left',
                         cursor: 'pointer',
                         background: 'transparent',
-                        color: '#7a1d1d',
+                        color: 'var(--accent)',
                         border: 0,
-                        borderTop: '1px solid #1a1a1a',
+                        borderTop: '1px solid var(--ink)',
                         fontFamily: "'IM Fell DW Pica SC', serif",
                         fontSize: 10,
                         letterSpacing: '0.28em',
@@ -3145,22 +3151,22 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                   </div>
                 </>
               ) : (
-                <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 14, color: '#6a6a62', marginTop: 8 }}>
+                <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 14, color: 'var(--ink-mute)', marginTop: 8 }}>
                   No typo found.
                 </div>
               )}
             </div>
 
-            <div style={{ borderLeft: '1px solid rgba(26,26,26,0.12)', paddingLeft: 28 }}>
+            <div style={{ borderLeft: '1px solid rgba(var(--ink-rgb),0.12)', paddingLeft: 28 }}>
               <div className="tracker" style={{ color: 'var(--accent)', fontSize: 10, letterSpacing: '0.32em' }}>the rewrite desk · suggested by the editor</div>
-              <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 14, color: '#3a3a36', marginTop: 6, marginBottom: 10 }}>
+              <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 14, color: 'var(--ink-soft)', marginTop: 6, marginBottom: 10 }}>
                 Three alternative searches that may surface a richer running order. Click one to file it instead.
               </div>
               {rewriteAlternatives.length === 0 && !rewriteLoading && !rewriteError && (
                 <button type="button" onClick={onLoadRewrites} className="btn-stamp">ask the editor for rewrites</button>
               )}
               {rewriteLoading && (
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontFamily: "'Special Elite', monospace", fontSize: 11, color: '#6a6a62' }}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontFamily: "'Special Elite', monospace", fontSize: 11, color: 'var(--ink-mute)' }}>
                   {/* Rewrite alternatives are LLM-generated. The AI assistant
                       is a separate role from any of the persona compositors
                       / sub-editors, so it gets a plain label with no portrait. */}
@@ -3168,10 +3174,10 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                 </div>
               )}
               {rewriteError && (
-                <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#7a1d1d' }}>{rewriteError}</div>
+                <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--accent)' }}>{rewriteError}</div>
               )}
               {rewriteAlternatives.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: '1px solid #1a1a1a' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: '1px solid var(--ink)' }}>
                   {rewriteAlternatives.map((r, i) => (
                     <button
                       key={`${r.topic}-${r.opinion}`}
@@ -3182,19 +3188,19 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                         textAlign: 'left',
                         cursor: 'pointer',
                         background: 'transparent',
-                        color: '#1a1a1a',
+                        color: 'var(--ink)',
                         border: 0,
-                        borderTop: i === 0 ? 0 : '1px solid #1a1a1a',
+                        borderTop: i === 0 ? 0 : '1px solid var(--ink)',
                         fontFamily: "'Old Standard TT', serif",
                       }}
                     >
                       <div style={{ display: 'flex', gap: 14, alignItems: 'baseline', fontFamily: "'IM Fell English', serif" }}>
-                        <span style={{ fontStyle: 'italic', fontSize: 13, color: '#6a6a62', minWidth: 70, textAlign: 'right' }}>regarding</span>
-                        <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 14, color: '#1a1a1a' }}>{r.topic}</span>
+                        <span style={{ fontStyle: 'italic', fontSize: 13, color: 'var(--ink-mute)', minWidth: 70, textAlign: 'right' }}>regarding</span>
+                        <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 14, color: 'var(--ink)' }}>{r.topic}</span>
                       </div>
                       <div style={{ display: 'flex', gap: 14, alignItems: 'baseline', marginTop: 4, fontFamily: "'IM Fell English', serif" }}>
-                        <span style={{ fontStyle: 'italic', fontSize: 13, color: '#6a6a62', minWidth: 70, textAlign: 'right' }}>I believe</span>
-                        <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 14, color: '#1a1a1a' }}>{r.opinion}</span>
+                        <span style={{ fontStyle: 'italic', fontSize: 13, color: 'var(--ink-mute)', minWidth: 70, textAlign: 'right' }}>I believe</span>
+                        <span style={{ fontFamily: "'Special Elite', monospace", fontSize: 14, color: 'var(--ink)' }}>{r.opinion}</span>
                       </div>
                       {r.rationale && (
                         <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, marginTop: 6, paddingLeft: 84, color: 'var(--ink-mute)' }}>{r.rationale}</div>
@@ -3207,8 +3213,8 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
           </div>
 
           {/* Stage 1 confirmation gate — proceeds to stage 2 with whatever query the user has */}
-          <div style={{ marginTop: 28, paddingTop: 16, borderTop: '1px solid rgba(26,26,26,0.18)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#6a6a62' }}>
+          <div style={{ marginTop: 28, paddingTop: 16, borderTop: '1px solid var(--rule-soft)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--ink-mute)' }}>
               {loading
                 ? 'the editor is checking your slip…'
                 : (hasTypo
@@ -3220,9 +3226,9 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
               onClick={onSearchAnyway}
               disabled={loading}
               style={{
-                background: '#1a1a1a',
-                color: '#fafaf7',
-                border: '1px solid #1a1a1a',
+                background: 'var(--ink)',
+                color: 'var(--paper)',
+                border: '1px solid var(--ink)',
                 padding: '10px 22px',
                 fontFamily: "'IM Fell DW Pica SC', serif",
                 fontSize: 11,
@@ -3249,7 +3255,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                 fontSize: 9,
                 letterSpacing: '0.28em',
                 textTransform: 'uppercase',
-                color: '#6a6a62',
+                color: 'var(--ink-mute)',
                 marginBottom: 10,
               }}>
                 <span>the desk · articles that cleared topic-relevance</span>
@@ -3282,7 +3288,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                     fontStyle: 'italic',
                     fontSize: 16,
                     lineHeight: 1.55,
-                    color: '#1a1a1a',
+                    color: 'var(--ink)',
                   }}>
                     <PersonaName persona={effectiveRetrievalModel} /> is finding articles that are on topic. One moment.
                   </div>
@@ -3295,24 +3301,24 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                     fontStyle: 'italic',
                     fontSize: 16,
                     lineHeight: 1.55,
-                    color: '#1a1a1a',
+                    color: 'var(--ink)',
                   }}>
-                    Here are some relevant articles, dear reader. I am presently <span style={{ borderBottom: '1.5px dotted #7a1d1d' }}>reranking</span> them by how closely they agree with you.
+                    Here are some relevant articles, dear reader. I am presently <span style={{ borderBottom: '1.5px dotted var(--accent)' }}>reranking</span> them by how closely they agree with you.
                     <br /><br />Give me one second.
-                    <span style={{ display: 'block', marginTop: 6, fontFamily: "'Special Elite', monospace", fontSize: 12, fontStyle: 'normal', color: '#6a6a62' }}>(actually, about 30 seconds)</span>
+                    <span style={{ display: 'block', marginTop: 6, fontFamily: "'Special Elite', monospace", fontSize: 12, fontStyle: 'normal', color: 'var(--ink-mute)' }}>(actually, about 30 seconds)</span>
                   </div>
                 </StickyNote>
               )}
-              <div style={{ width: '100%', maxWidth: 360, display: 'flex', alignItems: 'center', gap: 10, fontFamily: "'Special Elite', monospace", fontSize: 11, color: '#6a6a62' }}>
+              <div style={{ width: '100%', maxWidth: 360, display: 'flex', alignItems: 'center', gap: 10, fontFamily: "'Special Elite', monospace", fontSize: 11, color: 'var(--ink-mute)' }}>
                 <RFSpinner /><span>· · · {progressMessage ?? 'scoring agreement with the sub-editor'}</span>
               </div>
-              <div style={{ width: '100%', maxWidth: 360, display: 'flex', flexDirection: 'column', gap: 4, fontFamily: "'Special Elite', monospace", fontSize: 11, color: '#3a3a36' }}>
+              <div style={{ width: '100%', maxWidth: 360, display: 'flex', flexDirection: 'column', gap: 4, fontFamily: "'Special Elite', monospace", fontSize: 11, color: 'var(--ink-soft)' }}>
                 {progressLines.map(line => (
                   <RFProgressLine key={line.label} line={line} />
                 ))}
               </div>
               {dismissedIds.size > 0 && (
-                <div style={{ width: '100%', maxWidth: 360, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: '#6a6a62' }}>
+                <div style={{ width: '100%', maxWidth: 360, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>
                   <span>{dismissedIds.size} dismissed — pull next-best?</span>
                   <button type="button" onClick={onApplyDismissals} className="btn-stamp" style={{ padding: '6px 12px', fontSize: 9 }}>refresh</button>
                 </div>
@@ -3327,14 +3333,14 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
             <div style={{ order: 2, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
               {dismissedIds.size > 0 && (
                 <div style={{
-                  border: '2px solid #1a1a1a',
-                  background: '#1a1a1a',
-                  color: '#fafaf7',
+                  border: '2px solid var(--ink)',
+                  background: 'var(--ink)',
+                  color: 'var(--paper)',
                   padding: '12px 14px',
-                  boxShadow: '0 10px 22px rgba(26,26,26,0.20)',
+                  boxShadow: '0 10px 22px rgba(var(--ink-rgb),0.20)',
                   transform: 'rotate(0.35deg)',
                 }}>
-                  <div className="tracker" style={{ color: 'rgba(250,250,247,0.72)', fontSize: 9, letterSpacing: '0.26em', marginBottom: 5 }}>not relevant marked</div>
+                  <div className="tracker" style={{ color: 'rgba(var(--paper-rgb),0.72)', fontSize: 9, letterSpacing: '0.26em', marginBottom: 5 }}>not relevant marked</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'center' }}>
                     <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 15, lineHeight: 1.35 }}>
                       {dismissedIds.size} {dismissedIds.size === 1 ? 'article was' : 'articles were'} set aside.
@@ -3344,16 +3350,16 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                       onClick={onApplyDismissals}
                       style={{
                         flexShrink: 0,
-                        background: '#fafaf7',
-                        color: '#1a1a1a',
-                        border: '1px solid #fafaf7',
+                        background: 'var(--paper)',
+                        color: 'var(--ink)',
+                        border: '1px solid var(--paper)',
                         padding: '8px 12px',
                         fontFamily: "'IM Fell DW Pica SC', serif",
                         fontSize: 10,
                         letterSpacing: '0.24em',
                         textTransform: 'uppercase',
                         cursor: 'pointer',
-                        boxShadow: '2px 2px 0 rgba(250,250,247,0.26)',
+                        boxShadow: '2px 2px 0 rgba(var(--paper-rgb),0.26)',
                       }}
                     >pull next-best →</button>
                   </div>
@@ -3361,10 +3367,10 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
               )}
               {llmIrrelevantArticles.length > 0 && (
                 <details style={{
-                  borderTop: '1px solid #1a1a1a',
-                  borderBottom: '1px solid #1a1a1a',
+                  borderTop: '1px solid var(--ink)',
+                  borderBottom: '1px solid var(--ink)',
                   padding: '9px 0',
-                  color: '#6a6a62',
+                  color: 'var(--ink-mute)',
                 }}>
                   <summary style={{
                     cursor: 'pointer',
@@ -3377,7 +3383,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                     fontSize: 9,
                     letterSpacing: '0.22em',
                     textTransform: 'uppercase',
-                    color: '#7a1d1d',
+                    color: 'var(--accent)',
                   }}>
                     <span>AI marked not relevant</span>
                     <span>{llmIrrelevantArticles.length}</span>
@@ -3391,8 +3397,8 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                           fontStyle: 'italic',
                           fontSize: 12,
                           lineHeight: 1.35,
-                          color: '#3a3a36',
-                          borderTop: '1px dotted rgba(26,26,26,0.22)',
+                          color: 'var(--ink-soft)',
+                          borderTop: '1px dotted rgba(var(--ink-rgb),0.22)',
                           paddingTop: 6,
                         }}
                       >
@@ -3400,7 +3406,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                       </div>
                     ))}
                     {llmIrrelevantArticles.length > 8 && (
-                      <div style={{ fontFamily: "'Special Elite', monospace", fontSize: 10, color: '#6a6a62' }}>
+                      <div style={{ fontFamily: "'Special Elite', monospace", fontSize: 10, color: 'var(--ink-mute)' }}>
                         +{llmIrrelevantArticles.length - 8} more
                       </div>
                     )}
@@ -3415,22 +3421,22 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
               flex: 1,
               minHeight: 0,
               padding: '24px 22px 22px',
-              background: '#fdf6c9',
+              background: 'var(--sticky)',
               backgroundImage: 'radial-gradient(ellipse at 30% 18%, rgba(255,255,255,0.6), transparent 55%), radial-gradient(ellipse at 80% 90%, rgba(180,150,80,0.18), transparent 60%)',
-              boxShadow: '0 6px 14px rgba(26,26,26,0.16), 0 1px 0 rgba(26,26,26,0.06) inset',
+              boxShadow: '0 6px 14px var(--shadow-strong), 0 1px 0 var(--shadow-soft) inset',
               transform: 'rotate(-0.4deg)',
               position: 'relative',
             }}>
               {/* Tape strip at top */}
-              <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%) rotate(-2deg)', width: 96, height: 22, background: 'rgba(214, 196, 130, 0.7)', boxShadow: '0 2px 4px rgba(26,26,26,0.18)' }} aria-hidden />
+              <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%) rotate(-2deg)', width: 96, height: 22, background: 'rgba(214, 196, 130, 0.7)', boxShadow: '0 2px 4px var(--rule-soft)' }} aria-hidden />
               <div className="tracker" style={{ color: 'var(--accent)', fontSize: 10, letterSpacing: '0.32em' }}>AI Assistant Editor Overview</div>
               {overviewLoading && !overview && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.26em', textTransform: 'uppercase', color: '#6a6a62' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.26em', textTransform: 'uppercase', color: 'var(--ink-mute)' }}>
                     <RFSpinner /> <span>{overviewDraft ? 'the AI assistant editor is dictating…' : 'composing the brief…'}</span>
                   </div>
                   {overviewDraft && (
-                    <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.5, color: '#1a1a1a' }}>
+                    <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.5, color: 'var(--ink)' }}>
                       <MarkdownText
                         text={overviewDraft}
                         sources={overviewSources}
@@ -3442,7 +3448,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                         height: '0.95em',
                         marginLeft: 2,
                         verticalAlign: '-0.1em',
-                        background: '#1a1a1a',
+                        background: 'var(--ink)',
                         animation: 'caret-blink 1s steps(1) infinite',
                       }} />
                     </div>
@@ -3450,11 +3456,11 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                 </div>
               )}
               {overviewError && (
-                <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#7a1d1d' }}>{overviewError}</div>
+                <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--accent)' }}>{overviewError}</div>
               )}
               {overview && (
                 <>
-                  <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.5, color: '#1a1a1a' }}>
+                  <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.5, color: 'var(--ink)' }}>
                     <MarkdownText
                       text={overview.overview}
                       sources={overviewSources}
@@ -3462,8 +3468,8 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                     />
                   </div>
                   {(overview.supporting_arguments && overview.supporting_arguments.length > 0) && (
-                    <div style={{ borderTop: '1px solid #1a1a1a', borderBottom: '1px solid #1a1a1a', padding: '10px 0' }}>
-                      <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 18, color: '#1a1a1a', marginBottom: 8 }}>Authors who support you</div>
+                    <div style={{ borderTop: '1px solid var(--ink)', borderBottom: '1px solid var(--ink)', padding: '10px 0' }}>
+                      <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 18, color: 'var(--ink)', marginBottom: 8 }}>Authors who support you</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {overview.supporting_arguments.map((item, i) => (
                           <OverviewItem
@@ -3477,7 +3483,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                     </div>
                   )}
                   {(overview.opposing_arguments && overview.opposing_arguments.length > 0) && (
-                    <div style={{ borderTop: '1px solid #1a1a1a', borderBottom: '1px solid #1a1a1a', padding: '10px 0' }}>
+                    <div style={{ borderTop: '1px solid var(--ink)', borderBottom: '1px solid var(--ink)', padding: '10px 0' }}>
                       <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 18, color: 'var(--accent)', marginBottom: 8 }}>Authors who challenge you</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {overview.opposing_arguments.map((item, i) => (
@@ -3492,7 +3498,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                     </div>
                   )}
                   {overview.caveat && (
-                    <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: '#6a6a62' }}>
+                    <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 13, color: 'var(--ink-mute)' }}>
                       <MarkdownText
                         text={overview.caveat}
                         sources={overviewSources}
@@ -3505,18 +3511,18 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
               {!overview && !overviewLoading && !overviewError && (supporting.length > 0 || opposing.length > 0) && (
                 <>
                   {supporting.length > 0 && (
-                    <div style={{ borderTop: '1px solid #1a1a1a', borderBottom: '1px solid #1a1a1a', padding: '10px 0' }}>
-                      <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 18, color: '#1a1a1a', marginBottom: 8 }}>Authors who support you</div>
+                    <div style={{ borderTop: '1px solid var(--ink)', borderBottom: '1px solid var(--ink)', padding: '10px 0' }}>
+                      <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 18, color: 'var(--ink)', marginBottom: 8 }}>Authors who support you</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {supporting.map(article => (
                           <div
                             key={getArticleId(article)}
-                            style={{ display: 'grid', gridTemplateColumns: '36px 1fr', gap: 10, alignItems: 'baseline', paddingBottom: 6, borderBottom: '1px dotted rgba(26,26,26,0.2)' }}
+                            style={{ display: 'grid', gridTemplateColumns: '36px 1fr', gap: 10, alignItems: 'baseline', paddingBottom: 6, borderBottom: '1px dotted rgba(var(--ink-rgb),0.2)' }}
                           >
-                            <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 18, color: '#7a1d1d', fontStyle: 'italic' }}>"</span>
+                            <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 18, color: 'var(--accent)', fontStyle: 'italic' }}>"</span>
                             <div>
-                              <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 14, lineHeight: 1.45, color: '#1a1a1a' }}>{getCentralClaim(article) || article.title}</div>
-                              <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: '#6a6a62', marginTop: 4, display: 'flex', justifyContent: 'space-between' }}>
+                              <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 14, lineHeight: 1.45, color: 'var(--ink)' }}>{getCentralClaim(article) || article.title}</div>
+                              <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)', marginTop: 4, display: 'flex', justifyContent: 'space-between' }}>
                                 <span>— {getAuthorDisplay(article)} · {getOutlet(article)}</span>
                                 <button
                                   type="button"
@@ -3530,8 +3536,8 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                                     fontSize: 'inherit',
                                     letterSpacing: 'inherit',
                                     textTransform: 'inherit',
-                                    color: '#1a1a1a',
-                                    borderBottom: '1px solid #1a1a1a',
+                                    color: 'var(--ink)',
+                                    borderBottom: '1px solid var(--ink)',
                                   }}
                                 >read the article →</button>
                               </div>
@@ -3542,18 +3548,18 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                     </div>
                   )}
                   {opposing.length > 0 && (
-                    <div style={{ borderTop: '1px solid #1a1a1a', borderBottom: '1px solid #1a1a1a', padding: '10px 0' }}>
+                    <div style={{ borderTop: '1px solid var(--ink)', borderBottom: '1px solid var(--ink)', padding: '10px 0' }}>
                       <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 18, color: 'var(--accent)', marginBottom: 8 }}>Authors who challenge you</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {opposing.map(article => (
                           <div
                             key={getArticleId(article)}
-                            style={{ display: 'grid', gridTemplateColumns: '36px 1fr', gap: 10, alignItems: 'baseline', paddingBottom: 6, borderBottom: '1px dotted rgba(26,26,26,0.2)' }}
+                            style={{ display: 'grid', gridTemplateColumns: '36px 1fr', gap: 10, alignItems: 'baseline', paddingBottom: 6, borderBottom: '1px dotted rgba(var(--ink-rgb),0.2)' }}
                           >
-                            <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 18, color: '#7a1d1d', fontStyle: 'italic' }}>"</span>
+                            <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 18, color: 'var(--accent)', fontStyle: 'italic' }}>"</span>
                             <div>
-                              <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 14, lineHeight: 1.45, color: '#1a1a1a' }}>{getCentralClaim(article) || article.title}</div>
-                              <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: '#6a6a62', marginTop: 4, display: 'flex', justifyContent: 'space-between' }}>
+                              <div style={{ fontFamily: "'IM Fell English', serif", fontSize: 14, lineHeight: 1.45, color: 'var(--ink)' }}>{getCentralClaim(article) || article.title}</div>
+                              <div style={{ fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--ink-mute)', marginTop: 4, display: 'flex', justifyContent: 'space-between' }}>
                                 <span>— {getAuthorDisplay(article)} · {getOutlet(article)}</span>
                                 <button
                                   type="button"
@@ -3567,8 +3573,8 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                                     fontSize: 'inherit',
                                     letterSpacing: 'inherit',
                                     textTransform: 'inherit',
-                                    color: '#1a1a1a',
-                                    borderBottom: '1px solid #1a1a1a',
+                                    color: 'var(--ink)',
+                                    borderBottom: '1px solid var(--ink)',
                                   }}
                                 >read the article →</button>
                               </div>
@@ -3587,7 +3593,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
             <div style={{ display: 'flex', flexDirection: 'column', position: 'relative', minHeight: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
                 <div className="tracker" style={{ fontSize: 10, letterSpacing: '0.32em' }}>the ledger · ranked 01—{String(visibleArticles.length).padStart(2, '0')}</div>
-                <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: '#6a6a62' }}>click for the broadsheet</div>
+                <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>click for the broadsheet</div>
               </div>
               <div style={{
                 display: 'grid',
@@ -3598,16 +3604,16 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                 fontSize: 8,
                 letterSpacing: '0.24em',
                 textTransform: 'uppercase',
-                color: '#9a9a92',
+                color: 'var(--ink-faint)',
                 padding: '4px 4px',
-                borderTop: '1.5px solid #1a1a1a',
-                borderBottom: '1px solid rgba(26,26,26,0.18)',
+                borderTop: '1.5px solid var(--ink)',
+                borderBottom: '1px solid var(--rule-soft)',
               }}>
                 <span>rank</span><span>title · author</span><span>marks</span><span></span>
               </div>
               <div className="tray-scroll" style={{ flex: 1, minHeight: 0, paddingBottom: 24 }}>
                 {visibleArticles.length === 0 && (
-                  <div style={{ padding: 24, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: '#6a6a62' }}>
+                  <div style={{ padding: 24, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: 'var(--ink-mute)' }}>
                     {llmIrrelevantArticles.length > 0
                       ? 'The AI marked every candidate article as not relevant.'
                       : (emptyResultsMessage || 'No articles cleared the bench.')}
@@ -3647,9 +3653,9 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
             right: 32,
             bottom: 56,
             zIndex: 20,
-            background: '#1a1a1a',
-            color: '#fafaf7',
-            border: '1px solid #1a1a1a',
+            background: 'var(--ink)',
+            color: 'var(--paper)',
+            border: '1px solid var(--ink)',
             padding: '14px 20px',
             fontFamily: "'IM Fell DW Pica SC', serif",
             fontSize: 11,
@@ -3659,7 +3665,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
             display: 'flex',
             alignItems: 'center',
             gap: 12,
-            boxShadow: '0 14px 30px rgba(26,26,26,0.20)',
+            boxShadow: '0 14px 30px rgba(var(--ink-rgb),0.20)',
           }}
         >
           <span>↳ ask the editor</span>
