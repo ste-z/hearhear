@@ -2650,7 +2650,6 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
     onApplyDismissals,
     onBackToCompose,
     onOpenAbout,
-    onOpenMethod,
     theme,
     onToggleTheme,
     typoCorrection,

@@ -904,7 +904,6 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
     onSubmitEssayDraft,
     onOpenSettings,
     onOpenAbout,
-    onOpenMethod,
     theme,
     onToggleTheme,
     chunksLabel,
