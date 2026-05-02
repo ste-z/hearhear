@@ -8,6 +8,7 @@ import {
 } from 'react'
 import { PersonaName } from './PersonaName'
 import ThemeToggle, { type Theme } from './ThemeToggle'
+import { playCarriageReturn, playKeyStrike, playSend } from './typewriterAudio'
 import typewriterFrameUrl from './assets/typewriter-frame.svg'
 
 const INTRO_TOPICS = ['climate', 'immigration', 'minimum wage'] as const
@@ -953,7 +954,18 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
     const trimmedOpinion = opinion.trim()
     if (!trimmedTopic) return
     if (trimmedOpinion && !loading) {
-      onSubmitStance()
+      // Route through the same exit-animation path used by send-to-press
+      // so the slip lifts off whether the reader clicks or hits Enter.
+      setSlipExiting(prevExiting => {
+        if (prevExiting) return prevExiting
+        // The carriage-return ding has already been played by the caller
+        // (handleInputKeyDown for Enter, the on-screen Enter key handler,
+        // or handleSendToPress); follow it with the "sent" cue a beat
+        // later so the two read as a sequence.
+        window.setTimeout(() => playSend(), 180)
+        window.setTimeout(() => onSubmitStance(), 360)
+        return true
+      })
       return
     }
     if (activeField === 'topic') {
@@ -965,11 +977,21 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
     if (key === 'Enter') {
       event.preventDefault()
       flashKey('enter')
+      playCarriageReturn()
       handleStanceEnter()
     }
-    else if (key === 'Backspace') flashKey('backspace')
-    else if (key === ' ') flashKey('space')
-    else if (key.length === 1) flashKey(key.toLowerCase())
+    else if (key === 'Backspace') {
+      flashKey('backspace')
+      playKeyStrike()
+    }
+    else if (key === ' ') {
+      flashKey('space')
+      playKeyStrike()
+    }
+    else if (key.length === 1) {
+      flashKey(key.toLowerCase())
+      playKeyStrike()
+    }
   }, [flashKey, handleStanceEnter])
 
   const topicCycle = useTypewriterCycle(INTRO_TOPICS, phase === 'topic')
@@ -1007,10 +1029,28 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
 
   const isVoice = phase === 'voice'
 
+  // True for the brief window after `findVoice()` so we can run the
+  // entrance animation (typewriter rises, controls fade up). The flag is
+  // cleared after the longest animation has had time to complete.
+  const [voiceEntering, setVoiceEntering] = useState(false)
+  // True after the reader clicks "send to press"; the slip lifts off the
+  // page toward the top while the search is dispatched, giving a sense
+  // of motion into the pinned-slip position on the results page.
+  const [slipExiting, setSlipExiting] = useState(false)
+
   const findVoice = (): void => {
     setActiveField('topic')
+    setVoiceEntering(true)
     setPhase('voice')
   }
+
+  useEffect(() => {
+    if (!voiceEntering) return
+    // Longest stagger above is ~970ms (0.42s delay + 0.55s duration).
+    // Clear once we're safely past that so re-renders don't re-fire it.
+    const t = setTimeout(() => setVoiceEntering(false), 1000)
+    return () => clearTimeout(t)
+  }, [voiceEntering])
 
   const replay = (): void => {
     clearLandingSeen()
@@ -1029,6 +1069,25 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
   const essayCanSubmit = essayText.trim().length > 0 && !loading && !isImportingPdf
   const essayPasteWordCount = essayText.trim().split(/\s+/).filter(Boolean).length
 
+  const handleSendToPress = useCallback((): void => {
+    if (slipExiting) return
+    const canSubmit = voiceMode === 'stance' ? stanceCanSubmit : essayCanSubmit
+    if (!canSubmit) return
+    const submit = voiceMode === 'stance' ? onSubmitStance : onSubmitEssayDraft
+    // Same audio sequence as pressing Enter on the on-screen typewriter:
+    // the carriage-return bell rings as the slip is committed, followed by
+    // the "sent" cue a beat later as it lifts off toward the press.
+    playCarriageReturn()
+    window.setTimeout(() => playSend(), 180)
+    setSlipExiting(true)
+    // Hold the slip's exit transition long enough for it to reach the
+    // pinned-slip area before swapping pages — PinnedSlip's own
+    // entrance picks up where this leaves off.
+    window.setTimeout(() => {
+      submit()
+    }, 360)
+  }, [essayCanSubmit, onSubmitEssayDraft, onSubmitStance, slipExiting, stanceCanSubmit, voiceMode])
+
   return (
     <div className="stage-shell" style={{ position: 'relative' }}>
       <div className="top-rail" style={{ flexShrink: 0 }}>
@@ -1036,7 +1095,6 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
         <div className="top-rail-links">
           <button type="button" className="active">search</button>
           <button type="button" onClick={onOpenAbout}>about</button>
-          <button type="button" onClick={onOpenMethod}>method</button>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
       </div>
@@ -1130,18 +1188,22 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
 
       {/* VOICE MODE — flex column that scales to viewport */}
       {isVoice && (
-        <div style={{
-          flex: 1,
-          minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          padding: '14px 48px 12px',
-          gap: 6,
-          overflow: 'hidden',
-        }}>
+        <div
+          className={`${voiceEntering ? 'voice-entering' : ''} ${slipExiting ? 'slip-exiting' : ''}`.trim()}
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            padding: '14px 48px 12px',
+            gap: 6,
+            overflowX: 'hidden',
+            overflowY: 'auto',
+          }}
+        >
           {/* Mode toggle */}
-          <div style={{
+          <div className="voice-mode-toggle" style={{
             display: 'flex',
             justifyContent: 'center',
             gap: 0,
@@ -1190,24 +1252,34 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
             gap: 8,
             padding: '8px 0',
           }}>
-            {/* Paper sheet — the stance slip matches the intro animation slip. */}
-            <div style={{
+            {/* Paper sheet — the stance slip matches the intro animation slip.
+                On send-to-press the slip lifts toward where the pinned slip
+                will sit on the results page, paired with PinnedSlip's
+                entrance from above so the motion reads as one continuous
+                flight. The transform/opacity are set inline (not via CSS
+                class) so they layer cleanly over the existing min-height
+                transition the slip needs for essay-mode resize. */}
+            <div className="voice-slip" style={{
               marginTop: 0,
               width: COMPOSE_SURFACE_WIDTH,
               maxWidth: '100%',
-              height: voiceMode === 'essay' ? 380 : 'auto',
+              minHeight: voiceMode === 'essay' ? 380 : undefined,
+              height: 'auto',
               background: 'var(--paper)',
               border: voiceMode === 'essay' ? '1px solid rgba(var(--ink-rgb),0.6)' : '1px solid var(--ink)',
-              borderBottom: voiceMode === 'essay' ? 'none' : '1px solid var(--ink)',
+              borderBottom: '1px solid var(--ink)',
               boxShadow: voiceMode === 'essay'
-                ? '0 -2px 0 var(--shadow-faint), 0 -8px 24px var(--shadow-faint)'
+                ? '0 8px 20px var(--shadow-mid)'
                 : '0 8px 20px var(--shadow-mid)',
-              transition: 'height 0.5s ease',
-              padding: voiceMode === 'essay' ? '36px 36px 0' : '24px 30px 26px',
+              transition: 'min-height 0.5s ease, transform 460ms cubic-bezier(.55,.02,.2,1), opacity 460ms cubic-bezier(.55,.02,.2,1)',
+              transform: slipExiting ? 'translateY(-32vh) scale(0.945)' : 'translateY(0) scale(1)',
+              opacity: slipExiting ? 0 : 1,
+              pointerEvents: slipExiting ? 'none' : undefined,
+              padding: voiceMode === 'essay' ? '36px 36px 24px' : '24px 30px 26px',
               display: 'flex',
               flexDirection: 'column',
               gap: voiceMode === 'essay' ? 22 : 18,
-              overflow: voiceMode === 'essay' ? 'hidden' : 'visible',
+              overflow: 'visible',
               position: 'relative',
               zIndex: 1,
               flexShrink: 0,
@@ -1300,6 +1372,14 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
                       <textarea
                         value={essayText}
                         onChange={(event) => onEssayTextChange(event.target.value)}
+                        onKeyDown={(event) => {
+                          // Match the typewriter feel from the stance flow:
+                          // each key strike clicks, Enter rings the carriage bell.
+                          if (event.key === 'Enter') playCarriageReturn()
+                          else if (event.key === 'Backspace' || event.key === ' ' || event.key.length === 1) {
+                            playKeyStrike()
+                          }
+                        }}
                         placeholder="The case for sea protection has been overstated as sentiment and underargued as policy…"
                         style={{
                           position: 'relative',
@@ -1351,6 +1431,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
                   flashedKey={flashedKey}
                   onType={(char) => {
                     flashKey(char === ' ' ? 'space' : char)
+                    playKeyStrike()
                     if (activeField === 'topic') {
                       onTopicChange((prev) => prev + char)
                     } else {
@@ -1358,19 +1439,23 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
                     }
                   }}
                   onBackspace={() => {
+                    playKeyStrike()
                     if (activeField === 'topic') {
                       onTopicChange((prev) => prev.slice(0, -1))
                     } else {
                       onOpinionChange((prev) => prev.slice(0, -1))
                     }
                   }}
-                  onEnter={handleStanceEnter}
+                  onEnter={() => {
+                    playCarriageReturn()
+                    handleStanceEnter()
+                  }}
                 />
               </div>
             )}
 
             {/* Filters row */}
-            <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+            <div className="voice-filters" style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
               <FilterRow
                 yearStart={yearStart}
                 yearEnd={yearEnd}
@@ -1393,10 +1478,10 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
             </div>
 
             {/* Send to press button */}
-            <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+            <div className="voice-send" style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
               <button
                 type="button"
-                onClick={voiceMode === 'stance' ? onSubmitStance : onSubmitEssayDraft}
+                onClick={handleSendToPress}
                 disabled={voiceMode === 'stance' ? !stanceCanSubmit : !essayCanSubmit}
                 style={{
                   background: 'var(--ink)',
@@ -1419,7 +1504,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           </div>
 
           {/* Bottom row: replay intro on the left, instrument settings on the right */}
-          <div style={{
+          <div className="voice-bottom-row" style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',

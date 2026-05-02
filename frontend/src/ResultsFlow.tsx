@@ -229,9 +229,13 @@ function PinnedSlip({ topic, opinion, mode, essayText, thesisSentence, animateOn
     <div style={{
       display: 'flex',
       justifyContent: 'center',
-      transform: `translateY(${mounted ? 0 : 80}px)`,
+      // Enter from above and slightly enlarged so the motion lines up with
+      // the voice slip's exit (which lifted toward the top of the page).
+      // The reader's eye perceives a single continuous flight from the
+      // compose page into its pinned position on the results page.
+      transform: mounted ? 'translateY(0) scale(1)' : 'translateY(-32vh) scale(1.06)',
       opacity: mounted ? 1 : 0,
-      transition: 'transform 700ms cubic-bezier(.2,.7,.2,1.05), opacity 500ms',
+      transition: 'transform 620ms cubic-bezier(.2,.7,.2,1.05), opacity 380ms ease',
     }}>
       <div style={{
         position: 'relative',
@@ -295,10 +299,12 @@ function PinnedSlip({ topic, opinion, mode, essayText, thesisSentence, animateOn
                   borderBottom: '1px solid var(--ink)',
                   paddingBottom: 1,
                   flex: 1,
+                  minWidth: 0,
+                  overflowWrap: 'anywhere',
                 }}>{thesisSentence}</span>
               </div>
             )}
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginTop: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginTop: 6 }}>
               <span style={{ fontStyle: 'italic', fontSize: 14, color: 'var(--ink-mute)', minWidth: 70, textAlign: 'right' }}>essay</span>
               <span style={{
                 fontFamily: "'IM Fell English', serif",
@@ -306,7 +312,9 @@ function PinnedSlip({ topic, opinion, mode, essayText, thesisSentence, animateOn
                 fontSize: 13,
                 color: 'var(--ink-soft)',
                 flex: 1,
+                minWidth: 0,
                 lineHeight: 1.5,
+                overflowWrap: 'anywhere',
               }}>{essayText.slice(0, 220)}{essayText.length > 220 ? '…' : ''}</span>
             </div>
           </>
@@ -2829,7 +2837,6 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
         <div className="top-rail-links">
           <button type="button" className="active">search</button>
           <button type="button" onClick={onOpenAbout}>about</button>
-          <button type="button" onClick={onOpenMethod}>method</button>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
       </div>
