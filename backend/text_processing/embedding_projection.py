@@ -25,7 +25,6 @@ Run:
 
 import argparse
 import json
-import pickle
 import sqlite3
 import sys
 import time
@@ -35,6 +34,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from backend.text_processing.indexing.artifacts import _write_pickle_artifact
 from backend.text_processing.indexing.corpus import (
     DEFAULT_DB_PATH,
     DEFAULT_INDEX_DIR,
@@ -181,14 +181,25 @@ def project_source(
     np.save(coords_npy, coords_2d)
     print(f"[{source}] wrote {coords_npy} ({coords_npy.stat().st_size} bytes)", flush=True)
 
-    # 2. Save UMAP model pickle (Phase 2 backend transform)
+    # 2. Save UMAP model pickle. Reuses the existing chunked-artifact helper
+    # ([backend/text_processing/indexing/artifacts.py](backend/text_processing/indexing/artifacts.py))
+    # so anything over 95 MB is split into `.pkl.part-NNN` files that fit
+    # under GitHub's 100 MB per-file limit.
     model_pkl = _output_model_pkl(source)
-    with open(model_pkl, "wb") as fh:
-        pickle.dump(reducer, fh, protocol=pickle.HIGHEST_PROTOCOL)
-    print(
-        f"[{source}] wrote {model_pkl} ({model_pkl.stat().st_size / 1024 / 1024:.1f} MB)",
-        flush=True,
-    )
+    write_result = _write_pickle_artifact(model_pkl, reducer)
+    if write_result["storage"] == "chunked":
+        n_parts = len(write_result["files"])
+        total_bytes = sum(p.stat().st_size for p in write_result["files"])
+        print(
+            f"[{source}] wrote {model_pkl} in {n_parts} parts "
+            f"({total_bytes / 1024 / 1024:.1f} MB total)",
+            flush=True,
+        )
+    else:
+        print(
+            f"[{source}] wrote {model_pkl} ({model_pkl.stat().st_size / 1024 / 1024:.1f} MB)",
+            flush=True,
+        )
 
     # 3. Quantize to int16 and write public/.bin
     int16_coords = _quantize_to_int16(coords_2d)

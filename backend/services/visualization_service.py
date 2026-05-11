@@ -22,6 +22,11 @@ from pathlib import Path
 from threading import Lock
 from typing import Literal, Tuple
 
+from backend.text_processing.indexing.artifacts import (
+    _artifact_exists,
+    _materialized_artifact_path,
+)
+
 
 _VALID_SOURCES = ("minilm", "svd")
 Source = Literal["minilm", "svd"]
@@ -30,6 +35,9 @@ Source = Literal["minilm", "svd"]
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _INDEX_DIR = _PROJECT_ROOT / "data" / "processed" / "vector_index"
 
+# Logical pickle paths. The actual on-disk file is either the single ``.pkl``
+# or a sequence of ``.pkl.part-NNN`` chunks (split at 95 MB by
+# ``_write_pickle_artifact`` so each chunk fits under GitHub's 100 MB limit).
 UMAP_PICKLE_PATHS: dict[str, Path] = {
     "minilm": _INDEX_DIR / "guardian_article_umap2d_minilm_model.pkl",
     "svd": _INDEX_DIR / "guardian_article_umap2d_svd_model.pkl",
@@ -42,9 +50,12 @@ _umap_load_lock = Lock()
 def get_umap_model(source: Source) -> object:
     """Return the fitted UMAP model for ``source``, loading lazily on first use.
 
-    First call for a source pays the ~150 MB ``pickle.load`` cost (~2-4 s);
-    subsequent calls return the cached instance. The other source's pickle is
-    never opened if its endpoint is never hit.
+    The pickle is either a single file or a sequence of ``.pkl.part-NNN``
+    chunks; the chunked-artifact helper reassembles parts into a temp file
+    before ``pickle.load`` (mirrors how the existing search indices load
+    chunked ``.npy`` files). First call for a source pays the ~150 MB load
+    cost (~2-4 s); subsequent calls return the cached instance. The other
+    source's pickle is never opened if its endpoint is never hit.
     """
     if source not in _VALID_SOURCES:
         raise ValueError(f"Unknown source {source!r}; expected one of {_VALID_SOURCES}")
@@ -58,13 +69,14 @@ def get_umap_model(source: Source) -> object:
         if cached is not None:
             return cached
         path = UMAP_PICKLE_PATHS[source]
-        if not path.exists():
+        if not _artifact_exists(path):
             raise FileNotFoundError(
                 f"UMAP model for source={source!r} missing at {path}. "
                 f"Run: python -m backend.text_processing.embedding_projection --source {source}"
             )
-        with open(path, "rb") as fh:
-            model = pickle.load(fh)
+        with _materialized_artifact_path(path) as resolved_pickle_path:
+            with open(resolved_pickle_path, "rb") as fh:
+                model = pickle.load(fh)
         _umap_models[source] = model
         return model
 
@@ -98,5 +110,9 @@ def project_query_embedding(
 
 
 def is_umap_artifact_present(source: Source) -> bool:
-    """Cheap existence check that does NOT load the pickle."""
-    return UMAP_PICKLE_PATHS[source].exists()
+    """Cheap existence check that does NOT load the pickle.
+
+    Returns True if either the single ``.pkl`` exists or one or more
+    ``.pkl.part-NNN`` chunks exist.
+    """
+    return _artifact_exists(UMAP_PICKLE_PATHS[source])
