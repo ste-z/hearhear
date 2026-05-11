@@ -1,5 +1,5 @@
 {
-  "saved_at_utc": "2026-05-11T18:07:13.215209+00:00",
+  "saved_at_utc": "2026-05-11T18:26:10.435270+00:00",
   "reducer": "umap",
   "n_components": 2,
   "n_neighbors": 30,
@@ -16,10 +16,17 @@
       "min_dist": 0.1,
       "metric": "cosine",
       "random_state": 42,
-      "elapsed_seconds": 45.0,
+      "elapsed_seconds": 45.3,
       "coords_npy": "/Users/stevenzhou/Desktop/StevenZhou/Undergraduate/INFO4300/hearhear/.claude/worktrees/zen-wing-d22e26/data/processed/vector_index/guardian_article_umap2d_minilm_coords.npy",
       "model_pkl": "/Users/stevenzhou/Desktop/StevenZhou/Undergraduate/INFO4300/hearhear/.claude/worktrees/zen-wing-d22e26/data/processed/vector_index/guardian_article_umap2d_minilm_model.pkl",
-      "public_bin": "/Users/stevenzhou/Desktop/StevenZhou/Undergraduate/INFO4300/hearhear/.claude/worktrees/zen-wing-d22e26/frontend/public/embedding_atlas_minilm.bin"
+      "public_bin": "/Users/stevenzhou/Desktop/StevenZhou/Undergraduate/INFO4300/hearhear/.claude/worktrees/zen-wing-d22e26/frontend/public/embedding_atlas_minilm.bin",
+      "quantization": {
+        "center": [
+          1.3878834247589111,
+          3.319333553314209
+        ],
+        "scale": 4080.4581300494524
+      }
     },
     "svd": {
       "source": "svd",
@@ -28,10 +35,17 @@
       "min_dist": 0.1,
       "metric": "cosine",
       "random_state": 42,
-      "elapsed_seconds": 30.6,
+      "elapsed_seconds": 31.9,
       "coords_npy": "/Users/stevenzhou/Desktop/StevenZhou/Undergraduate/INFO4300/hearhear/.claude/worktrees/zen-wing-d22e26/data/processed/vector_index/guardian_article_umap2d_svd_coords.npy",
       "model_pkl": "/Users/stevenzhou/Desktop/StevenZhou/Undergraduate/INFO4300/hearhear/.claude/worktrees/zen-wing-d22e26/data/processed/vector_index/guardian_article_umap2d_svd_model.pkl",
-      "public_bin": "/Users/stevenzhou/Desktop/StevenZhou/Undergraduate/INFO4300/hearhear/.claude/worktrees/zen-wing-d22e26/frontend/public/embedding_atlas_svd.bin"
+      "public_bin": "/Users/stevenzhou/Desktop/StevenZhou/Undergraduate/INFO4300/hearhear/.claude/worktrees/zen-wing-d22e26/frontend/public/embedding_atlas_svd.bin",
+      "quantization": {
+        "center": [
+          0.52707839012146,
+          6.302628040313721
+        ],
+        "scale": 2819.066928248991
+      }
     }
   },
   "shared_metadata": {

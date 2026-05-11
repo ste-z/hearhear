@@ -17,10 +17,13 @@ SVD pickle is never opened.
 
 from __future__ import annotations
 
+import json
 import pickle
 from pathlib import Path
 from threading import Lock
 from typing import Literal, Tuple
+
+import numpy as np
 
 from backend.text_processing.indexing.artifacts import (
     _artifact_exists,
@@ -43,7 +46,10 @@ UMAP_PICKLE_PATHS: dict[str, Path] = {
     "svd": _INDEX_DIR / "guardian_article_umap2d_svd_model.pkl",
 }
 
+UMAP_META_PATH = _INDEX_DIR / "guardian_article_umap2d_meta.json"
+
 _umap_models: dict[str, object] = {}
+_umap_quantization: dict[str, dict] = {}
 _umap_load_lock = Lock()
 
 
@@ -81,32 +87,76 @@ def get_umap_model(source: Source) -> object:
         return model
 
 
-def project_query_embedding(
-    query_embedding,
-    source: Source,
-) -> Tuple[float, float]:
-    """Project a single high-D query embedding into the 2D UMAP space.
+def _get_quantization(source: Source) -> dict:
+    """Return ``{center: [cx, cy], scale: s}`` so the backend can map raw
+    UMAP coords into the same int16 space the frontend renders.
 
-    Parameters
-    ----------
-    query_embedding:
-        Numpy 1-D array. Must match the source's input dimensionality:
-        384 for ``minilm``, 100 for ``svd``.
-    source:
-        Which precomputed UMAP projection to use.
-
-    Returns
-    -------
-    (x, y):
-        2D coordinates in the same scale as the corresponding ``.npy``
-        master coords (i.e. before int16 quantization).
+    Cached after first read. The values are written into the umap meta
+    JSON at preprocessing time (see ``embedding_projection.py``).
     """
-    import numpy as np
+    cached = _umap_quantization.get(source)
+    if cached is not None:
+        return cached
+    if not UMAP_META_PATH.exists():
+        raise FileNotFoundError(
+            f"UMAP meta not found at {UMAP_META_PATH}. "
+            "Run `python -m backend.text_processing.embedding_projection --all`."
+        )
+    with open(UMAP_META_PATH) as fh:
+        meta = json.load(fh) or {}
+    sources_meta = meta.get("sources") or {}
+    source_meta = sources_meta.get(source) or {}
+    quant = source_meta.get("quantization")
+    if not quant:
+        raise ValueError(
+            f"Quantization params missing for source={source!r}. Re-run the "
+            "preprocessing script so the updated meta is written."
+        )
+    _umap_quantization[source] = quant
+    return quant
+
+
+def _get_query_projector_processor(source: Source):
+    """Build (or reuse) the retrieval processor whose embeddings UMAP was
+    fit on. Both ``svd`` and ``minilm`` processors expose
+    ``project_query(text, normalize=True) -> np.ndarray``.
+    """
+    from backend.text_processing.search_helpers import build_retrieval_processor
+
+    return build_retrieval_processor(retrieval_model=source)
+
+
+def project_query(query: str, source: Source) -> Tuple[float, float]:
+    """Embed the query text with the corresponding retrieval processor,
+    run it through the fitted UMAP model's ``.transform`` (this is the
+    exact projection — no nearest-neighbor approximation), and map the
+    raw 2D output into the int16 space the frontend uses to render.
+
+    Returns ``(x, y)`` floats in roughly ``[-30000, 30000]``.
+    """
+    if source not in _VALID_SOURCES:
+        raise ValueError(f"Unknown source {source!r}; expected one of {_VALID_SOURCES}")
+    text = (query or "").strip()
+    if not text:
+        raise ValueError("Query must be non-empty.")
+
+    processor = _get_query_projector_processor(source)
+    embedding = processor.project_query(text, normalize=True)
+    if embedding is None:
+        raise ValueError(
+            "Query had no projectable terms (empty after normalization)."
+        )
+    arr = np.asarray(embedding, dtype=np.float32).reshape(1, -1)
 
     model = get_umap_model(source)
-    arr = np.asarray(query_embedding, dtype=np.float32).reshape(1, -1)
-    coords = model.transform(arr)  # type: ignore[attr-defined]
-    return float(coords[0, 0]), float(coords[0, 1])
+    raw = model.transform(arr)  # type: ignore[attr-defined]
+    raw_xy = np.asarray(raw, dtype=np.float32).reshape(-1)[:2]
+
+    quant = _get_quantization(source)
+    center = np.asarray(quant["center"], dtype=np.float32)
+    scale = float(quant["scale"])
+    xy = (raw_xy - center) * scale
+    return float(xy[0]), float(xy[1])
 
 
 def is_umap_artifact_present(source: Source) -> bool:

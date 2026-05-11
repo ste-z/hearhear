@@ -87,14 +87,24 @@ def _load_doc_ids(path: Path) -> list[str]:
     return [str(d) for d in ids]
 
 
+def _compute_quantization_params(coords: np.ndarray) -> dict:
+    """Return the (center, scale) used by ``_quantize_to_int16`` so the
+    backend can project a fresh query through ``umap_model.transform`` and
+    then map it into the same int16 coordinate space the frontend renders.
+    """
+    center = coords.mean(axis=0)
+    centered = coords - center
+    max_abs = float(np.abs(centered).max())
+    scale = (INT16_RANGE / max_abs) if max_abs > 0.0 else 1.0
+    return {"center": [float(center[0]), float(center[1])], "scale": float(scale)}
+
+
 def _quantize_to_int16(coords: np.ndarray) -> np.ndarray:
     """Center to origin then scale so |max| == INT16_RANGE."""
-    centered = coords - coords.mean(axis=0, keepdims=True)
-    max_abs = float(np.abs(centered).max())
-    if max_abs <= 0.0:
-        scaled = centered
-    else:
-        scaled = centered * (INT16_RANGE / max_abs)
+    params = _compute_quantization_params(coords)
+    center = np.array(params["center"], dtype=np.float32)
+    scale = params["scale"]
+    scaled = (coords - center) * scale
     return np.clip(scaled, -32767, 32767).round().astype(np.int16)
 
 
@@ -207,6 +217,7 @@ def project_source(
     _save_int16_bin(int16_coords, public_bin)
     print(f"[{source}] wrote {public_bin} ({public_bin.stat().st_size} bytes)", flush=True)
 
+    quant = _compute_quantization_params(coords_2d)
     return {
         "source": source,
         "n_docs": int(coords_2d.shape[0]),
@@ -218,6 +229,10 @@ def project_source(
         "coords_npy": str(coords_npy),
         "model_pkl": str(model_pkl),
         "public_bin": str(public_bin),
+        # The frontend reads int16 from `public_bin`. To project a fresh
+        # query through `umap_model.transform()` and land in the same int16
+        # space, the backend applies `(raw_xy - center) * scale`.
+        "quantization": quant,
     }
 
 

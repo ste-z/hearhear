@@ -936,6 +936,36 @@ def register_routes(app):
             app.logger.exception("API request to /api/articles/similar failed")
             return _api_error_response(exc)
 
+    @app.route("/api/visualization/project_query", methods=["POST"])
+    def visualization_project_query_route():
+        """Embed the query with the relevant retrieval processor, run it
+        through the matching UMAP model, and return the projected 2D
+        coordinate in the same int16 space the frontend renders.
+        """
+        try:
+            payload = _request_payload()
+            query = str(payload.get("query") or payload.get("topic") or "").strip()
+            source = str(payload.get("source") or payload.get("retrieval_model") or "").strip().lower()
+            if source in ("tfidf", "tf-idf", "tf_idf"):
+                # The atlas only has UMAP projections for MiniLM and SVD;
+                # SVD is the natural fallback for the TF-IDF retrieval mode
+                # (SVD is built on top of the same TF-IDF vectors).
+                source = "svd"
+            if source not in ("minilm", "svd"):
+                source = "svd"
+            from backend.services.visualization_service import project_query
+
+            x, y = project_query(query, source=source)
+            log_runtime_event(
+                "visualization.project_query.done",
+                source=source,
+                query_chars=len(query),
+            )
+            return jsonify({"x": x, "y": y, "source": source})
+        except Exception as exc:
+            app.logger.exception("API request to /api/visualization/project_query failed")
+            return _api_error_response(exc)
+
     @app.route("/api/essay/claim-candidates", methods=["POST"])
     def essay_claim_candidates_route():
         try:
