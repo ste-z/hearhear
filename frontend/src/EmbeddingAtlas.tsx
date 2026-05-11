@@ -271,11 +271,65 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     return idToIndex.get(props.focalId) ?? null
   }, [props.focalId, idToIndex])
 
-  // Compute query centroid for mode 'embedded'.
-  const queryCentroid: QueryCentroid | null = useMemo(() => {
+  // Query position in mode 'embedded'. Preferred path: call the backend
+  // `/api/visualization/project_query` route, which embeds the query with
+  // the matching retrieval processor and runs it through `umap_model.transform()`
+  // — the exact projection, no nearest-neighbor approximation. Fallback
+  // (shown immediately while the request is in flight, or if the request
+  // fails) is the k-NN weighted centroid of the result articles' 2D coords.
+  const fallbackCentroid: QueryCentroid | null = useMemo(() => {
     if (props.mode !== 'embedded' || !props.highlightedArticles || !coords || !idToIndex) return null
     return computeQueryCentroid(props.highlightedArticles, coords, idToIndex)
   }, [props.mode, props.highlightedArticles, coords, idToIndex])
+
+  const [exactQueryXY, setExactQueryXY] = useState<{ x: number; y: number; source: AtlasSource; query: string } | null>(null)
+  useEffect(() => {
+    if (props.mode !== 'embedded') return
+    const query = (props.queryString || '').trim()
+    if (!query) return
+    if (
+      exactQueryXY &&
+      exactQueryXY.query === query &&
+      exactQueryXY.source === source
+    ) return
+    let cancelled = false
+    const body = JSON.stringify({ query, source })
+    fetch('/api/visualization/project_query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`))))
+      .then((data) => {
+        if (cancelled) return
+        if (typeof data?.x !== 'number' || typeof data?.y !== 'number') return
+        setExactQueryXY({ x: data.x, y: data.y, source, query })
+      })
+      .catch(() => {
+        // silent: leave the fallback centroid in place
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [props.mode, props.queryString, source, exactQueryXY])
+
+  const queryCentroid: QueryCentroid | null = useMemo(() => {
+    if (
+      exactQueryXY &&
+      exactQueryXY.source === source &&
+      exactQueryXY.query === (props.queryString || '').trim()
+    ) {
+      // Use the dispersion verdict from the fallback (computed from result
+      // article coords) so the radial-lines / convex-hull decision stays
+      // consistent — but anchor the marker at the exact transformed point.
+      return {
+        x: exactQueryXY.x,
+        y: exactQueryXY.y,
+        dispersed: fallbackCentroid?.dispersed ?? false,
+      }
+    }
+    return fallbackCentroid
+  }, [exactQueryXY, fallbackCentroid, props.queryString, source])
 
   // Set up d3-zoom — attach to the OVERLAY canvas (top layer) so pointer
   // events hit a single element regardless of which layer is being painted.
