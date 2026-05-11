@@ -1,5 +1,5 @@
 {
-  "saved_at_utc": "2026-05-11T16:34:49.909180+00:00",
+  "saved_at_utc": "2026-05-11T18:07:13.215209+00:00",
   "reducer": "umap",
   "n_components": 2,
   "n_neighbors": 30,
@@ -38,6 +38,6 @@
     "n_docs": 66331,
     "n_sections": 33,
     "path": "/Users/stevenzhou/Desktop/StevenZhou/Undergraduate/INFO4300/hearhear/.claude/worktrees/zen-wing-d22e26/frontend/public/embedding_atlas_meta.json",
-    "size_bytes": 18653211
+    "size_bytes": 24710447
   }
 }
