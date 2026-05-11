@@ -673,42 +673,42 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
 
         {/* Scrollable journey */}
         <div ref={scrollRef} onScroll={handleScroll} className="tray-scroll" style={{ flex: 1, overflowX: 'hidden', position: 'relative' }}>
-          <StepPanel idx={0} title="Chunking" subtitle="How long articles enter the archive" stepRef={stepRefs[0]}>
+          <StepPanel idx={0} title="Chunking" subtitle="How articles are split before search" stepRef={stepRefs[0]}>
             <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: 32, alignItems: 'center' }}>
               <div>
                 <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: 'var(--ink-soft)', maxWidth: 520 }}>
-                  Before anyone reads, the press decides how each article is filed. Whole articles preserve argument; section-chunks let the press cite a single paragraph. Chunking requires the LLM sub-editor.
+                  Choose whether search uses each full article or splits articles into sections first. Full articles keep the complete context. Section chunks make it easier to find and cite a specific passage. Chunking requires the LLM sub-editor.
                 </p>
                 <ModalRoleSelector<FrontendChunkingMode>
-                  label="At the archive"
+                  label="Search unit"
                   value={chunkingMode}
                   onChange={onChunkingModeChange}
                   options={[
-                    { id: 'none', label: 'OFF', sub: 'whole article · default' },
-                    { id: 'semantic', label: 'SEMANTIC', sub: 'by section', disabled: !canUseChunking },
+                    { id: 'none', label: 'OFF', sub: 'use whole articles · default' },
+                    { id: 'semantic', label: 'SEMANTIC', sub: 'split by section', disabled: !canUseChunking },
                   ]}
                 />
                 {useChunking && (
                   <>
                     <SliderField
-                      label="Chunk candidate pool"
+                      label="Chunks to consider"
                       unit="chunks"
                       min={25}
                       max={maxChunkCandidateTopK}
                       step={5}
                       value={chunkCandidateTopK}
                       onChange={onChunkCandidateTopKChange}
-                      hint="how many top chunks to gather before grouping into articles"
+                      hint="top matching chunks to collect before combining them by article"
                     />
                     <SliderField
-                      label="Article cap (chunked retrieval)"
+                      label="Article limit after chunking"
                       unit="articles"
                       min={1}
                       max={20}
                       step={1}
                       value={chunkArticleTopK}
                       onChange={onChunkArticleTopKChange}
-                      hint="max articles handed to the sub-editor after chunk pooling"
+                      hint="max articles sent to the sub-editor after chunk matches are merged"
                     />
                   </>
                 )}
@@ -725,7 +725,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
               </div>
               <div>
                 <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: 'var(--ink-soft)' }}>
-                  The compositor stands at the type-case and pulls candidates from the archive. Each hand has a different feel for what counts as a match.
+                  Choose how the archive finds candidate articles. Each method ranks matches a little differently: some look for exact wording, while others look for broader meaning.
                 </p>
                 <ModalRoleSelector<RetrievalModel>
                   label="At the type case"
@@ -745,7 +745,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
             <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: 32, alignItems: 'center' }}>
               <div>
                 <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: 'var(--ink-soft)', maxWidth: 520 }}>
-                  As articles travel from compositor to sub-editor, you decide how the cut is made. <em>Auto</em> sets a relevance threshold (0–1), then caps how many articles can cross. <em>Manual</em> takes a fixed count of the strongest articles (1–{benchArticleLimitMax}) regardless of score.
+                  Decide which retrieved articles go to the sub-editor. <em>Auto</em> keeps articles that meet a minimum relevance score, then applies an article limit. <em>Manual</em> sends a fixed number of the strongest articles (1–{benchArticleLimitMax}), regardless of score.
                 </p>
                 <ModalRoleSelector<RerankSelectionMode>
                   label="Hand-off"
@@ -766,7 +766,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                       value={autoRerankThreshold}
                       onChange={onAutoRerankThresholdChange}
                       fmt={(v) => v.toFixed(2)}
-                      hint="articles below this score don’t cross to the lectern"
+                      hint="articles below this score are filtered out"
                     />
                     <SliderField
                       label="Maximum articles"
@@ -776,7 +776,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                       step={1}
                       value={rerankTopK}
                       onChange={onRerankTopKChange}
-                      hint="after the threshold cut, at most this many articles cross to the sub-editor"
+                      hint="after filtering by score, send no more than this many articles"
                     />
                   </>
                 )}
@@ -808,15 +808,15 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, alignItems: 'center' }}>
               <div>
                 <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: 'var(--ink-soft)' }}>
-                  At the lectern, the sub-editor decides where each article lands relative to your claim — in agreement, qualified, or against.
+                  Choose how each article is classified against your claim: supports it, qualifies it, or argues against it.
                 </p>
                 <ModalRoleSelector<StanceMethod>
-                  label="At the lectern"
+                  label="Stance method"
                   value={stanceMethod}
                   onChange={onStanceMethodChange}
                   options={[
-                    { id: 'nli', label: 'NLI', sub: 'red pencil', disabled: !supportedStanceMethods.includes('nli') || useChunking },
-                    { id: 'llm', label: 'LLM', sub: 'lamplight · default', disabled: !supportedStanceMethods.includes('llm') || !llmAgreementAvailable },
+                    { id: 'nli', label: 'NLI', sub: 'quick classifier', disabled: !supportedStanceMethods.includes('nli') || useChunking },
+                    { id: 'llm', label: 'LLM', sub: 'context-aware · default', disabled: !supportedStanceMethods.includes('llm') || !llmAgreementAvailable },
                   ]}
                 />
                 {useChunking && (
@@ -825,11 +825,11 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
                   </p>
                 )}
                 <SmallSwitch
-                  label="LLM irrelevant labels"
+                  label="Filter unrelated LLM results"
                   checked={llmLabelIrrelevant}
                   disabled={effectiveStanceMethod !== 'llm' || !llmAgreementAvailable}
                   onChange={onLlmLabelIrrelevantChange}
-                  hint="When the LLM sub-editor is active, let it mark completely unrelated articles as not relevant and keep them out of the main ledger."
+                  hint="When using the LLM, let it mark completely unrelated articles as not relevant so they stay out of the main results."
                 />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
@@ -843,7 +843,7 @@ export function SettingsTray(props: SettingsTrayProps): JSX.Element | null {
             <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: 32, alignItems: 'start' }}>
               <div>
                 <p style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 16, lineHeight: 1.55, color: 'var(--ink-soft)', maxWidth: 520 }}>
-                  After every article is marked, the editor at the back desk weights three qualities to set the final running order. Drag each weight to taste.
+                  Choose how much each factor matters when sorting the final results: relevance, stance agreement, and recency.
                 </p>
                 <WeightSliders weights={[
                   {
