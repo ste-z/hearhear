@@ -19,6 +19,8 @@ type AtlasMetaPayload = {
   years: number[]
   section_indices: number[]
   urls: string[]
+  authors?: string[]
+  keywords?: string[][]
 }
 
 export type EmbeddingAtlasProps = {
@@ -851,14 +853,22 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
           <div
             className="atlas-tooltip"
             style={{
-              transform: `translate(${Math.min(size.w - 260, hoverPos.x + 12)}px, ${Math.max(8, hoverPos.y - 8)}px)`,
+              transform: `translate(${Math.min(size.w - 280, hoverPos.x + 12)}px, ${Math.max(8, hoverPos.y - 8)}px)`,
             }}
           >
             <div className="atlas-tooltip-title">{meta.titles[hoverIdx] || '(untitled)'}</div>
             <div className="atlas-tooltip-meta">
-              {meta.years[hoverIdx] ? `${meta.years[hoverIdx]} · ` : ''}
-              {meta.sections[meta.section_indices[hoverIdx]] || 'uncategorized'}
+              {meta.years[hoverIdx] ? meta.years[hoverIdx] : ''}
+              {meta.years[hoverIdx] && meta.authors?.[hoverIdx] ? ' · ' : ''}
+              {meta.authors?.[hoverIdx] || ''}
             </div>
+            {meta.keywords?.[hoverIdx] && meta.keywords[hoverIdx].length > 0 && (
+              <div className="atlas-tooltip-keywords">
+                {meta.keywords[hoverIdx].slice(0, 4).map((k) => (
+                  <span key={k} className="atlas-tooltip-keyword">{k}</span>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {loading && !error && (
