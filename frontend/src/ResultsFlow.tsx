@@ -3942,7 +3942,15 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                     mode="embedded"
                     highlightedIds={visibleArticles.map(a => String(getArticleId(a)))}
                     highlightedArticles={visibleArticles}
-                    queryString={topic}
+                    queryString={
+                      inputMode === 'essay'
+                        // Essay searches send the full essay text as `q`, so
+                        // project the same string the backend retrieved on.
+                        // Fall back to the thesis if for any reason the
+                        // essay text isn't present in the flow's state.
+                        ? (essayText.trim() || thesisSentence.trim())
+                        : topic
+                    }
                     drawQueryLines
                     autoZoom="highlighted"
                     defaultSource={effectiveRetrievalModel === 'minilm' ? 'minilm' : 'svd'}
