@@ -43,6 +43,10 @@ data/processed/vector_index/guardian_tfidf_terms.json
 data/processed/vector_index/guardian_tfidf_vectorizer.pkl
 data/processed/vector_index/*_chunk_rows.sqlite
 data/processed/vector_index/tmp*.npy
+# UMAP 2D atlas: large per-source artifacts. The lightweight frontend bin +
+# metadata that ship with the UI live in frontend/public/ instead.
+data/processed/vector_index/guardian_article_umap2d_*_coords.npy
+data/processed/vector_index/guardian_article_umap2d_*_model.pkl
 backend/data/processed/vector_index/guardian_tfidf_articles.pkl
 backend/data/processed/vector_index/guardian_tfidf_doc_ids.json
 backend/data/processed/vector_index/guardian_tfidf_meta.json

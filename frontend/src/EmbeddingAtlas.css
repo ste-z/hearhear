@@ -1,0 +1,357 @@
+/* Embedding atlas — newsprint-styled 2D point-cloud visualization */
+
+.atlas-wrapper {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Old Standard TT', Georgia, serif;
+}
+
+.atlas-mode-standalone {
+  /* Standalone mode reuses .stage-shell from App.css for outer chrome.
+     The atlas itself fills the remaining vertical space. */
+  height: 100%;
+}
+
+.atlas-mode-embedded,
+.atlas-mode-similar {
+  /* When embedded inside results, fill the host slot. */
+  min-height: 420px;
+  height: 100%;
+  border: 1px solid var(--rule-soft);
+  border-radius: 4px;
+  background: var(--paper);
+}
+
+/* ---------- Controls bar ---------- */
+
+/* In standalone mode the wrapper sits inside .stage-shell whose top-rail
+   has 48px horizontal padding. The controls bar and canvas inherit the
+   same gutters so the atlas content lines up with the nav above. */
+.atlas-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 48px;
+  border-bottom: 1px solid var(--rule-soft);
+  background: var(--paper);
+  flex-shrink: 0;
+}
+
+.atlas-mode-embedded .atlas-controls,
+.atlas-mode-similar .atlas-controls {
+  padding: 10px 16px;
+}
+
+/* Segmented control — matches `ModalRoleSelector` in SettingsTray:
+   thin top + bottom rules, ink-on-paper active state. */
+.atlas-control-group {
+  display: inline-flex;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  background: var(--paper);
+}
+
+.atlas-pill {
+  appearance: none;
+  border: 0;
+  border-left: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  padding: 6px 16px;
+  font-family: 'IM Fell English', Georgia, serif;
+  font-size: 14px;
+  line-height: 1.2;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.atlas-pill:first-child {
+  border-left: 0;
+}
+
+.atlas-pill:hover:not(:disabled):not(.active) {
+  background: var(--paper-warm);
+}
+
+.atlas-pill.active {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.atlas-pill:disabled {
+  color: var(--ink-faint);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Static source label (embedded + similar modes — source is locked to the
+   user's current retrieval model, so no toggle, just an identifier). */
+.atlas-source-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 3px 10px;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  font-family: 'IM Fell English', Georgia, serif;
+}
+
+.atlas-source-label-model {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.atlas-source-label-sub {
+  font-family: 'IM Fell DW Pica SC', serif;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.atlas-search {
+  flex: 1 1 200px;
+  min-width: 140px;
+  max-width: 320px;
+  padding: 6px 10px;
+  border: 1px solid var(--rule-soft);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.atlas-search:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.atlas-query-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent);
+  font-size: 13px;
+  max-width: 340px;
+}
+
+.atlas-query-q {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  font-family: 'Special Elite', Georgia, serif;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.atlas-query-text {
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.atlas-stats {
+  margin-left: auto;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--ink-mute);
+  font-family: 'Special Elite', Georgia, serif;
+  white-space: nowrap;
+}
+
+.atlas-close {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--rule-soft);
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ink-mute);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.atlas-close:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+/* ---------- Canvas area ---------- */
+
+.atlas-canvas-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--paper);
+  margin: 0 48px 12px;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.atlas-mode-embedded .atlas-canvas-wrap,
+.atlas-mode-similar .atlas-canvas-wrap {
+  margin: 0;
+  border-top: none;
+}
+
+.atlas-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  touch-action: none;
+}
+
+.atlas-canvas-bg {
+  z-index: 1;
+  pointer-events: none;
+}
+
+.atlas-canvas-overlay {
+  z-index: 2;
+  cursor: crosshair;
+}
+
+/* ---------- Minimap (overview) ---------- */
+.atlas-minimap {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  width: 152px;
+  height: 108px;
+  z-index: 3;
+  pointer-events: none;
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  box-shadow: 0 4px 10px var(--shadow-mid);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.atlas-minimap-canvas {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.atlas-minimap-label {
+  position: absolute;
+  top: -8px;
+  left: 8px;
+  padding: 0 4px;
+  background: var(--paper);
+  font-family: 'IM Fell DW Pica SC', serif;
+  font-size: 8px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.atlas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  text-align: center;
+  color: var(--ink-mute);
+  font-family: 'Special Elite', Georgia, serif;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+.atlas-empty-loading {
+  background: var(--paper);
+}
+
+.atlas-empty-hint {
+  font-family: 'Old Standard TT', Georgia, serif;
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+
+.atlas-empty code {
+  font-family: 'Special Elite', monospace;
+  background: var(--paper-warm);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-style: normal;
+  font-size: 11px;
+}
+
+/* ---------- Tooltip ---------- */
+
+.atlas-tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: 260px;
+  pointer-events: none;
+  padding: 6px 10px;
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  box-shadow: 0 2px 6px var(--shadow-soft);
+  font-size: 12px;
+  line-height: 1.35;
+  z-index: 4;
+}
+
+.atlas-tooltip-title {
+  font-family: 'Old Standard TT', Georgia, serif;
+  color: var(--ink);
+  font-weight: 600;
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.atlas-tooltip-meta {
+  font-family: 'Special Elite', Georgia, serif;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+/* ---------- Footer (standalone) ---------- */
+
+.atlas-footer {
+  flex-shrink: 0;
+  padding: 8px 48px 12px;
+  display: flex;
+  justify-content: center;
+}

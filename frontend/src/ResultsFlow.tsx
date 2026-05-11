@@ -12,6 +12,7 @@ import type {
 } from './types'
 import PersonaName from './PersonaName'
 import ThemeToggle, { type Theme } from './ThemeToggle'
+import EmbeddingAtlas from './EmbeddingAtlas'
 
 export type SearchProgressLine = {
   label: string
@@ -49,6 +50,7 @@ export type ResultsFlowProps = {
   onBackToCompose: () => void
   onOpenAbout: () => void
   onOpenMethod: () => void
+  onOpenExplore: () => void
   theme: Theme
   onToggleTheme: () => void
 
@@ -2065,6 +2067,7 @@ function SimilarOverlay({
   onOpen: (article: Article) => void
 }): JSX.Element {
   const sharedKeywords = (source.keywords ?? []).slice(0, 6)
+  const [similarView, setSimilarView] = useState<'list' | 'atlas'>('list')
   return (
     <div onClick={onClose} style={{
       position: 'fixed',
@@ -2077,8 +2080,9 @@ function SimilarOverlay({
       animation: 'rf-fade 220ms ease-out both',
     }}>
       <div onClick={(event) => event.stopPropagation()} style={{
-        width: 760,
-        maxHeight: '90%',
+        width: 960,
+        height: '88%',
+        maxHeight: '92%',
         background: 'var(--paper)',
         border: '1px solid var(--ink)',
         boxShadow: '0 24px 60px rgba(var(--ink-rgb),0.36)',
@@ -2088,19 +2092,33 @@ function SimilarOverlay({
         animation: 'rf-rise 360ms cubic-bezier(.2,.7,.2,1.05) both',
       }}>
         <div style={{ padding: '20px 28px 14px', borderBottom: '1px solid var(--ink)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
             <div className="tracker" style={{ color: 'var(--accent)' }}>from the archive · neighbours of this article</div>
-            <button type="button" onClick={onClose} style={{
-              background: 'transparent',
-              border: '1px solid var(--ink)',
-              padding: '6px 12px',
-              fontFamily: "'IM Fell DW Pica SC', serif",
-              fontSize: 10,
-              letterSpacing: '0.28em',
-              textTransform: 'uppercase',
-              color: 'var(--ink)',
-              cursor: 'pointer',
-            }}>close</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className="atlas-control-group">
+                <button
+                  type="button"
+                  className={`atlas-pill ${similarView === 'list' ? 'active' : ''}`}
+                  onClick={() => setSimilarView('list')}
+                >list</button>
+                <button
+                  type="button"
+                  className={`atlas-pill ${similarView === 'atlas' ? 'active' : ''}`}
+                  onClick={() => setSimilarView('atlas')}
+                >atlas</button>
+              </div>
+              <button type="button" onClick={onClose} style={{
+                background: 'transparent',
+                border: '1px solid var(--ink)',
+                padding: '6px 12px',
+                fontFamily: "'IM Fell DW Pica SC', serif",
+                fontSize: 10,
+                letterSpacing: '0.28em',
+                textTransform: 'uppercase',
+                color: 'var(--ink)',
+                cursor: 'pointer',
+              }}>close</button>
+            </div>
           </div>
           <div style={{ marginTop: 10, fontFamily: "'IM Fell English', serif", fontSize: 16, lineHeight: 1.4 }}>
             articles that share latitude with <em style={{ fontStyle: 'italic' }}>"{source.title}"</em>
@@ -2124,6 +2142,22 @@ function SimilarOverlay({
           )}
         </div>
 
+        {similarView === 'atlas' && (
+          <div style={{ flex: 1, minHeight: 0, padding: '0 0 12px' }}>
+            <EmbeddingAtlas
+              mode="similar"
+              focalId={String(getArticleId(source))}
+              highlightedIds={similar.map(a => String(getArticleId(a)))}
+              highlightedArticles={similar}
+              autoZoom="focal"
+              onPointClick={(_id) => {
+                const match = similar.find(a => String(getArticleId(a)) === _id)
+                if (match) onOpen(match)
+              }}
+            />
+          </div>
+        )}
+        {similarView === 'list' && (
         <div className="tray-scroll" style={{ flex: 1 }}>
           {error && (
             <div style={{
@@ -2149,7 +2183,7 @@ function SimilarOverlay({
                 onClick={() => onOpen(article)}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '76px 1fr 110px',
+                  gridTemplateColumns: '76px 1fr',
                   gap: 18,
                   alignItems: 'center',
                   padding: '14px 28px',
@@ -2188,13 +2222,11 @@ function SimilarOverlay({
                     ))}
                   </div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <span className="tracker" style={{ borderBottom: '1px solid var(--ink)', paddingBottom: 2, color: 'var(--ink)' }}>read the article →</span>
-                </div>
               </div>
             )
           })}
         </div>
+        )}
 
         <div style={{
           padding: '12px 28px',
@@ -2204,7 +2236,7 @@ function SimilarOverlay({
           alignItems: 'center',
         }}>
           <span className="tracker">
-            {similar.length} {similar.length === 1 ? 'article' : 'articles'} · sorted by cosine similarity
+            {similar.length} {similar.length === 1 ? 'article' : 'articles'} · {similarView === 'atlas' ? 'mapped in latent space' : 'sorted by cosine similarity'}
           </span>
           <button
             type="button"
@@ -2650,6 +2682,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
     onApplyDismissals,
     onBackToCompose,
     onOpenAbout,
+    onOpenExplore,
     theme,
     onToggleTheme,
     typoCorrection,
@@ -2710,6 +2743,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
   const [openId, setOpenId] = useState<string | null>(null)
   const [chatOpen, setChatOpen] = useState(false)
   const [sortPhase, setSortPhase] = useState<'idle' | 'sorting' | 'done'>('idle')
+  const [resultsView, setResultsView] = useState<'list' | 'atlas'>('list')
   const prevStageRef = useRef<'stage1' | 'stage2' | 'stage3'>(stage)
   useEffect(() => {
     if (stage === 'stage3' && prevStageRef.current === 'stage2' && articles.length > 0) {
@@ -2835,6 +2869,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
         <button type="button" className="top-rail-brand" onClick={onBackToCompose}>hear! hear!</button>
         <div className="top-rail-links">
           <button type="button" className="active">search</button>
+          <button type="button" onClick={onOpenExplore}>explore</button>
           <button type="button" onClick={onOpenAbout}>about</button>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
@@ -3597,51 +3632,79 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', position: 'relative', minHeight: 0 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6, gap: 10 }}>
                 <div className="tracker" style={{ fontSize: 10, letterSpacing: '0.32em' }}>the ledger · ranked 01—{String(visibleArticles.length).padStart(2, '0')}</div>
-                <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>click for the broadsheet</div>
+                <div className="atlas-control-group">
+                  <button
+                    type="button"
+                    className={`atlas-pill ${resultsView === 'list' ? 'active' : ''}`}
+                    onClick={() => setResultsView('list')}
+                  >list</button>
+                  <button
+                    type="button"
+                    className={`atlas-pill ${resultsView === 'atlas' ? 'active' : ''}`}
+                    onClick={() => setResultsView('atlas')}
+                  >atlas</button>
+                </div>
               </div>
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '52px 1fr 96px 28px',
-                gap: 14,
-                alignItems: 'center',
-                fontFamily: "'IM Fell DW Pica SC', serif",
-                fontSize: 8,
-                letterSpacing: '0.24em',
-                textTransform: 'uppercase',
-                color: 'var(--ink-faint)',
-                padding: '4px 4px',
-                borderTop: '1.5px solid var(--ink)',
-                borderBottom: '1px solid var(--rule-soft)',
-              }}>
-                <span>rank</span><span>title · author</span><span>marks</span><span></span>
-              </div>
-              <div className="tray-scroll" style={{ flex: 1, minHeight: 0, paddingBottom: 24 }}>
-                {visibleArticles.length === 0 && (
-                  <div style={{ padding: 24, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: 'var(--ink-mute)' }}>
-                    {llmIrrelevantArticles.length > 0
-                      ? 'The AI marked every candidate article as not relevant.'
-                      : (emptyResultsMessage || 'No articles cleared the bench.')}
+              {resultsView === 'list' ? (
+                <>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '52px 1fr 96px 28px',
+                    gap: 14,
+                    alignItems: 'center',
+                    fontFamily: "'IM Fell DW Pica SC', serif",
+                    fontSize: 8,
+                    letterSpacing: '0.24em',
+                    textTransform: 'uppercase',
+                    color: 'var(--ink-faint)',
+                    padding: '4px 4px',
+                    borderTop: '1.5px solid var(--ink)',
+                    borderBottom: '1px solid var(--rule-soft)',
+                  }}>
+                    <span>rank</span><span>title · author</span><span>marks</span><span></span>
                   </div>
-                )}
-                {visibleArticles.map((article, i) => (
-                  <RFRankedRow
-                    key={getArticleId(article)}
-                    article={article}
-                    rank={i + 1}
-                    active={openId === getArticleId(article)}
-                    onClick={() => setOpenId(getArticleId(article))}
-                    onDismiss={() => onDismiss(article)}
-                    hideArticleInfo={sortPhase === 'sorting'}
+                  <div className="tray-scroll" style={{ flex: 1, minHeight: 0, paddingBottom: 24 }}>
+                    {visibleArticles.length === 0 && (
+                      <div style={{ padding: 24, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', color: 'var(--ink-mute)' }}>
+                        {llmIrrelevantArticles.length > 0
+                          ? 'The AI marked every candidate article as not relevant.'
+                          : (emptyResultsMessage || 'No articles cleared the bench.')}
+                      </div>
+                    )}
+                    {visibleArticles.map((article, i) => (
+                      <RFRankedRow
+                        key={getArticleId(article)}
+                        article={article}
+                        rank={i + 1}
+                        active={openId === getArticleId(article)}
+                        onClick={() => setOpenId(getArticleId(article))}
+                        onDismiss={() => onDismiss(article)}
+                        hideArticleInfo={sortPhase === 'sorting'}
+                      />
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div style={{ flex: 1, minHeight: 0, paddingBottom: 8 }}>
+                  <EmbeddingAtlas
+                    mode="embedded"
+                    highlightedIds={visibleArticles.map(a => String(getArticleId(a)))}
+                    highlightedArticles={visibleArticles}
+                    queryString={topic}
+                    drawQueryLines
+                    autoZoom="highlighted"
+                    defaultSource={effectiveRetrievalModel === 'minilm' ? 'minilm' : 'svd'}
+                    onPointClick={(id) => setOpenId(id)}
                   />
-                ))}
-              </div>
+                </div>
+              )}
               {/* Cards fly in from scatter positions and land in the empty
                   article-info slots above. Rendered inside the ledger panel
                   (which has position:relative) so coordinates are panel-relative
                   and include the caption + table-header offsets. */}
-              {sortPhase === 'sorting' && (
+              {sortPhase === 'sorting' && resultsView === 'list' && (
                 <SortFlight articles={visibleArticles} />
               )}
             </div>
