@@ -399,7 +399,7 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     if (!canvas || !size.w || !size.h) return
     const selection = d3Select(canvas as Element)
     const zoom = d3Zoom<HTMLCanvasElement, unknown>()
-      .scaleExtent([0.5, 40])
+      .scaleExtent([0.5, 200])
       .on('zoom', (ev) => {
         transformRef.current = ev.transform
         setTransformTick((t) => t + 1)
@@ -620,7 +620,7 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     if (highlightedIndices && highlightedIndices.size > 0) {
       const showRank = props.mode === 'embedded' && idxToRank && idxToRank.size > 0
       const baseSize = Math.max(3, Math.min(8, 3.5 + k * 0.18))
-      const stampSize = showRank ? Math.max(14, Math.min(22, 14 + k * 0.5)) : baseSize
+      const stampSize = showRank ? Math.max(10, Math.min(16, 10 + k * 0.32)) : baseSize
       ctx.fillStyle = `rgb(${accentRgb[0]},${accentRgb[1]},${accentRgb[2]})`
       for (const i of highlightedIndices) {
         const cx = dataToCanvasX(coords[i * 2])
@@ -632,7 +632,7 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
       if (showRank && idxToRank) {
         // Stamp the rank number in paper color.
         ctx.fillStyle = paper
-        const fontPx = Math.round(stampSize * 0.55)
+        const fontPx = Math.max(8, Math.round(stampSize * 0.62))
         ctx.font = `bold ${fontPx}px 'IM Fell English', Georgia, serif`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
@@ -773,8 +773,10 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     const toX = (dx: number) => ox + dx * mmBaseScale
     const toY = (dy: number) => oy + dy * mmBaseScale
 
-    // 1) Background points — every article at 1px dimmed.
-    ctx.fillStyle = `rgba(${inkRgb[0]},${inkRgb[1]},${inkRgb[2]},0.32)`
+    // 1) Background points — every article at 1px, low per-point alpha so
+    // overlapping pixels stack into a legible density gradient rather than
+    // saturating into a solid blob.
+    ctx.fillStyle = `rgba(${inkRgb[0]},${inkRgb[1]},${inkRgb[2]},0.14)`
     const n = coords.length / 2
     for (let i = 0; i < n; i++) {
       ctx.fillRect(toX(coords[i * 2]), toY(coords[i * 2 + 1]), 1, 1)
@@ -817,7 +819,8 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     }
 
     // 5) Viewport rectangle — map the visible canvas region back into data
-    // space, then onto the minimap.
+    // space, then onto the minimap. Stronger fill + thicker stroke so the
+    // current focus stays clearly readable against the dimmed point cloud.
     if (size.w && size.h) {
       const mainBaseScale = Math.min(size.w, size.h) / (2 * COORD_RANGE)
       const t = transformRef.current
@@ -830,11 +833,11 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
       const my0 = Math.max(0, toY(dataY0))
       const mx1 = Math.min(mmW, toX(dataX1))
       const my1 = Math.min(mmH, toY(dataY1))
-      ctx.fillStyle = `rgba(${accentRgb[0]},${accentRgb[1]},${accentRgb[2]},0.08)`
+      ctx.fillStyle = `rgba(${accentRgb[0]},${accentRgb[1]},${accentRgb[2]},0.18)`
       ctx.fillRect(mx0, my0, mx1 - mx0, my1 - my0)
       ctx.strokeStyle = `rgb(${accentRgb[0]},${accentRgb[1]},${accentRgb[2]})`
-      ctx.lineWidth = 1
-      ctx.strokeRect(mx0 + 0.5, my0 + 0.5, mx1 - mx0 - 1, my1 - my0 - 1)
+      ctx.lineWidth = 1.75
+      ctx.strokeRect(mx0 + 0.75, my0 + 0.75, mx1 - mx0 - 1.5, my1 - my0 - 1.5)
     }
   }, [
     coords,
