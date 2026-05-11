@@ -91,6 +91,7 @@ export type LandingFlowProps = {
   onOpenSettings: () => void
   onOpenAbout: () => void
   onOpenMethod: () => void
+  onOpenExplore: () => void
   tutorialRequestId: number
   theme: Theme
   onToggleTheme: () => void
@@ -970,6 +971,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
     onSubmitEssayDraft,
     onOpenSettings,
     onOpenAbout,
+    onOpenExplore,
     tutorialRequestId,
     theme,
     onToggleTheme,
@@ -1221,6 +1223,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
         <button type="button" className="top-rail-brand">hear! hear!</button>
         <div className="top-rail-links">
           <button type="button" className="active">search</button>
+          <button type="button" onClick={onOpenExplore}>explore</button>
           <button type="button" onClick={onOpenAbout}>about</button>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
           <button

@@ -43,6 +43,14 @@ data/processed/vector_index/guardian_tfidf_terms.json
 data/processed/vector_index/guardian_tfidf_vectorizer.pkl
 data/processed/vector_index/*_chunk_rows.sqlite
 data/processed/vector_index/tmp*.npy
+# UMAP 2D atlas: backend artifacts.
+#   - float32 master coords (~520 KB each) are regenerable from the .bin in
+#     frontend/public, so we don't track them.
+#   - The monolithic .pkl (390/151 MB) is too big for git; only the chunked
+#     .pkl.part-NNN siblings (≤95 MB each, written by _write_pickle_artifact)
+#     are committed and reassembled at load time by visualization_service.
+data/processed/vector_index/guardian_article_umap2d_*_coords.npy
+data/processed/vector_index/guardian_article_umap2d_*_model.pkl
 backend/data/processed/vector_index/guardian_tfidf_articles.pkl
 backend/data/processed/vector_index/guardian_tfidf_doc_ids.json
 backend/data/processed/vector_index/guardian_tfidf_meta.json

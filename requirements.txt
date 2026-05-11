@@ -17,4 +17,5 @@ openai
 spacy
 rapidfuzz
 vaderSentiment
+umap-learn
 git+https://github.com/MrPeterss/infosci-spark-client.git
