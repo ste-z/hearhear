@@ -2282,6 +2282,10 @@ function SimilarOverlay({
               highlightedIds={similar.map(a => String(getArticleId(a)))}
               highlightedArticles={similar}
               autoZoom="focal"
+              // Atlas only has UMAP projections for MiniLM and SVD; TF-IDF
+              // falls through to SVD (which IS the TF-IDF embedding's
+              // dimensionality-reduced form).
+              defaultSource={retrievalModel === 'minilm' ? 'minilm' : 'svd'}
               onPointClick={(_id) => {
                 const match = similar.find(a => String(getArticleId(a)) === _id)
                 if (match) onOpen(match)
