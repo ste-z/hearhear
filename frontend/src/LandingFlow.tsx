@@ -7,6 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 import { PersonaName } from './PersonaName'
+import SpotlightTour, { type SpotlightTourStep } from './SpotlightTour'
 import ThemeToggle, { type Theme } from './ThemeToggle'
 import { playCarriageReturn, playKeyStrike, playSend } from './typewriterAudio'
 import typewriterFrameUrl from './assets/typewriter-frame.svg'
@@ -19,12 +20,58 @@ const INTRO_CLAIMS_BY_TOPIC: Record<typeof INTRO_TOPICS[number], readonly string
 }
 
 const LANDING_SEEN_KEY = 'hearhear.hasSeenLanding'
+const COMPOSE_TOUR_SEEN_KEY = 'hearhear.tour.composeSeen'
 
 type IntroPhase = 'topic' | 'claim' | 'done' | 'voice'
 type VoiceMode = 'stance' | 'essay'
 type EssaySource = 'paste' | 'envelope'
 
 type LengthFilterUnit = 'characters' | 'words' | 'reading_time'
+
+const COMPOSE_TOUR_STEPS: SpotlightTourStep[] = [
+  {
+    target: 'compose-mode-toggle',
+    title: 'Choose your search mode',
+    body: 'Start from a short topic and stance, or switch to essay mode when you already have a draft.',
+    placement: 'bottom',
+  },
+  {
+    target: 'compose-stance-slip',
+    title: 'Topic & stance mode',
+    body: 'Use Regarding for the subject, then I believe for the position you want articles searched against.',
+    placement: 'right',
+  },
+  {
+    target: 'compose-essay-slip',
+    title: 'Essay mode',
+    body: 'Essay mode lets the app work from your own draft instead of a two-line claim.',
+    placement: 'left',
+  },
+  {
+    target: 'compose-essay-source',
+    title: 'Paste text or open a PDF',
+    body: 'Paste your essay into the lined page, or use the PDF envelope to extract text from a file.',
+    placement: 'left',
+  },
+  {
+    target: 'compose-settings',
+    title: 'Choose the instrument',
+    body: 'Settings control how hear! hear! reads the archive, judges stance, chunks long articles, and balances topic, stance, and recency.',
+    placement: 'top',
+  },
+  {
+    target: 'compose-filters',
+    title: 'Narrow the archive',
+    body: 'Use year, length, and avoid-word filters to shape the candidate set before ranking begins.',
+    placement: 'top',
+  },
+  {
+    target: 'compose-actions',
+    title: 'Send to press',
+    body: 'Start the search pipeline.',
+    placement: 'top',
+  },
+]
 
 export type LandingFlowProps = {
   topic: string
@@ -45,6 +92,7 @@ export type LandingFlowProps = {
   onOpenAbout: () => void
   onOpenMethod: () => void
   onOpenExplore: () => void
+  tutorialRequestId: number
   theme: Theme
   onToggleTheme: () => void
   chunksLabel: string
@@ -96,6 +144,24 @@ function clearLandingSeen(): void {
   if (typeof window === 'undefined') return
   try {
     window.localStorage.removeItem(LANDING_SEEN_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
+function readTourSeen(key: string): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(key) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function markTourSeen(key: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(key, 'true')
   } catch {
     /* ignore */
   }
@@ -906,6 +972,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
     onOpenSettings,
     onOpenAbout,
     onOpenExplore,
+    tutorialRequestId,
     theme,
     onToggleTheme,
     chunksLabel,
@@ -935,6 +1002,12 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
   const [voiceMode, setVoiceMode] = useState<VoiceMode>('stance')
   const [activeField, setActiveField] = useState<'topic' | 'claim'>('topic')
   const [essaySource, setEssaySource] = useState<EssaySource>('paste')
+  const [composeTourOpen, setComposeTourOpen] = useState(false)
+  const composeTourSeenRef = useRef(readTourSeen(COMPOSE_TOUR_SEEN_KEY))
+  const composeTourAutoOpenedRef = useRef(false)
+  const composeTourReturnModeRef = useRef<VoiceMode>('stance')
+  const lastTutorialRequestIdRef = useRef(tutorialRequestId)
+  const pendingManualTourRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const topicInputRef = useRef<HTMLInputElement | null>(null)
   const opinionInputRef = useRef<HTMLInputElement | null>(null)
@@ -1053,10 +1126,65 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
     return () => clearTimeout(t)
   }, [voiceEntering])
 
+  const startComposeTour = useCallback((manual = false): void => {
+    if (phase !== 'voice') {
+      pendingManualTourRef.current = manual
+      return
+    }
+    pendingManualTourRef.current = false
+    composeTourReturnModeRef.current = voiceMode
+    setEssaySource('paste')
+    setVoiceMode('stance')
+    setComposeTourOpen(true)
+  }, [phase, voiceMode])
+
+  const closeComposeTour = useCallback((): void => {
+    composeTourSeenRef.current = true
+    composeTourAutoOpenedRef.current = true
+    markTourSeen(COMPOSE_TOUR_SEEN_KEY)
+    setComposeTourOpen(false)
+    setVoiceMode(composeTourReturnModeRef.current)
+  }, [])
+
+  useEffect(() => {
+    if (tutorialRequestId === lastTutorialRequestIdRef.current) return
+    lastTutorialRequestIdRef.current = tutorialRequestId
+    pendingManualTourRef.current = true
+    startComposeTour(true)
+  }, [startComposeTour, tutorialRequestId])
+
+  useEffect(() => {
+    if (phase !== 'voice') return
+    if (pendingManualTourRef.current) {
+      startComposeTour(true)
+      return
+    }
+    if (!composeTourSeenRef.current && !composeTourAutoOpenedRef.current) {
+      composeTourAutoOpenedRef.current = true
+      startComposeTour(false)
+    }
+  }, [phase, startComposeTour])
+
+  const handleComposeTourStep = useCallback((_step: SpotlightTourStep, index: number): void => {
+    if (index >= 2) {
+      setVoiceMode('essay')
+      setEssaySource('paste')
+    } else {
+      setVoiceMode('stance')
+    }
+  }, [])
+
   const replay = (): void => {
     clearLandingSeen()
     setPhase('topic')
     setActiveField('topic')
+  }
+
+  const skipIntro = (): void => {
+    markLandingSeen()
+    setActiveField('topic')
+    setVoiceEntering(true)
+    setPhase('voice')
   }
 
   const topicShown = phase === 'topic'
@@ -1098,6 +1226,15 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           <button type="button" onClick={onOpenExplore}>explore</button>
           <button type="button" onClick={onOpenAbout}>about</button>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+          <button
+            type="button"
+            className="help-toggle"
+            onClick={() => startComposeTour(true)}
+            aria-label="Open tutorial"
+            title="Open tutorial"
+          >
+            ?
+          </button>
         </div>
       </div>
       <div className="top-rule" style={{ flexShrink: 0 }} />
@@ -1205,7 +1342,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           }}
         >
           {/* Mode toggle */}
-          <div className="voice-mode-toggle" style={{
+          <div className="voice-mode-toggle" data-tour="compose-mode-toggle" style={{
             display: 'flex',
             justifyContent: 'center',
             gap: 0,
@@ -1261,7 +1398,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
                 flight. The transform/opacity are set inline (not via CSS
                 class) so they layer cleanly over the existing min-height
                 transition the slip needs for essay-mode resize. */}
-            <div className="voice-slip" style={{
+            <div className="voice-slip" data-tour={voiceMode === 'essay' ? 'compose-essay-slip' : 'compose-stance-slip'} style={{
               marginTop: 0,
               width: COMPOSE_SURFACE_WIDTH,
               maxWidth: '100%',
@@ -1336,7 +1473,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 22, fontStyle: 'italic', color: 'var(--ink-soft)' }}>An essay,</span>
-                    <div style={{ display: 'flex', fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase' }}>
+                    <div data-tour="compose-essay-source" style={{ display: 'flex', fontFamily: "'IM Fell DW Pica SC', serif", fontSize: 9, letterSpacing: '0.24em', textTransform: 'uppercase' }}>
                       <button type="button" onClick={() => setEssaySource('paste')} style={{
                         padding: '4px 12px',
                         border: '1px solid var(--ink)',
@@ -1427,7 +1564,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
 
             {/* Typewriter — held close to the slip without covering its contents. */}
             {voiceMode === 'stance' && (
-              <div className="landing-typewriter-slot">
+              <div className="landing-typewriter-slot" data-tour="compose-typewriter">
                 <RisingTypewriter
                   disabled={loading}
                   flashedKey={flashedKey}
@@ -1457,7 +1594,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
             )}
 
             {/* Filters row */}
-            <div className="voice-filters" style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+            <div className="voice-filters" data-tour="compose-filters" style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
               <FilterRow
                 yearStart={yearStart}
                 yearEnd={yearEnd}
@@ -1480,7 +1617,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
             </div>
 
             {/* Send to press button */}
-            <div className="voice-send" style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+            <div className="voice-send" data-tour="compose-actions" style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
               <button
                 type="button"
                 onClick={handleSendToPress}
@@ -1527,7 +1664,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
               cursor: 'pointer',
               whiteSpace: 'nowrap',
             }}>↻ replay intro</button>
-            <div style={{
+            <div data-tour="compose-settings" style={{
               display: 'flex',
               alignItems: 'center',
               gap: 14,
@@ -1569,10 +1706,10 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
         </div>
       )}
 
-      {/* Footer — just the replay button, centered, no static labels */}
+      {/* Footer — intro can be skipped before the compose screen appears. */}
       {!isVoice && (
       <div style={{ flexShrink: 0, padding: '8px 48px 12px', display: 'flex', justifyContent: 'center' }}>
-        <button type="button" onClick={replay} style={{
+        <button type="button" onClick={skipIntro} style={{
           background: 'transparent',
           border: '1px solid var(--ink)',
           padding: '6px 14px',
@@ -1582,9 +1719,16 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
           textTransform: 'uppercase',
           color: 'var(--ink)',
           cursor: 'pointer',
-        }}>↻ replay intro</button>
+        }}>skip intro →</button>
       </div>
       )}
+
+      <SpotlightTour
+        open={composeTourOpen}
+        steps={COMPOSE_TOUR_STEPS}
+        onClose={closeComposeTour}
+        onStepChange={handleComposeTourStep}
+      />
     </div>
   )
 }

@@ -671,16 +671,32 @@ input[type="range"].tw-range::-moz-range-thumb {
   margin: 0;
   display: grid;
   /* Fixed 3-column grid so the panel width is stable across tabs */
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
+.about-team-grid-featured {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
 @media (max-width: 720px) {
-  .about-team-grid { grid-template-columns: repeat(2, 1fr); }
+  .about-team-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .about-team-card {
   border: 1px solid var(--rule-soft);
   padding: 14px 16px;
   background: var(--paper-tint);
+  min-width: 0;
+}
+.about-team-photo {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  object-position: center top;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  margin-bottom: 12px;
+  box-shadow: 2px 3px 0 var(--shadow-soft);
 }
 .about-team-card h3,
 .about-team-card h4 {
@@ -695,7 +711,7 @@ input[type="range"].tw-range::-moz-range-thumb {
   letter-spacing: 0.24em;
   text-transform: uppercase;
   color: var(--ink-mute);
-  margin: 0;
+  margin: 4px 0 0;
 }
 .about-team-links {
   display: flex;
@@ -890,6 +906,216 @@ input[type="range"].tw-range::-moz-range-thumb {
   display: block;
 }
 
+.help-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--rule-soft);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+  font-family: 'IM Fell English', serif;
+  font-size: 17px;
+  line-height: 1;
+  letter-spacing: 0;
+}
+.help-toggle:hover {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.help-toggle:focus-visible {
+  outline: 1px dashed var(--accent);
+  outline-offset: 2px;
+}
+.stage-shell .top-rail-links .theme-toggle,
+.stage-shell .top-rail-links .help-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--rule-soft);
+  color: var(--ink-soft);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.stage-shell .top-rail-links .theme-toggle:hover,
+.stage-shell .top-rail-links .help-toggle:hover {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.stage-shell .top-rail-links .help-toggle {
+  font-family: 'IM Fell English', serif;
+  font-size: 17px;
+}
+
+/* ---------- Contextual spotlight tour ---------- */
+.spotlight-tour {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  pointer-events: auto;
+}
+.spotlight-tour-hole {
+  position: fixed;
+  border: 2px solid var(--paper);
+  box-shadow:
+    0 0 0 9999px rgba(0, 0, 0, 0.68),
+    0 0 0 5px rgba(var(--accent-rgb), 0.26),
+    0 18px 48px rgba(0, 0, 0, 0.35);
+  background: transparent;
+  border-radius: 4px;
+  pointer-events: none;
+  animation: spotlight-pulse 1.8s ease-in-out infinite;
+  transition: top 260ms ease, left 260ms ease, width 260ms ease, height 260ms ease;
+}
+.spotlight-tour-card {
+  position: fixed;
+  z-index: 262;
+  pointer-events: auto;
+  background:
+    repeating-linear-gradient(0deg, var(--shadow-faint) 0 1px, transparent 1px 4px),
+    var(--paper);
+  border: 1px solid var(--ink);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
+  padding: 16px 18px;
+  color: var(--ink);
+  transition: top 260ms ease, left 260ms ease;
+}
+.spotlight-tour-kicker {
+  font-family: 'IM Fell DW Pica SC', serif;
+  font-size: 9px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 7px;
+}
+.spotlight-tour-card h2 {
+  margin: 0 0 8px;
+  font-family: 'IM Fell English', serif;
+  font-weight: 400;
+  font-size: 25px;
+  line-height: 1.05;
+  color: var(--ink);
+}
+.spotlight-tour-card p {
+  margin: 0;
+  font-family: 'Old Standard TT', Georgia, serif;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+.spotlight-tour-progress {
+  position: relative;
+  height: 2px;
+  margin: 14px 0 12px;
+  background: var(--rule-soft);
+  overflow: hidden;
+}
+.spotlight-tour-progress span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent);
+  transition: width 240ms ease;
+}
+.spotlight-tour-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-family: 'IM Fell DW Pica SC', serif;
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+.spotlight-tour-actions div {
+  display: inline-flex;
+  gap: 8px;
+}
+.spotlight-tour-actions button {
+  background: transparent;
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  padding: 5px 8px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.spotlight-tour-actions button:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--paper);
+}
+.spotlight-tour-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+@keyframes spotlight-pulse {
+  0%, 100% { outline: 0 solid rgba(var(--accent-rgb), 0.05); }
+  50% { outline: 7px solid rgba(var(--accent-rgb), 0.18); }
+}
+
+@media (max-width: 720px) {
+  .spotlight-tour-card {
+    left: 12px !important;
+    right: 12px;
+    bottom: 14px;
+    top: auto !important;
+    width: auto !important;
+  }
+}
+
+/* ---------- Loading-stage editor note intro ---------- */
+.loading-note-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 255;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(6px) saturate(0.9);
+  transition: background 360ms ease, backdrop-filter 360ms ease;
+}
+.loading-note-intro.is-flying {
+  background: rgba(0, 0, 0, 0);
+  backdrop-filter: blur(0) saturate(1);
+  pointer-events: none;
+}
+.loading-note-intro-card {
+  position: fixed;
+  z-index: 256;
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+  transition:
+    top 560ms cubic-bezier(.2,.75,.18,1),
+    left 560ms cubic-bezier(.2,.75,.18,1),
+    width 560ms cubic-bezier(.2,.75,.18,1),
+    transform 560ms cubic-bezier(.2,.75,.18,1);
+}
+.loading-note-close {
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: 'IM Fell DW Pica SC', serif;
+  font-size: 9px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+}
+.loading-note-close:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
 /* In dark mode, paint the runtime-overlay backdrop a touch darker so the
    blur reads against the warm dark background rather than washing out. */
 [data-theme='dark'] .runtime-overlay {
@@ -903,7 +1129,8 @@ input[type="range"].tw-range::-moz-range-thumb {
    page background by switching to the warm paper tone — otherwise they
    blend with the page and only the cream border separates them. */
 [data-theme='dark'] .modal-tray,
-[data-theme='dark'] .runtime-overlay-card {
+[data-theme='dark'] .runtime-overlay-card,
+[data-theme='dark'] .spotlight-tour-card {
   background: var(--paper-warm);
 }
 
