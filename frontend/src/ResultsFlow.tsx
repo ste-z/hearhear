@@ -7,6 +7,7 @@ import type {
   ResultsOverview,
   ResultsOverviewArgument,
   ResultsOverviewSource,
+  RetrievalModel,
   SvdLatentDimension,
   TypoCorrectionSuggestion,
 } from './types'
@@ -2200,6 +2201,7 @@ function SimilarOverlay({
   onClose,
   onLoadMore,
   onOpen,
+  retrievalModel,
 }: {
   source: Article
   similar: Article[]
@@ -2209,7 +2211,13 @@ function SimilarOverlay({
   onClose: () => void
   onLoadMore: () => void
   onOpen: (article: Article) => void
+  retrievalModel: RetrievalModel
 }): JSX.Element {
+  const similarityDescription = ((): string => {
+    if (retrievalModel === 'minilm') return 'measured by MiniLM cosine on the article body'
+    if (retrievalModel === 'tfidf') return 'measured by TF·IDF cosine on the article body'
+    return 'measured by SVD cosine on the article body'
+  })()
   const sharedKeywords = (source.keywords ?? []).slice(0, 6)
   const [similarView, setSimilarView] = useState<'list' | 'atlas'>('list')
   return (
@@ -2268,7 +2276,7 @@ function SimilarOverlay({
             articles that share latitude with <em style={{ fontStyle: 'italic' }}>"{source.title}"</em>
           </div>
           <div style={{ marginTop: 6, fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>
-            measured by SVD cosine on the article body · {getAuthorDisplay(source)} · {getOutlet(source)}
+            {similarityDescription} · {getAuthorDisplay(source)} · {getOutlet(source)}
           </div>
           {sharedKeywords.length > 0 && (
             <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -4062,6 +4070,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
           loading={similarLoading}
           hasMore={similarHasMore}
           error={similarError}
+          retrievalModel={effectiveRetrievalModel}
           onClose={onCloseSimilar}
           onLoadMore={onLoadMoreSimilar}
           onOpen={(article) => {
