@@ -100,6 +100,14 @@ function resolveCurrentDomTheme(): DomTheme {
   return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'
 }
 
+// Article scores live on a 0-1 scale in the response payload; we render
+// them as 0-100% bars. Mirrors `clampPct` over in ResultsFlow.
+function clamp01ToPct(value: number | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0
+  const v = value <= 1 ? value * 100 : value
+  return Math.round(Math.max(0, Math.min(100, v)))
+}
+
 type AtlasData = {
   coordsMinilm: Int16Array
   coordsSvd: Int16Array | null
@@ -265,6 +273,59 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     }
     return out
   }, [props.highlightedIds, idToIndex])
+
+  // For embedded/similar modes the parent passes the actual Article list
+  // alongside the IDs so we can label dots with rank, vary lines by score,
+  // and surface score bars on hover. These two maps are keyed by the
+  // canonical *index* (the point's row in the coords array).
+  const idxToRank = useMemo(() => {
+    if (!props.highlightedArticles || !idToIndex) return null
+    const out = new Map<number, number>()
+    props.highlightedArticles.forEach((a, i) => {
+      const idx = idToIndex.get(String(a.id))
+      if (idx !== undefined) out.set(idx, i + 1)
+    })
+    return out
+  }, [props.highlightedArticles, idToIndex])
+
+  const idxToArticle = useMemo(() => {
+    if (!props.highlightedArticles || !idToIndex) return null
+    const out = new Map<number, Article>()
+    for (const a of props.highlightedArticles) {
+      const idx = idToIndex.get(String(a.id))
+      if (idx !== undefined) out.set(idx, a)
+    }
+    return out
+  }, [props.highlightedArticles, idToIndex])
+
+  // Per-result score (combined / topic / fallback) normalized into [0, 1]
+  // so we can use it for both line thickness and alpha. The map is keyed
+  // by canonical index for fast lookup inside the render loop.
+  const idxToScore = useMemo(() => {
+    if (!idxToArticle) return null
+    const out = new Map<number, number>()
+    let lo = Number.POSITIVE_INFINITY
+    let hi = Number.NEGATIVE_INFINITY
+    for (const [idx, a] of idxToArticle) {
+      const raw =
+        a.combined_score ??
+        a.score ??
+        a.topic_score_normalized ??
+        a.topic_score ??
+        0
+      const v = typeof raw === 'number' ? raw : 0
+      out.set(idx, v)
+      if (v < lo) lo = v
+      if (v > hi) hi = v
+    }
+    if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) {
+      for (const k of out.keys()) out.set(k, 1)
+      return out
+    }
+    const range = hi - lo
+    for (const [k, v] of out) out.set(k, (v - lo) / range)
+    return out
+  }, [idxToArticle])
 
   const focalIndex = useMemo(() => {
     if (!props.focalId || !idToIndex) return null
@@ -468,39 +529,58 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     }
     ctx.globalAlpha = 1
 
-    // Radial query lines (mode 'embedded', non-dispersed).
+    // Radial query lines (mode 'embedded', non-dispersed). Alpha + width
+    // both scale with the normalized relevance score — top-ranked results
+    // get a thicker, more visible line.
     if (
       props.mode === 'embedded' &&
       props.drawQueryLines &&
       queryCentroid &&
       !queryCentroid.dispersed &&
       highlightedIndices &&
-      props.highlightedArticles
+      idxToScore
     ) {
       const qx = dataToCanvasX(queryCentroid.x)
       const qy = dataToCanvasY(queryCentroid.y)
-      ctx.lineWidth = 1
-      const articles = props.highlightedArticles
-      const scoreMap = new Map<number, number>()
-      for (const a of articles) {
-        const idx = idToIndex?.get(String(a.id))
-        if (idx === undefined) continue
-        const s = a.combined_score ?? a.score ?? a.topic_score_normalized ?? a.topic_score ?? 0
-        scoreMap.set(idx, typeof s === 'number' ? s : 0)
-      }
-      const ordered = Array.from(scoreMap.entries()).sort((a, b) => a[1] - b[1])
-      const minScore = ordered.length ? ordered[0][1] : 0
-      const maxScore = ordered.length ? ordered[ordered.length - 1][1] : 1
-      const range = Math.max(1e-6, maxScore - minScore)
-      for (const [idx, score] of ordered) {
-        const t = (score - minScore) / range
-        const alpha = 0.08 + 0.14 * t
+      const ordered = Array.from(idxToScore.entries()).sort((a, b) => a[1] - b[1])
+      for (const [idx, t] of ordered) {
+        const alpha = 0.18 + 0.38 * t
+        const width = 0.7 + 2.2 * t
         ctx.strokeStyle = `rgba(${accentRgb[0]},${accentRgb[1]},${accentRgb[2]},${alpha})`
+        ctx.lineWidth = width
         ctx.beginPath()
         ctx.moveTo(qx, qy)
         ctx.lineTo(dataToCanvasX(coords[idx * 2]), dataToCanvasY(coords[idx * 2 + 1]))
         ctx.stroke()
       }
+      ctx.lineWidth = 1
+    }
+
+    // Focal → similar lines (mode 'similar'). Similar articles tend to come
+    // back with a cosine score in `combined_score`/`score`; we normalize
+    // those into the same [0, 1] range used for the embedded radial lines
+    // and use it for both alpha and width.
+    if (
+      props.mode === 'similar' &&
+      focalIndex !== null &&
+      highlightedIndices &&
+      idxToScore
+    ) {
+      const fx = dataToCanvasX(coords[focalIndex * 2])
+      const fy = dataToCanvasY(coords[focalIndex * 2 + 1])
+      const ordered = Array.from(idxToScore.entries()).sort((a, b) => a[1] - b[1])
+      for (const [idx, t] of ordered) {
+        if (idx === focalIndex) continue
+        const alpha = 0.22 + 0.4 * t
+        const width = 0.7 + 2.2 * t
+        ctx.strokeStyle = `rgba(${accentRgb[0]},${accentRgb[1]},${accentRgb[2]},${alpha})`
+        ctx.lineWidth = width
+        ctx.beginPath()
+        ctx.moveTo(fx, fy)
+        ctx.lineTo(dataToCanvasX(coords[idx * 2]), dataToCanvasY(coords[idx * 2 + 1]))
+        ctx.stroke()
+      }
+      ctx.lineWidth = 1
     }
 
     // Dispersed-result convex hull fallback.
@@ -531,16 +611,37 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
       }
     }
 
-    // Highlighted result points.
+    // Highlighted result points. In embedded mode (when a rank lookup is
+    // available) we render the points larger as filled accent discs with
+    // the result's 1-based rank stamped on top in the paper color — so the
+    // dots double as a "rank stamp" the user can scan to see where the top
+    // hits sit on the atlas. In similar mode and other contexts the dots
+    // stay small.
     if (highlightedIndices && highlightedIndices.size > 0) {
-      const ptSize = Math.max(3, Math.min(8, 3.5 + k * 0.18))
+      const showRank = props.mode === 'embedded' && idxToRank && idxToRank.size > 0
+      const baseSize = Math.max(3, Math.min(8, 3.5 + k * 0.18))
+      const stampSize = showRank ? Math.max(14, Math.min(22, 14 + k * 0.5)) : baseSize
       ctx.fillStyle = `rgb(${accentRgb[0]},${accentRgb[1]},${accentRgb[2]})`
       for (const i of highlightedIndices) {
         const cx = dataToCanvasX(coords[i * 2])
         const cy = dataToCanvasY(coords[i * 2 + 1])
         ctx.beginPath()
-        ctx.arc(cx, cy, ptSize / 2, 0, Math.PI * 2)
+        ctx.arc(cx, cy, stampSize / 2, 0, Math.PI * 2)
         ctx.fill()
+      }
+      if (showRank && idxToRank) {
+        // Stamp the rank number in paper color.
+        ctx.fillStyle = paper
+        const fontPx = Math.round(stampSize * 0.55)
+        ctx.font = `bold ${fontPx}px 'IM Fell English', Georgia, serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        for (const [i, rank] of idxToRank) {
+          if (!highlightedIndices.has(i)) continue
+          const cx = dataToCanvasX(coords[i * 2])
+          const cy = dataToCanvasY(coords[i * 2 + 1])
+          ctx.fillText(String(rank), cx, cy + 0.5)
+        }
       }
     }
 
@@ -604,6 +705,8 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     props.mode,
     props.drawQueryLines,
     props.highlightedArticles,
+    idxToRank,
+    idxToScore,
     // `domTheme` is the canvas's authoritative theme signal (updated by the
     // MutationObserver that watches <html data-theme>).
     domTheme,
@@ -923,6 +1026,47 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
                 ))}
               </div>
             )}
+            {(() => {
+              const article = idxToArticle?.get(hoverIdx)
+              if (!article) return null
+              const bars: Array<{ label: string; value: number; accent?: boolean }> = [
+                {
+                  label: 'topic',
+                  value: clamp01ToPct(
+                    article.topic_score_display ??
+                      article.topic_score_normalized ??
+                      article.topic_score,
+                  ),
+                },
+                {
+                  label: 'stance',
+                  value: clamp01ToPct(
+                    article.stance_score_normalized ?? article.llm_agreement_score,
+                  ),
+                  accent: true,
+                },
+                {
+                  label: 'recency',
+                  value: clamp01ToPct(article.recency_score_normalized),
+                },
+              ]
+              return (
+                <div className="atlas-tooltip-scores">
+                  {bars.map((b) => (
+                    <div key={b.label} className="atlas-tooltip-score-row">
+                      <span className="atlas-tooltip-score-label">{b.label}</span>
+                      <div className="atlas-tooltip-score-track">
+                        <div
+                          className={`atlas-tooltip-score-fill ${b.accent ? 'atlas-tooltip-score-accent' : ''}`}
+                          style={{ width: `${b.value}%` }}
+                        />
+                      </div>
+                      <span className="atlas-tooltip-score-value">{b.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
           </div>
         )}
         {loading && !error && (
