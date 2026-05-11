@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type {
   Article,
@@ -11,6 +11,7 @@ import type {
   TypoCorrectionSuggestion,
 } from './types'
 import PersonaName from './PersonaName'
+import SpotlightTour, { type SpotlightTourStep } from './SpotlightTour'
 import ThemeToggle, { type Theme } from './ThemeToggle'
 
 export type SearchProgressLine = {
@@ -132,6 +133,85 @@ const SCATTER_SPOTS = [
   { x: 280, y: 188, r: -1.2 }, { x: 550, y: 174, r: 0.4 },
   { x: 140, y: 340, r: 1.6 }, { x: 410, y: 354, r: -0.8 },
 ] as const
+
+const LOADING_NOTE_SEEN_KEY = 'hearhear.tour.loadingSeen'
+const RESULTS_TOUR_SEEN_KEY = 'hearhear.tour.resultsSeen'
+const ROCCHIO_TOUR_SEEN_KEY = 'hearhear.tour.rocchioSeen'
+
+const STAGE1_TOUR_STEPS: SpotlightTourStep[] = [
+  {
+    target: 'results-stage-rail',
+    title: 'The search moves in stages',
+    body: 'This rail shows where your slip is in the newsroom workflow: proofreading, topic relevance, then stance agreement.',
+    placement: 'bottom',
+  },
+  {
+    target: 'results-stage-body',
+    title: 'Proofreading or thesis picking',
+    body: 'Before the heavy search begins, hear! hear! checks spelling and rewrite options for short claims, or asks essay users to confirm a thesis.',
+    placement: 'right',
+  },
+]
+
+const RESULTS_TOUR_STEPS: SpotlightTourStep[] = [
+  {
+    target: 'results-ledger',
+    title: 'The final ranked ledger',
+    body: 'The ledger ranks articles by topic relevance, stance agreement, and recency. Click any row to open the full broadsheet view.',
+    placement: 'right',
+  },
+  {
+    target: 'results-dismiss-cross',
+    title: 'Mark weak matches',
+    body: 'Click the cross on the right of an article to mark it as not relevant. hear! hear! can use that feedback with Rocchio to rerank toward better matches.',
+    placement: 'left',
+  },
+  {
+    target: 'results-overview',
+    title: 'The AI assistant brief',
+    body: 'This note summarizes the opinion spread in the results, including articles who support or challenge your argument.',
+    placement: 'left',
+  },
+  {
+    target: 'results-chat',
+    title: 'Ask the editor',
+    body: 'Use the editor chat to ask questions about the ranked results, compare articles, or focus on selected sources.',
+    placement: 'left',
+  },
+  {
+    target: 'results-compose-link',
+    title: 'Revise and search again',
+    body: 'Return to compose whenever you want to edit the slip, change search mode, or try a sharper argument.',
+    placement: 'top',
+  },
+]
+
+const ROCCHIO_TOUR_STEPS: SpotlightTourStep[] = [
+  {
+    target: 'results-rocchio-refresh',
+    title: 'Refresh with feedback',
+    body: 'Your not-relevant mark is saved here. Click this box to refresh the results using Rocchio feedback and pull next-best articles.',
+    placement: 'left',
+  },
+]
+
+function readTourSeen(key: string): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(key) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function markTourSeen(key: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(key, 'true')
+  } catch {
+    /* ignore */
+  }
+}
 
 function getArticleId(article: Article): string {
   return String(article.id)
@@ -567,6 +647,67 @@ function StickyNote({
   )
 }
 
+function LoadingEditorNoteContent(): JSX.Element {
+  return (
+    <>
+      <div className="tracker" style={{ color: 'var(--accent)', fontSize: 9, letterSpacing: '0.26em', marginBottom: 8 }}>from Editor</div>
+      <div style={{
+        fontFamily: "'IM Fell English', serif",
+        fontStyle: 'italic',
+        fontSize: 16,
+        lineHeight: 1.55,
+        color: 'var(--ink)',
+      }}>
+        Here are some relevant articles, dear reader. I am presently <span style={{ borderBottom: '1.5px dotted var(--accent)' }}>reranking</span> them by how closely they agree with you.
+        <br /><br />Give me one second.
+        <span style={{ display: 'block', marginTop: 6, fontFamily: "'Special Elite', monospace", fontSize: 12, fontStyle: 'normal', color: 'var(--ink-mute)' }}>(actually, about 30 seconds)</span>
+      </div>
+    </>
+  )
+}
+
+function LoadingEditorNoteIntro({
+  open,
+  flying,
+  targetRect,
+  onClose,
+}: {
+  open: boolean
+  flying: boolean
+  targetRect: DOMRect | null
+  onClose: () => void
+}): JSX.Element | null {
+  if (!open && !flying) return null
+  const cardStyle: CSSProperties = flying && targetRect
+    ? {
+        top: targetRect.top,
+        left: targetRect.left,
+        width: targetRect.width,
+        transform: 'translate(0, 0) rotate(-1.5deg)',
+      }
+    : {
+        top: '50%',
+        left: '50%',
+        width: 'min(380px, calc(100vw - 56px))',
+        transform: 'translate(-50%, -50%) rotate(-1.5deg)',
+      }
+
+  return (
+    <section className={`loading-note-intro ${flying ? 'is-flying' : ''}`} role="dialog" aria-modal="true" aria-label="Loading stage note">
+      <div className="loading-note-intro-card" style={cardStyle}>
+        <StickyNote rotation={0} maxWidth="none" style={{ transform: 'none' }}>
+          <LoadingEditorNoteContent />
+        </StickyNote>
+        {!flying && (
+          <button type="button" className="loading-note-close" onClick={onClose}>
+            close
+          </button>
+        )}
+      </div>
+    </section>
+  )
+}
+
 function RFSpinner(): JSX.Element {
   return (
     <span style={{ display: 'inline-block', width: 12, height: 12, position: 'relative' }}>
@@ -726,6 +867,7 @@ function RFRankedRow({
   onClick,
   onDismiss,
   hideArticleInfo = false,
+  tourTarget,
 }: {
   article: Article
   rank: number
@@ -733,6 +875,7 @@ function RFRankedRow({
   onClick: () => void
   onDismiss: () => void
   hideArticleInfo?: boolean
+  tourTarget?: string
 }): JSX.Element {
   const [hover, setHover] = useState(false)
   const sentColor = getSentColor(article)
@@ -787,6 +930,7 @@ function RFRankedRow({
       </div>
       <button
         type="button"
+        data-tour={tourTarget}
         onClick={(event) => { event.stopPropagation(); onDismiss() }}
         title="not relevant"
         style={{
@@ -2701,7 +2845,6 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
     progressMessage,
     querySvdDimensions,
     querySvdCorpusChartDimensions,
-    effectiveRetrievalModel,
     stage,
     rankingExplanations,
     onExplainRanking,
@@ -2710,6 +2853,17 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
   const [openId, setOpenId] = useState<string | null>(null)
   const [chatOpen, setChatOpen] = useState(false)
   const [sortPhase, setSortPhase] = useState<'idle' | 'sorting' | 'done'>('idle')
+  const [activeTour, setActiveTour] = useState<'stage1' | 'results' | 'rocchio' | null>(null)
+  const [loadingNoteIntroState, setLoadingNoteIntroState] = useState<'open' | 'flying' | null>(null)
+  const [loadingNoteTargetRect, setLoadingNoteTargetRect] = useState<DOMRect | null>(null)
+  const [pendingRocchioTour, setPendingRocchioTour] = useState(false)
+  const loadingNoteSeenRef = useRef(readTourSeen(LOADING_NOTE_SEEN_KEY))
+  const resultsTourSeenRef = useRef(readTourSeen(RESULTS_TOUR_SEEN_KEY))
+  const rocchioTourSeenRef = useRef(readTourSeen(ROCCHIO_TOUR_SEEN_KEY))
+  const loadingNoteAutoOpenedRef = useRef(false)
+  const resultsTourAutoOpenedRef = useRef(false)
+  const rocchioTourAutoOpenedRef = useRef(false)
+  const loadingNoteFlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevStageRef = useRef<'stage1' | 'stage2' | 'stage3'>(stage)
   useEffect(() => {
     if (stage === 'stage3' && prevStageRef.current === 'stage2' && articles.length > 0) {
@@ -2807,6 +2961,99 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
   const isStage1 = stage === 'stage1'
   const isStage2 = stage === 'stage2'
   const isStage3 = stage === 'stage3'
+  const activeTourSteps = useMemo(() => {
+    if (activeTour === 'stage1') return STAGE1_TOUR_STEPS
+    if (activeTour === 'rocchio') return ROCCHIO_TOUR_STEPS
+    if (activeTour === 'results') {
+      return visibleArticles.length > 0
+        ? RESULTS_TOUR_STEPS
+        : RESULTS_TOUR_STEPS.filter(step => step.target !== 'results-chat')
+    }
+    return []
+  }, [activeTour, visibleArticles.length])
+  const closeActiveTour = useCallback((): void => {
+    if (activeTour === 'results') {
+      resultsTourSeenRef.current = true
+      resultsTourAutoOpenedRef.current = true
+      markTourSeen(RESULTS_TOUR_SEEN_KEY)
+    }
+    if (activeTour === 'rocchio') {
+      rocchioTourSeenRef.current = true
+      rocchioTourAutoOpenedRef.current = true
+      markTourSeen(ROCCHIO_TOUR_SEEN_KEY)
+    }
+    setActiveTour(null)
+  }, [activeTour])
+  const closeLoadingNoteIntro = useCallback((): void => {
+    const target = document.querySelector('[data-tour="loading-editor-note"]')
+    setLoadingNoteTargetRect(target instanceof HTMLElement ? target.getBoundingClientRect() : null)
+    loadingNoteSeenRef.current = true
+    loadingNoteAutoOpenedRef.current = true
+    markTourSeen(LOADING_NOTE_SEEN_KEY)
+    setLoadingNoteIntroState('flying')
+    if (loadingNoteFlightTimerRef.current) clearTimeout(loadingNoteFlightTimerRef.current)
+    loadingNoteFlightTimerRef.current = setTimeout(() => {
+      setLoadingNoteIntroState(null)
+      setLoadingNoteTargetRect(null)
+      loadingNoteFlightTimerRef.current = null
+    }, 620)
+  }, [])
+  const startCurrentStageTour = useCallback((): void => {
+    if (stage === 'stage2') {
+      if (loadingNoteFlightTimerRef.current) clearTimeout(loadingNoteFlightTimerRef.current)
+      setLoadingNoteTargetRect(null)
+      setLoadingNoteIntroState('open')
+    }
+    else if (stage === 'stage3') setActiveTour('results')
+    else setActiveTour('stage1')
+  }, [stage])
+  useEffect(() => {
+    if (stage !== 'stage2') return
+    if (loadingNoteSeenRef.current || loadingNoteAutoOpenedRef.current) return
+    loadingNoteAutoOpenedRef.current = true
+    setLoadingNoteIntroState('open')
+  }, [stage])
+  useEffect(() => {
+    if (stage !== 'stage3') return
+    if (resultsTourSeenRef.current || resultsTourAutoOpenedRef.current) return
+    resultsTourAutoOpenedRef.current = true
+    setActiveTour('results')
+  }, [stage])
+  useEffect(() => {
+    if (stage !== 'stage2' && loadingNoteIntroState !== null) {
+      loadingNoteSeenRef.current = true
+      loadingNoteAutoOpenedRef.current = true
+      markTourSeen(LOADING_NOTE_SEEN_KEY)
+      setLoadingNoteIntroState(null)
+      setLoadingNoteTargetRect(null)
+    }
+  }, [loadingNoteIntroState, stage])
+  useEffect(() => {
+    if (activeTour === 'results' && stage !== 'stage3') {
+      closeActiveTour()
+    } else if (activeTour === 'stage1' && stage !== 'stage1') {
+      setActiveTour(null)
+    } else if (activeTour === 'rocchio' && stage !== 'stage3') {
+      closeActiveTour()
+    }
+  }, [activeTour, closeActiveTour, stage])
+  useEffect(() => {
+    if (!pendingRocchioTour || stage !== 'stage3' || dismissedIds.size === 0) return
+    setPendingRocchioTour(false)
+    if (rocchioTourSeenRef.current || rocchioTourAutoOpenedRef.current) return
+    rocchioTourAutoOpenedRef.current = true
+    setActiveTour('rocchio')
+  }, [dismissedIds.size, pendingRocchioTour, stage])
+  useEffect(() => () => {
+    if (loadingNoteFlightTimerRef.current) clearTimeout(loadingNoteFlightTimerRef.current)
+  }, [])
+
+  const handleRankedDismiss = useCallback((article: Article): void => {
+    onDismiss(article)
+    if (!rocchioTourSeenRef.current && !rocchioTourAutoOpenedRef.current) {
+      setPendingRocchioTour(true)
+    }
+  }, [onDismiss])
   const hasTypo = typoCorrection !== null
   const stageLabels = [
     { n: 1, title: 'Proofreading your slip', caption: 'spelling & rewrite check' },
@@ -2837,6 +3084,15 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
           <button type="button" className="active">search</button>
           <button type="button" onClick={onOpenAbout}>about</button>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+          <button
+            type="button"
+            className="help-toggle"
+            onClick={startCurrentStageTour}
+            aria-label="Open tutorial"
+            title="Open tutorial"
+          >
+            ?
+          </button>
         </div>
       </div>
       <div className="top-rule" />
@@ -2888,7 +3144,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
       </div>
 
       {/* step rail */}
-      <div style={{
+      <div data-tour="results-stage-rail" style={{
         margin: '14px 48px 0',
         display: 'grid',
         gridTemplateColumns: 'repeat(3, 1fr)',
@@ -2937,7 +3193,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
       {/* body — flex-1 so it fills available height. Stage 1 needs outer scroll
           (typo/rewrite or thesis-picker can be tall); stages 2 & 3 own their scroll
           inside the panels (ledger, overview), so the outer pane stays fixed. */}
-      <div className="tray-scroll" style={{ position: 'relative', padding: '24px 48px 0', flex: 1, minHeight: 0, overflowY: isStage1 ? 'auto' : 'hidden' }}>
+      <div className="tray-scroll" data-tour={isStage1 ? 'results-stage-body' : undefined} style={{ position: 'relative', padding: '24px 48px 0', flex: 1, minHeight: 0, overflowY: isStage1 ? 'auto' : 'hidden' }}>
         {/* Stage 1: typo + rewrite (stance) OR thesis picker (essay/NLI) */}
         {isStage1 && inputMode === 'essay' && (
           <div>
@@ -3253,7 +3509,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
         {/* Stage 2: scatter (after stage 1 confirmed, before ledger) */}
         {isStage2 && (
           <div style={{ display: 'grid', gridTemplateColumns: '820px 1fr', gap: 32 }}>
-            <div style={{ position: 'relative', height: 470 }}>
+            <div data-tour="loading-scatter-desk" style={{ position: 'relative', height: 470 }}>
               <div style={{
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -3279,42 +3535,26 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                 ))}
               </div>
             </div>
-            <div style={{ paddingTop: 12, paddingLeft: 28, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22 }}>
+            <div data-tour="loading-progress-panel" style={{ paddingTop: 12, paddingLeft: 28, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22 }}>
               {/* Two notes for stage 2:
                   - While the retrieval pipeline is still running we have no
                     cards yet, so the Compositor is on stage telling the
                     reader articles are being pulled from the archive.
                   - Once articles are in, the LLM sub-editor takes over and
                     explains it's now reranking by stance agreement. */}
-              {articles.length === 0 ? (
+              <div
+                data-tour="loading-editor-note"
+                style={{
+                  opacity: loadingNoteIntroState === null ? 1 : 0,
+                  transition: 'opacity 180ms ease',
+                  width: '100%',
+                  maxWidth: 360,
+                }}
+              >
                 <StickyNote rotation={-1.5} maxWidth={360}>
-                  <div className="tracker" style={{ color: 'var(--accent)', fontSize: 9, letterSpacing: '0.26em', marginBottom: 8 }}>from <PersonaName persona={effectiveRetrievalModel} /></div>
-                  <div style={{
-                    fontFamily: "'IM Fell English', serif",
-                    fontStyle: 'italic',
-                    fontSize: 16,
-                    lineHeight: 1.55,
-                    color: 'var(--ink)',
-                  }}>
-                    <PersonaName persona={effectiveRetrievalModel} /> is finding articles that are on topic. One moment.
-                  </div>
+                  <LoadingEditorNoteContent />
                 </StickyNote>
-              ) : (
-                <StickyNote rotation={-1.5} maxWidth={360}>
-                  <div className="tracker" style={{ color: 'var(--accent)', fontSize: 9, letterSpacing: '0.26em', marginBottom: 8 }}>from <PersonaName persona="llm" /></div>
-                  <div style={{
-                    fontFamily: "'IM Fell English', serif",
-                    fontStyle: 'italic',
-                    fontSize: 16,
-                    lineHeight: 1.55,
-                    color: 'var(--ink)',
-                  }}>
-                    Here are some relevant articles, dear reader. I am presently <span style={{ borderBottom: '1.5px dotted var(--accent)' }}>reranking</span> them by how closely they agree with you.
-                    <br /><br />Give me one second.
-                    <span style={{ display: 'block', marginTop: 6, fontFamily: "'Special Elite', monospace", fontSize: 12, fontStyle: 'normal', color: 'var(--ink-mute)' }}>(actually, about 30 seconds)</span>
-                  </div>
-                </StickyNote>
-              )}
+              </div>
               <div style={{ width: '100%', maxWidth: 360, display: 'flex', alignItems: 'center', gap: 10, fontFamily: "'Special Elite', monospace", fontSize: 11, color: 'var(--ink-mute)' }}>
                 <RFSpinner /><span>· · · {progressMessage ?? 'scoring agreement with the sub-editor'}</span>
               </div>
@@ -3338,7 +3578,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 460px', gap: 36, position: 'relative', height: '100%', minHeight: 0, alignItems: 'stretch' }}>
             <div style={{ order: 2, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
               {dismissedIds.size > 0 && (
-                <div style={{
+                <div data-tour="results-rocchio-refresh" style={{
                   border: '2px solid var(--ink)',
                   background: 'var(--ink)',
                   color: 'var(--paper)',
@@ -3420,7 +3660,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                 </details>
               )}
             {/* Editor Overview */}
-            <div className="tray-scroll" style={{
+            <div className="tray-scroll" data-tour="results-overview" style={{
               display: 'flex',
               flexDirection: 'column',
               gap: 14,
@@ -3596,7 +3836,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
             </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', position: 'relative', minHeight: 0 }}>
+            <div data-tour="results-ledger" style={{ display: 'flex', flexDirection: 'column', position: 'relative', minHeight: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
                 <div className="tracker" style={{ fontSize: 10, letterSpacing: '0.32em' }}>the ledger · ranked 01—{String(visibleArticles.length).padStart(2, '0')}</div>
                 <div style={{ fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>click for the broadsheet</div>
@@ -3632,8 +3872,9 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                     rank={i + 1}
                     active={openId === getArticleId(article)}
                     onClick={() => setOpenId(getArticleId(article))}
-                    onDismiss={() => onDismiss(article)}
+                    onDismiss={() => handleRankedDismiss(article)}
                     hideArticleInfo={sortPhase === 'sorting'}
+                    tourTarget={i === 0 ? 'results-dismiss-cross' : undefined}
                   />
                 ))}
               </div>
@@ -3653,6 +3894,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
       {isStage3 && visibleArticles.length > 0 && !chatOpen && (
         <button
           type="button"
+          data-tour="results-chat"
           onClick={() => setChatOpen(true)}
           style={{
             position: 'absolute',
@@ -3696,7 +3938,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
           : `${visibleArticles.length} retained${dismissedIds.size ? ` · ${dismissedIds.size} dismissed` : ''}`}
       </div>
       <div style={{ flexShrink: 0, padding: '4px 48px 12px', display: 'flex', justifyContent: 'center' }}>
-        <button type="button" onClick={onBackToCompose} className="btn-stamp" style={{ padding: '6px 14px' }}>← compose</button>
+        <button type="button" data-tour="results-compose-link" onClick={onBackToCompose} className="btn-stamp" style={{ padding: '6px 14px' }}>← compose</button>
       </div>
 
       {/* overlays */}
@@ -3771,6 +4013,19 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
           }}
         />
       )}
+
+      <LoadingEditorNoteIntro
+        open={loadingNoteIntroState === 'open'}
+        flying={loadingNoteIntroState === 'flying'}
+        targetRect={loadingNoteTargetRect}
+        onClose={closeLoadingNoteIntro}
+      />
+
+      <SpotlightTour
+        open={activeTour !== null && activeTourSteps.length > 0}
+        steps={activeTourSteps}
+        onClose={closeActiveTour}
+      />
 
     </div>
   )
