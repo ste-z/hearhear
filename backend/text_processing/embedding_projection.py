@@ -231,7 +231,8 @@ def build_shared_metadata(
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         df = pd.read_sql_query(
-            "SELECT id, title, section_name, url, year FROM guardian_articles",
+            "SELECT id, title, section_name, url, year, author_raw, "
+            "contributors, keywords FROM guardian_articles",
             conn,
         )
     finally:
@@ -265,6 +266,52 @@ def build_shared_metadata(
     years_raw = df["year"].fillna(0)
     years = years_raw.astype(int).tolist()
 
+    # Resolve author: prefer the first contributor (JSON list); fall back to
+    # author_raw. Both are stored as text in sqlite — contributors is a JSON
+    # array string like '["Jane Doe","John Smith"]'.
+    def _parse_first_contributor(raw):
+        if not isinstance(raw, str) or not raw.strip():
+            return ""
+        try:
+            value = json.loads(raw)
+        except Exception:
+            return ""
+        if isinstance(value, list) and value:
+            first = value[0]
+            return str(first).strip() if first else ""
+        return ""
+
+    contributor_first = df["contributors"].apply(_parse_first_contributor).tolist()
+    author_raw = df["author_raw"].fillna("").astype(str).tolist()
+    authors = [
+        (cf if cf else (ar or "")).strip()
+        for cf, ar in zip(contributor_first, author_raw)
+    ]
+
+    # Keywords are stored as JSON arrays. Keep up to 6 per article and
+    # normalize to a list[str] to keep the wire payload predictable.
+    def _parse_keywords(raw):
+        if not isinstance(raw, str) or not raw.strip():
+            return []
+        try:
+            value = json.loads(raw)
+        except Exception:
+            return []
+        if not isinstance(value, list):
+            return []
+        cleaned = []
+        for item in value:
+            if not item:
+                continue
+            text = str(item).strip()
+            if text:
+                cleaned.append(text)
+            if len(cleaned) >= 6:
+                break
+        return cleaned
+
+    keywords = df["keywords"].apply(_parse_keywords).tolist()
+
     payload = {
         "n_docs": len(canonical_doc_ids),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -275,6 +322,8 @@ def build_shared_metadata(
         "years": years,
         "section_indices": section_indices,
         "urls": urls,
+        "authors": authors,
+        "keywords": keywords,
     }
 
     out_path = _output_public_meta()

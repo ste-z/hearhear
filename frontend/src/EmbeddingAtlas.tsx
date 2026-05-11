@@ -19,6 +19,8 @@ type AtlasMetaPayload = {
   years: number[]
   section_indices: number[]
   urls: string[]
+  authors?: string[]
+  keywords?: string[][]
 }
 
 export type EmbeddingAtlasProps = {
@@ -29,6 +31,7 @@ export type EmbeddingAtlasProps = {
   onBackToCompose?: () => void
   onOpenAbout?: () => void
   onOpenMethod?: () => void
+  onOpenTutorial?: () => void
   active?: 'explore' | null
   // Highlighting:
   highlightedIds?: string[]
@@ -68,17 +71,33 @@ function buildSpatialGrid(coords: Int16Array): Map<number, number[]> {
   return grid
 }
 
-function readCssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+// Inline color palettes (mirror App.css `--paper`, `--ink-rgb`, `--accent-rgb`).
+// Reading these via `getComputedStyle(<html>)` races with App.tsx's separate
+// `useEffect` that writes `data-theme`, so we keep the canvas-paint pipeline
+// keyed to plain React state (`domTheme`) instead. The CSS-var values for
+// non-canvas chrome still come from `data-theme` — only the canvas needs
+// this decoupled path.
+type DomTheme = 'light' | 'dark'
+const ATLAS_THEME_PALETTE: Record<DomTheme, {
+  paper: string
+  inkRgb: [number, number, number]
+  accentRgb: [number, number, number]
+}> = {
+  light: {
+    paper: '#fafaf7',
+    inkRgb: [26, 26, 26],
+    accentRgb: [122, 29, 29],
+  },
+  dark: {
+    paper: '#15130f',
+    inkRgb: [237, 228, 210],
+    accentRgb: [217, 115, 84],
+  },
 }
 
-function rgbStringToTuple(s: string): [number, number, number] {
-  // expects format "r, g, b"
-  const parts = s.split(',').map((p) => Number(p.trim()))
-  if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
-    return [parts[0], parts[1], parts[2]]
-  }
-  return [128, 128, 128]
+function resolveCurrentDomTheme(): DomTheme {
+  if (typeof document === 'undefined') return 'light'
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'
 }
 
 type AtlasData = {
@@ -187,6 +206,20 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null)
   const [size, setSize] = useState<{ w: number; h: number; dpr: number }>({ w: 0, h: 0, dpr: 1 })
+  // `domTheme` is the source of truth for canvas colors. We initialize it
+  // from `<html data-theme>` at mount, then keep it in lock-step with that
+  // attribute via a MutationObserver. This deliberately avoids depending on
+  // `props.theme`, which can be one phase ahead of the DOM attribute.
+  const [domTheme, setDomTheme] = useState<DomTheme>(() => resolveCurrentDomTheme())
+  useEffect(() => {
+    const root = document.documentElement
+    const sync = () => setDomTheme(resolveCurrentDomTheme())
+    // Sync once on mount in case the attribute was set before mount.
+    sync()
+    const observer = new MutationObserver(sync)
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => observer.disconnect()
+  }, [])
 
   // Resize observer — keeps canvas matched to its container.
   useEffect(() => {
@@ -327,6 +360,8 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
   // ===== Heavy (background) render: 66K bg points + radial lines + hull +
   // highlights + focal + query marker + search-matches.
   // Doesn't depend on hoverIdx, so hover updates do NOT trigger this.
+  // Colors come from the `domTheme`-keyed palette, not getComputedStyle, so
+  // the canvas never paints with stale CSS vars.
   useEffect(() => {
     const canvas = bgCanvasRef.current
     if (!canvas || !coords || !size.w || !size.h || !dataToCanvas) return
@@ -339,10 +374,11 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     canvas.style.height = `${size.h}px`
     ctx.setTransform(size.dpr, 0, 0, size.dpr, 0, 0)
 
-    const paper = readCssVar('--paper') || '#fafaf7'
-    const inkRgb = rgbStringToTuple(readCssVar('--ink-rgb'))
-    const accentRgb = rgbStringToTuple(readCssVar('--accent-rgb'))
-    const isDark = document.documentElement.dataset.theme === 'dark'
+    const palette = ATLAS_THEME_PALETTE[domTheme]
+    const paper = palette.paper
+    const inkRgb = palette.inkRgb
+    const accentRgb = palette.accentRgb
+    const isDark = domTheme === 'dark'
 
     ctx.fillStyle = paper
     ctx.fillRect(0, 0, size.w, size.h)
@@ -514,7 +550,9 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     props.mode,
     props.drawQueryLines,
     props.highlightedArticles,
-    props.theme,
+    // `domTheme` is the canvas's authoritative theme signal (updated by the
+    // MutationObserver that watches <html data-theme>).
+    domTheme,
     idToIndex,
     searchMatches,
   ])
@@ -533,7 +571,7 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     ctx.setTransform(size.dpr, 0, 0, size.dpr, 0, 0)
     ctx.clearRect(0, 0, size.w, size.h)
     if (hoverIdx === null) return
-    const accentRgb = rgbStringToTuple(readCssVar('--accent-rgb'))
+    const accentRgb = ATLAS_THEME_PALETTE[domTheme].accentRgb
     const tform = transformRef.current
     const { baseScale } = dataToCanvas
     const k = tform.k
@@ -544,7 +582,7 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     ctx.beginPath()
     ctx.arc(cx, cy, 8, 0, Math.PI * 2)
     ctx.stroke()
-  }, [hoverIdx, coords, size, dataToCanvas, transformTick, props.theme])
+  }, [hoverIdx, coords, size, dataToCanvas, transformTick, domTheme])
 
   // ===== Minimap (embedded + similar modes only): overview rectangle.
   useEffect(() => {
@@ -561,9 +599,10 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     canvas.height = Math.round(mmH * dpr)
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-    const paper = readCssVar('--paper') || '#fafaf7'
-    const inkRgb = rgbStringToTuple(readCssVar('--ink-rgb'))
-    const accentRgb = rgbStringToTuple(readCssVar('--accent-rgb'))
+    const palette = ATLAS_THEME_PALETTE[domTheme]
+    const paper = palette.paper
+    const inkRgb = palette.inkRgb
+    const accentRgb = palette.accentRgb
 
     ctx.fillStyle = paper
     ctx.fillRect(0, 0, mmW, mmH)
@@ -648,17 +687,10 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
     focalIndex,
     queryCentroid,
     props.mode,
-    props.theme,
+    domTheme,
   ])
 
-  // Re-render bg when theme attribute flips for embedded/similar modes.
-  useEffect(() => {
-    if (props.theme) return // standalone passes it explicitly
-    const root = document.documentElement
-    const observer = new MutationObserver(() => setTransformTick((t) => t + 1))
-    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] })
-    return () => observer.disconnect()
-  }, [props.theme])
+  // (theme handling lives in the `domTheme` state above)
 
   // Pointer move → hover hit-test
   const onPointerMove = useCallback(
@@ -721,6 +753,17 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
               <button type="button" onClick={props.onOpenAbout}>about</button>
               {props.theme && props.onToggleTheme && (
                 <ThemeToggle theme={props.theme} onToggle={props.onToggleTheme} />
+              )}
+              {props.onOpenTutorial && (
+                <button
+                  type="button"
+                  className="help-toggle"
+                  onClick={props.onOpenTutorial}
+                  aria-label="Open tutorial"
+                  title="Open tutorial"
+                >
+                  ?
+                </button>
               )}
             </div>
           </div>
@@ -810,14 +853,22 @@ export default function EmbeddingAtlas(props: EmbeddingAtlasProps) {
           <div
             className="atlas-tooltip"
             style={{
-              transform: `translate(${Math.min(size.w - 260, hoverPos.x + 12)}px, ${Math.max(8, hoverPos.y - 8)}px)`,
+              transform: `translate(${Math.min(size.w - 280, hoverPos.x + 12)}px, ${Math.max(8, hoverPos.y - 8)}px)`,
             }}
           >
             <div className="atlas-tooltip-title">{meta.titles[hoverIdx] || '(untitled)'}</div>
             <div className="atlas-tooltip-meta">
-              {meta.years[hoverIdx] ? `${meta.years[hoverIdx]} · ` : ''}
-              {meta.sections[meta.section_indices[hoverIdx]] || 'uncategorized'}
+              {meta.years[hoverIdx] ? meta.years[hoverIdx] : ''}
+              {meta.years[hoverIdx] && meta.authors?.[hoverIdx] ? ' · ' : ''}
+              {meta.authors?.[hoverIdx] || ''}
             </div>
+            {meta.keywords?.[hoverIdx] && meta.keywords[hoverIdx].length > 0 && (
+              <div className="atlas-tooltip-keywords">
+                {meta.keywords[hoverIdx].slice(0, 4).map((k) => (
+                  <span key={k} className="atlas-tooltip-keyword">{k}</span>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {loading && !error && (
