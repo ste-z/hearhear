@@ -365,6 +365,56 @@
   line-height: 1.2;
 }
 
+/* Score bars in the tooltip mirror the RFMicroDial component used inside
+   the results ledger so the visual language matches. */
+.atlas-tooltip-scores {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-tooltip-score-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'Special Elite', monospace;
+  font-size: 9px;
+  color: var(--ink);
+}
+
+.atlas-tooltip-score-label {
+  width: 44px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: var(--ink-mute);
+}
+
+.atlas-tooltip-score-track {
+  flex: 1;
+  height: 3px;
+  background: rgba(var(--ink-rgb), 0.12);
+  position: relative;
+}
+
+.atlas-tooltip-score-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--ink);
+}
+
+.atlas-tooltip-score-fill.atlas-tooltip-score-accent {
+  background: var(--accent);
+}
+
+.atlas-tooltip-score-value {
+  width: 22px;
+  text-align: right;
+  color: var(--ink);
+}
+
 /* ---------- Footer (standalone) ---------- */
 
 .atlas-footer {
