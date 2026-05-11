@@ -71,6 +71,12 @@ const COMPOSE_TOUR_STEPS: SpotlightTourStep[] = [
     body: 'Start the search pipeline.',
     placement: 'top',
   },
+  {
+    target: 'compose-explore',
+    title: 'Explore the archive',
+    body: 'Explore the article database as an atlas.',
+    placement: 'bottom',
+  },
 ]
 
 export type LandingFlowProps = {
@@ -1223,7 +1229,7 @@ export function LandingFlow(props: LandingFlowProps): JSX.Element {
         <button type="button" className="top-rail-brand">hear! hear!</button>
         <div className="top-rail-links">
           <button type="button" className="active">search</button>
-          <button type="button" onClick={onOpenExplore}>explore</button>
+          <button type="button" data-tour="compose-explore" onClick={onOpenExplore}>explore</button>
           <button type="button" onClick={onOpenAbout}>about</button>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
           <button

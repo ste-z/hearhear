@@ -113,8 +113,6 @@ export type ResultsFlowProps = {
   onArticleChatInputChange: (next: string) => void
   onSubmitArticleChat: (event: FormEvent<HTMLFormElement>) => void
 
-  // search progress
-  progressLines: SearchProgressLine[]
   progressMessage: string | null
 
   // svd
@@ -136,6 +134,7 @@ const SCATTER_SPOTS = [
   { x: 280, y: 188, r: -1.2 }, { x: 550, y: 174, r: 0.4 },
   { x: 140, y: 340, r: 1.6 }, { x: 410, y: 354, r: -0.8 },
 ] as const
+const LOADING_DESK_PAGE_HEIGHT = 500
 
 const LOADING_NOTE_SEEN_KEY = 'hearhear.tour.loadingSeen'
 const RESULTS_TOUR_SEEN_KEY = 'hearhear.tour.resultsSeen'
@@ -162,6 +161,12 @@ const RESULTS_TOUR_STEPS: SpotlightTourStep[] = [
     title: 'The final ranked ledger',
     body: 'The ledger ranks articles by topic relevance, stance agreement, and recency. Click any row to open the full broadsheet view.',
     placement: 'right',
+  },
+  {
+    target: 'results-atlas-tab',
+    title: 'Map the results',
+    body: 'See the ranked articles plotted in embedding space and how your query sits among the results.',
+    placement: 'left',
   },
   {
     target: 'results-dismiss-cross',
@@ -726,31 +731,6 @@ function RFSpinner(): JSX.Element {
   )
 }
 
-function RFProgressLine({ line }: { line: SearchProgressLine }): JSX.Element {
-  const color = line.state === 'done' ? 'var(--ink)' : line.state === 'active' ? 'var(--accent)' : 'var(--ink-faint)'
-  const symbol = line.state === 'done' ? '◼' : line.state === 'active' ? '◧' : '◻'
-  const pct = clampPct(line.pct)
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', color }}>
-        <span>{symbol} {line.label}</span>
-        <span>{line.state === 'done' ? '✓' : line.state === 'queued' ? '— —' : `${pct}%`}</span>
-      </div>
-      <div style={{ height: 2, background: 'rgba(var(--ink-rgb),0.12)', position: 'relative', marginTop: 2 }}>
-        <div style={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: `${pct}%`,
-          background: color,
-          opacity: line.state === 'queued' ? 0.3 : 1,
-        }} />
-      </div>
-    </div>
-  )
-}
-
 function RFScatterCard({
   article,
   spot,
@@ -849,7 +829,7 @@ function RFMicroDial({ label, value, accent, active }: { label: string; value: n
   const fill = accent ? 'var(--accent)' : (active ? 'var(--paper)' : 'var(--ink)')
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: "'Special Elite', monospace", fontSize: 9 }}>
-      <span>{label}</span>
+      <span style={{ width: 58 }}>{label}</span>
       <div style={{
         flex: 1,
         height: 3,
@@ -890,7 +870,7 @@ function RFRankedRow({
       onClick={hideArticleInfo ? undefined : onClick}
       style={{
         display: 'grid',
-        gridTemplateColumns: '52px 1fr 96px 28px',
+        gridTemplateColumns: '52px 1fr 168px 28px',
         gap: 14,
         alignItems: 'center',
         padding: '12px 4px',
@@ -927,9 +907,9 @@ function RFRankedRow({
         </div>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <RFMicroDial label="A" value={getAgreementPct(article)} active={active} accent />
-        <RFMicroDial label="T" value={getTopicPct(article)} active={active} />
-        <RFMicroDial label="R" value={getRecencyPct(article)} active={active} />
+        <RFMicroDial label="Agreement" value={getAgreementPct(article)} active={active} accent />
+        <RFMicroDial label="Topic" value={getTopicPct(article)} active={active} />
+        <RFMicroDial label="Recency" value={getRecencyPct(article)} active={active} />
       </div>
       <button
         type="button"
@@ -2882,7 +2862,6 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
     onCloseArticleChat,
     onArticleChatInputChange,
     onSubmitArticleChat,
-    progressLines,
     progressMessage,
     querySvdDimensions,
     querySvdCorpusChartDimensions,
@@ -2932,64 +2911,8 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
     [articles, dismissedIds, llmLabelIrrelevant],
   )
 
-  /**
-   * Lock the 8 cards on the desk in stage 2.
-   *
-   * The bug: topic_results SSE arrives → top-8 by topic-relevance scatters.
-   * When the rerank JSON arrives, the new top-8 by combined-score may not
-   * be the *same* 8 IDs — articles that were rank 5–8 by topic can drop to
-   * rank 9+ after stance scoring, replaced by articles that climbed up.
-   * Slicing `visibleArticles.slice(0, 8)` then changes membership, React
-   * unmounts the dropped cards and remounts the new ones, and the user
-   * sees the desk briefly empty out / repopulate.
-   *
-   * Fix: when the desk first becomes non-empty, freeze its 8 IDs. On every
-   * subsequent render we keep the *same* IDs but re-order them by their
-   * position in the current `visibleArticles` — so the cards reshuffle
-   * smoothly via the CSS left/top transition instead of remounting.
-   */
-  const scatteredIdsRef = useRef<string[] | null>(null)
-  // Reset the lock whenever stage 2 ends (search restart, dismiss-and-refetch).
-  useEffect(() => {
-    if (stage !== 'stage2') {
-      scatteredIdsRef.current = null
-    }
-  }, [stage])
-
-  const scatterArticles = useMemo<Article[]>(() => {
-    if (visibleArticles.length === 0) return []
-    if (scatteredIdsRef.current === null) {
-      // First time the desk has cards — freeze the top-8 by current order.
-      const seed = visibleArticles.slice(0, 8)
-      scatteredIdsRef.current = seed.map(a => getArticleId(a))
-      return seed
-    }
-    // Subsequent renders — keep the same IDs, but reorder them to match
-    // the new ranking from `visibleArticles`. Drop any frozen IDs that
-    // dropped out of the visible set entirely (e.g. user dismissed it).
-    const lockedIds = scatteredIdsRef.current
-    const rankIndex = new Map<string, number>()
-    visibleArticles.forEach((a, i) => rankIndex.set(getArticleId(a), i))
-    const byId = new Map(visibleArticles.map(a => [getArticleId(a), a]))
-    const stillVisible = lockedIds.filter(id => byId.has(id))
-    stillVisible.sort((a, b) => (rankIndex.get(a) ?? 1e9) - (rankIndex.get(b) ?? 1e9))
-    // If a frozen card was dismissed, refill the slot from the next-best
-    // visible article (by current ranking) so the desk stays at 8.
-    const stillVisibleSet = new Set(stillVisible)
-    if (stillVisible.length < 8) {
-      for (const a of visibleArticles) {
-        if (stillVisible.length >= 8) break
-        const id = getArticleId(a)
-        if (stillVisibleSet.has(id)) continue
-        stillVisible.push(id)
-        stillVisibleSet.add(id)
-      }
-      scatteredIdsRef.current = [...stillVisible]
-    } else if (stillVisible.length !== lockedIds.length) {
-      scatteredIdsRef.current = [...stillVisible]
-    }
-    return stillVisible.map(id => byId.get(id)!).filter(Boolean) as Article[]
-  }, [visibleArticles])
+  const loadingDeskPageCount = Math.max(1, Math.ceil(visibleArticles.length / SCATTER_SPOTS.length))
+  const loadingDeskHeight = Math.max(440, loadingDeskPageCount * LOADING_DESK_PAGE_HEIGHT)
 
   const supporting = useMemo(
     () => visibleArticles.filter(a => getStanceCategory(a) === 'supports').slice(0, 3),
@@ -3567,16 +3490,36 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                 <span>the desk · articles that cleared topic-relevance</span>
                 <span>{visibleArticles.length} of {articles.length} retained{dismissedIds.size ? ` · ${dismissedIds.size} dismissed` : ''}</span>
               </div>
-              <div style={{ position: 'relative', width: 820, height: 440 }}>
-                {scatterArticles.map((article, i) => (
-                  <RFScatterCard
-                    key={getArticleId(article)}
-                    article={article}
-                    spot={SCATTER_SPOTS[i % SCATTER_SPOTS.length]}
-                    delay={i * 80}
-                    onDismiss={() => onDismiss(article)}
-                  />
-                ))}
+              <div
+                className="tray-scroll"
+                style={{
+                  position: 'relative',
+                  width: 820,
+                  height: 440,
+                  overflowX: 'hidden',
+                  paddingRight: 6,
+                  scrollbarGutter: 'stable',
+                }}
+              >
+                <div style={{ position: 'relative', width: 820, height: loadingDeskHeight }}>
+                  {visibleArticles.map((article, i) => {
+                    const baseSpot = SCATTER_SPOTS[i % SCATTER_SPOTS.length]
+                    const page = Math.floor(i / SCATTER_SPOTS.length)
+                    return (
+                      <RFScatterCard
+                        key={getArticleId(article)}
+                        article={article}
+                        spot={{
+                          x: baseSpot.x,
+                          y: baseSpot.y + page * LOADING_DESK_PAGE_HEIGHT,
+                          r: baseSpot.r,
+                        }}
+                        delay={(i % SCATTER_SPOTS.length) * 80}
+                        onDismiss={() => onDismiss(article)}
+                      />
+                    )
+                  })}
+                </div>
               </div>
             </div>
             <div data-tour="loading-progress-panel" style={{ paddingTop: 12, paddingLeft: 28, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22 }}>
@@ -3601,11 +3544,6 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
               </div>
               <div style={{ width: '100%', maxWidth: 360, display: 'flex', alignItems: 'center', gap: 10, fontFamily: "'Special Elite', monospace", fontSize: 11, color: 'var(--ink-mute)' }}>
                 <RFSpinner /><span>· · · {progressMessage ?? 'scoring agreement with the sub-editor'}</span>
-              </div>
-              <div style={{ width: '100%', maxWidth: 360, display: 'flex', flexDirection: 'column', gap: 4, fontFamily: "'Special Elite', monospace", fontSize: 11, color: 'var(--ink-soft)' }}>
-                {progressLines.map(line => (
-                  <RFProgressLine key={line.label} line={line} />
-                ))}
               </div>
               {dismissedIds.size > 0 && (
                 <div style={{ width: '100%', maxWidth: 360, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: "'IM Fell English', serif", fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)' }}>
@@ -3891,6 +3829,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                   >list</button>
                   <button
                     type="button"
+                    data-tour="results-atlas-tab"
                     className={`atlas-pill ${resultsView === 'atlas' ? 'active' : ''}`}
                     onClick={() => setResultsView('atlas')}
                   >atlas</button>
@@ -3900,7 +3839,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                 <>
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: '52px 1fr 96px 28px',
+                    gridTemplateColumns: '52px 1fr 168px 28px',
                     gap: 14,
                     alignItems: 'center',
                     fontFamily: "'IM Fell DW Pica SC', serif",
@@ -3912,7 +3851,7 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
                     borderTop: '1.5px solid var(--ink)',
                     borderBottom: '1px solid var(--rule-soft)',
                   }}>
-                    <span>rank</span><span>title · author</span><span>marks</span><span></span>
+                    <span>rank</span><span>title · author</span><span>ranking scores</span><span></span>
                   </div>
                   <div className="tray-scroll" style={{ flex: 1, minHeight: 0, paddingBottom: 24 }}>
                     {visibleArticles.length === 0 && (
