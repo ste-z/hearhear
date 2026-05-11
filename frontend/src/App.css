@@ -49,6 +49,10 @@
      (highlighter, neutral-stance bar). Flipped for dark mode. */
   --sticky: #fdf6c9;
   --sticky-ink: var(--ink);
+  --sticky-texture:
+    radial-gradient(ellipse at 30% 18%, rgba(255, 255, 255, 0.6), transparent 55%),
+    radial-gradient(ellipse at 80% 90%, rgba(180, 150, 80, 0.18), transparent 60%);
+  --sticky-tape: rgba(214, 196, 130, 0.7);
   --neutral: #cdcabd;
   --neutral-ink: var(--ink);
 }
@@ -93,8 +97,12 @@
   --runtime-veil-top: rgba(0, 0, 0, 0.5);
   --runtime-veil-bot: rgba(0, 0, 0, 0.66);
 
-  --sticky: #54472a;
-  --sticky-ink: #f4e9c4;
+  --sticky: #2a241b;
+  --sticky-ink: var(--ink);
+  --sticky-texture:
+    radial-gradient(ellipse at 30% 18%, rgba(237, 228, 210, 0.12), transparent 56%),
+    radial-gradient(ellipse at 78% 92%, rgba(217, 115, 84, 0.12), transparent 62%);
+  --sticky-tape: rgba(217, 115, 84, 0.24);
   --neutral: #4a463c;
   --neutral-ink: var(--ink);
 

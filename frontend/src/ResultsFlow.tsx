@@ -632,11 +632,11 @@ function StickyNote({
       maxWidth,
       padding: '20px 22px 18px',
       background,
-      backgroundImage: `radial-gradient(ellipse at 30% 18%, rgba(255,255,255,0.6), transparent 55%), radial-gradient(ellipse at 80% 90%, rgba(180,150,80,0.18), transparent 60%)`,
+      backgroundImage: 'var(--sticky-texture)',
       transform: `rotate(${rotation}deg)`,
       boxShadow: '0 6px 14px var(--shadow-strong), 0 1px 0 var(--shadow-soft) inset',
       fontFamily: "'IM Fell English', serif",
-      color: 'var(--ink)',
+      color: 'var(--sticky-ink)',
       ...style,
     }}>
       <span style={{
@@ -3650,13 +3650,14 @@ export function ResultsFlow(props: ResultsFlowProps): JSX.Element {
               minHeight: 0,
               padding: '24px 22px 22px',
               background: 'var(--sticky)',
-              backgroundImage: 'radial-gradient(ellipse at 30% 18%, rgba(255,255,255,0.6), transparent 55%), radial-gradient(ellipse at 80% 90%, rgba(180,150,80,0.18), transparent 60%)',
+              backgroundImage: 'var(--sticky-texture)',
+              color: 'var(--sticky-ink)',
               boxShadow: '0 6px 14px var(--shadow-strong), 0 1px 0 var(--shadow-soft) inset',
               transform: 'rotate(-0.4deg)',
               position: 'relative',
             }}>
               {/* Tape strip at top */}
-              <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%) rotate(-2deg)', width: 96, height: 22, background: 'rgba(214, 196, 130, 0.7)', boxShadow: '0 2px 4px var(--rule-soft)' }} aria-hidden />
+              <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%) rotate(-2deg)', width: 96, height: 22, background: 'var(--sticky-tape)', boxShadow: '0 2px 4px var(--rule-soft)' }} aria-hidden />
               <div className="tracker" style={{ color: 'var(--accent)', fontSize: 10, letterSpacing: '0.32em' }}>AI Assistant Editor Overview</div>
               {overviewLoading && !overview && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
