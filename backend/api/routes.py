@@ -46,7 +46,7 @@ from backend.services.retrieval_service import (
     retrieval_query_typo_suggestion,
     retrieval_query_svd_corpus_chart_dimensions,
     retrieval_query_svd_dimensions,
-    similar_svd_articles,
+    similar_articles,
     SUPPORTED_RERANK_SELECTION_MODES,
     SUPPORTED_RETRIEVAL_MODELS,
     stance_search,
@@ -863,7 +863,8 @@ def register_routes(app):
         try:
             payload = _request_payload()
             article_id = payload.get("article_id") or payload.get("id")
-            limit = _coerce_int(payload.get("limit"), 5, minimum=1, maximum=25)
+            retrieval_model = payload.get("retrieval_model") or payload.get("model")
+            limit = _coerce_int(payload.get("limit"), 10, minimum=1, maximum=25)
             offset = _coerce_int(payload.get("offset"), 0, minimum=0, maximum=5000)
             year_start, year_end = normalize_article_year_range(
                 payload.get("year_start"),
@@ -909,8 +910,9 @@ def register_routes(app):
                     "reading_minutes_end",
                 ),
             )
-            results = similar_svd_articles(
+            results = similar_articles(
                 article_id=article_id,
+                retrieval_model=retrieval_model,
                 limit=limit,
                 offset=offset,
                 year_start=year_start,
@@ -925,6 +927,7 @@ def register_routes(app):
             log_runtime_event(
                 "similar_articles.done",
                 article_id=str(article_id or ""),
+                retrieval_model=str(retrieval_model or "default"),
                 result_count=len(results.get("results") or []),
                 has_more=bool(results.get("has_more")),
             )

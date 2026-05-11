@@ -644,9 +644,10 @@ def svd_search(
     )
 
 
-def similar_svd_articles(
+def similar_articles(
     article_id,
-    limit=5,
+    retrieval_model=DEFAULT_RETRIEVAL_MODEL,
+    limit=10,
     offset=0,
     year_start=None,
     year_end=None,
@@ -657,6 +658,15 @@ def similar_svd_articles(
     reading_time_start=None,
     reading_time_end=None,
 ):
+    """Find articles similar to ``article_id`` using the cosine-similarity
+    notion of the requested ``retrieval_model``.
+
+    - ``svd`` / ``minilm``: dense cosine over the model's article embeddings
+      (using ``processor.normalized_doc_embeddings`` + ``get_doc_vector``).
+    - ``tfidf``: sparse cosine via re-vectorizing the source article's body
+      text and running the standard postings-index search.
+    """
+    resolved_model = normalize_retrieval_model(retrieval_model)
     source_id = str(article_id or "").strip()
     if not source_id:
         raise ValueError("An article_id is required.")
@@ -684,67 +694,119 @@ def similar_svd_articles(
         resolved_reading_time_end,
     )
 
+    eligible_ids = _collect_similar_eligibility(
+        year_start=resolved_year_start,
+        year_end=resolved_year_end,
+        character_start=resolved_character_start,
+        character_end=resolved_character_end,
+        word_start=resolved_word_start,
+        word_end=resolved_word_end,
+        reading_time_word_start=reading_time_word_start,
+        reading_time_word_end=reading_time_word_end,
+    )
+
+    if resolved_model == "tfidf":
+        return _similar_articles_tfidf(
+            source_id=source_id,
+            eligible_ids=eligible_ids,
+            limit=resolved_limit,
+            offset=resolved_offset,
+        )
+    return _similar_articles_dense(
+        source_id=source_id,
+        retrieval_model=resolved_model,
+        eligible_ids=eligible_ids,
+        limit=resolved_limit,
+        offset=resolved_offset,
+    )
+
+
+def similar_svd_articles(*args, **kwargs):
+    """Back-compat wrapper — always uses the SVD index."""
+    kwargs.pop("retrieval_model", None)
+    return similar_articles(*args, retrieval_model="svd", **kwargs)
+
+
+def _collect_similar_eligibility(
+    *,
+    year_start,
+    year_end,
+    character_start,
+    character_end,
+    word_start,
+    word_end,
+    reading_time_word_start,
+    reading_time_word_end,
+):
+    has_metadata_filters = any(
+        value is not None
+        for value in (
+            year_start,
+            year_end,
+            character_start,
+            character_end,
+            word_start,
+            word_end,
+            reading_time_word_start,
+            reading_time_word_end,
+        )
+    )
+    if not has_metadata_filters:
+        return None
+    eligible_query = GuardianArticle.query.with_entities(GuardianArticle.id)
+    if year_start is not None:
+        eligible_query = eligible_query.filter(GuardianArticle.year >= year_start)
+    if year_end is not None:
+        eligible_query = eligible_query.filter(GuardianArticle.year <= year_end)
+    if character_start is not None:
+        eligible_query = eligible_query.filter(
+            GuardianArticle.body_character_count >= character_start
+        )
+    if character_end is not None:
+        eligible_query = eligible_query.filter(
+            GuardianArticle.body_character_count <= character_end
+        )
+    if word_start is not None:
+        eligible_query = eligible_query.filter(
+            GuardianArticle.body_word_count >= word_start
+        )
+    if word_end is not None:
+        eligible_query = eligible_query.filter(
+            GuardianArticle.body_word_count <= word_end
+        )
+    if reading_time_word_start is not None:
+        eligible_query = eligible_query.filter(
+            GuardianArticle.body_word_count >= reading_time_word_start
+        )
+    if reading_time_word_end is not None:
+        eligible_query = eligible_query.filter(
+            GuardianArticle.body_word_count <= reading_time_word_end
+        )
+    return {str(row[0]) for row in eligible_query.all()}
+
+
+def _similar_articles_dense(
+    *,
+    source_id,
+    retrieval_model,
+    eligible_ids,
+    limit,
+    offset,
+):
     try:
-        processor = build_retrieval_processor(retrieval_model="svd")
+        processor = build_retrieval_processor(retrieval_model=retrieval_model)
     except RuntimeError as exc:
-        raise ValueError("SVD similar-article search is not available yet.") from exc
+        raise ValueError(
+            f"{retrieval_model.upper()} similar-article search is not available yet."
+        ) from exc
 
     try:
         source_idx = processor.get_doc_idx_by_id(source_id)
         source_vector = processor.get_doc_vector(source_id, normalize=True)
     except Exception as exc:
-        raise ValueError("That article is not available in the SVD index.") from exc
-
-    has_metadata_filters = any(
-        value is not None
-        for value in (
-            resolved_year_start,
-            resolved_year_end,
-            resolved_character_start,
-            resolved_character_end,
-            resolved_word_start,
-            resolved_word_end,
-            reading_time_word_start,
-            reading_time_word_end,
-        )
-    )
-
-    eligible_ids = None
-    if has_metadata_filters:
-        eligible_query = GuardianArticle.query.with_entities(GuardianArticle.id)
-        if resolved_year_start is not None:
-            eligible_query = eligible_query.filter(
-                GuardianArticle.year >= resolved_year_start
-            )
-        if resolved_year_end is not None:
-            eligible_query = eligible_query.filter(
-                GuardianArticle.year <= resolved_year_end
-            )
-        if resolved_character_start is not None:
-            eligible_query = eligible_query.filter(
-                GuardianArticle.body_character_count >= resolved_character_start
-            )
-        if resolved_character_end is not None:
-            eligible_query = eligible_query.filter(
-                GuardianArticle.body_character_count <= resolved_character_end
-            )
-        if resolved_word_start is not None:
-            eligible_query = eligible_query.filter(
-                GuardianArticle.body_word_count >= resolved_word_start
-            )
-        if resolved_word_end is not None:
-            eligible_query = eligible_query.filter(
-                GuardianArticle.body_word_count <= resolved_word_end
-            )
-        if reading_time_word_start is not None:
-            eligible_query = eligible_query.filter(
-                GuardianArticle.body_word_count >= reading_time_word_start
-            )
-        if reading_time_word_end is not None:
-            eligible_query = eligible_query.filter(
-                GuardianArticle.body_word_count <= reading_time_word_end
-            )
-        eligible_ids = {str(row[0]) for row in eligible_query.all()}
+        raise ValueError(
+            f"That article is not available in the {retrieval_model.upper()} index."
+        ) from exc
 
     def keep_candidate_indices(indices):
         if eligible_ids is None:
@@ -761,29 +823,92 @@ def similar_svd_articles(
     candidate_indices, candidate_scores = top_positive_dot_candidates(
         processor.normalized_doc_embeddings,
         source_vector,
-        top_n=resolved_offset + resolved_limit + 1,
+        top_n=offset + limit + 1,
         candidate_filter=keep_candidate_indices,
     )
-    page_slice = slice(resolved_offset, resolved_offset + resolved_limit + 1)
+    page_slice = slice(offset, offset + limit + 1)
     page_indices = candidate_indices[page_slice]
     page_scores = candidate_scores[page_slice]
-    has_more = len(page_indices) > resolved_limit
-    page_indices = page_indices[:resolved_limit]
-    page_scores = page_scores[:resolved_limit]
+    has_more = len(page_indices) > limit
+    page_indices = page_indices[:limit]
+    page_scores = page_scores[:limit]
     page_ranked = [
         (processor.doc_ids[int(idx)], float(score))
         for idx, score in zip(page_indices, page_scores)
     ]
     results = build_matches(
         page_ranked,
-        retrieval_model="svd",
+        retrieval_model=retrieval_model,
         processor=processor,
     )
 
     return {
         "source_article_id": source_id,
         "results": results,
-        "next_offset": resolved_offset + len(results),
+        "next_offset": offset + len(results),
+        "has_more": has_more,
+    }
+
+
+def _similar_articles_tfidf(*, source_id, eligible_ids, limit, offset):
+    """TF-IDF doc-to-doc cosine: re-vectorize the source article's body text
+    and run the standard postings-index search. Slightly different semantics
+    from a "true" doc/doc cosine because the postings score is the standard
+    TF-IDF query/doc dot product, but for this corpus and use case (one
+    Guardian article vs. all others) the ranking is materially identical.
+    """
+    try:
+        processor = build_retrieval_processor(retrieval_model="tfidf")
+    except RuntimeError as exc:
+        raise ValueError("TF-IDF similar-article search is not available yet.") from exc
+
+    source_article = GuardianArticle.query.filter_by(id=source_id).first()
+    if source_article is None or not (source_article.body_text or "").strip():
+        raise ValueError("That article is not available in the TF-IDF index.")
+
+    raw_results = processor.search(
+        source_article.body_text,
+        top_n=offset + limit + 32,
+        return_articles=False,
+    )
+    if not raw_results:
+        return {
+            "source_article_id": source_id,
+            "results": [],
+            "next_offset": offset,
+            "has_more": False,
+        }
+
+    filtered_pairs = []
+    for entry in raw_results:
+        if isinstance(entry, dict):
+            doc_id = str(entry.get("doc_id") or entry.get("id") or "")
+            score = float(entry.get("score") or 0.0)
+        elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
+            doc_id = str(entry[0])
+            score = float(entry[1])
+        else:
+            continue
+        if not doc_id or doc_id == source_id:
+            continue
+        if eligible_ids is not None and doc_id not in eligible_ids:
+            continue
+        filtered_pairs.append((doc_id, score))
+
+    page_slice = slice(offset, offset + limit + 1)
+    page = filtered_pairs[page_slice]
+    has_more = len(page) > limit
+    page = page[:limit]
+
+    results = build_matches(
+        page,
+        retrieval_model="tfidf",
+        processor=processor,
+    )
+    return {
+        "source_article_id": source_id,
+        "results": results,
+        "next_offset": offset + len(results),
         "has_more": has_more,
     }
 
