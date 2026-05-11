@@ -671,16 +671,32 @@ input[type="range"].tw-range::-moz-range-thumb {
   margin: 0;
   display: grid;
   /* Fixed 3-column grid so the panel width is stable across tabs */
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
+.about-team-grid-featured {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
 @media (max-width: 720px) {
-  .about-team-grid { grid-template-columns: repeat(2, 1fr); }
+  .about-team-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .about-team-card {
   border: 1px solid var(--rule-soft);
   padding: 14px 16px;
   background: var(--paper-tint);
+  min-width: 0;
+}
+.about-team-photo {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  object-position: center top;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  margin-bottom: 12px;
+  box-shadow: 2px 3px 0 var(--shadow-soft);
 }
 .about-team-card h3,
 .about-team-card h4 {
@@ -695,7 +711,7 @@ input[type="range"].tw-range::-moz-range-thumb {
   letter-spacing: 0.24em;
   text-transform: uppercase;
   color: var(--ink-mute);
-  margin: 0;
+  margin: 4px 0 0;
 }
 .about-team-links {
   display: flex;
